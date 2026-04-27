@@ -1,9 +1,12 @@
-# cross-rs configuration. Adds `protoc` to the cross Docker images so
-# tonic-build can run inside the container (host protoc is not visible).
+# cross-rs configuration. Adds a modern `protoc` to the cross Docker images
+# so tonic-build can run inside the container — the default cross images ship
+# Ubuntu/Debian releases whose `protobuf-compiler` package predates proto3.
 # Source: https://github.com/cross-rs/cross/wiki/Configuration
 
 [build]
 pre-build = [
-    "dpkg --add-architecture $CROSS_DEB_ARCH",
-    "apt-get update && apt-get install --assume-yes --no-install-recommends protobuf-compiler",
+    "apt-get update && apt-get install --assume-yes --no-install-recommends curl unzip ca-certificates",
+    "curl -sSLO https://github.com/protocolbuffers/protobuf/releases/download/v25.3/protoc-25.3-linux-x86_64.zip",
+    "unzip -o protoc-25.3-linux-x86_64.zip -d /usr/local",
+    "rm -f protoc-25.3-linux-x86_64.zip",
 ]
