@@ -1,0 +1,9 @@
+# cross-rs configuration. Adds `protoc` to the cross Docker images so
+# tonic-build can run inside the container (host protoc is not visible).
+# Source: https://github.com/cross-rs/cross/wiki/Configuration
+
+[build]
+pre-build = [
+    "dpkg --add-architecture $CROSS_DEB_ARCH",
+    "apt-get update && apt-get install --assume-yes --no-install-recommends protobuf-compiler",
+]
