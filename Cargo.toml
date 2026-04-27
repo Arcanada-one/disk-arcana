@@ -1,0 +1,43 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/disk-proto",
+    "crates/disk-core",
+    "crates/disk-server",
+    "crates/disk-client",
+    "crates/disk-cli",
+]
+
+[workspace.package]
+version      = "0.0.1"
+edition      = "2021"
+rust-version = "1.78"
+license      = "MIT"
+repository   = "https://github.com/Arcanada-one/disk-arcana"
+authors      = ["Pavel Valentov <paxbeach@gmail.com>"]
+
+[workspace.dependencies]
+tokio       = { version = "1", features = ["full"] }
+tonic       = { version = "0.12", features = ["tls", "transport"] }
+tonic-build = { version = "0.12" }
+prost       = "0.13"
+prost-types = "0.13"
+blake3      = { version = "1", features = ["serde"] }
+zstd        = "0.13"
+sqlx        = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate"] }
+notify      = "6"
+serde       = { version = "1", features = ["derive"] }
+toml        = "0.8"
+clap        = { version = "4", features = ["derive"] }
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+axum       = "0.7"
+thiserror  = "1"
+anyhow     = "1"
+
+[profile.release]
+lto             = "fat"
+codegen-units   = 1
+opt-level       = 3
+strip           = "symbols"
+panic           = "abort"

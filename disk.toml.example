@@ -1,0 +1,45 @@
+# Disk Arcana — sample config for self-hosted v1.0 (Phase 1 stub).
+# Copy to `disk.toml` and edit. The real daemon (DISK-0006) reads this file.
+
+[sync]
+# Local vault root that should mirror the server.
+vault_path    = "/home/user/Vault"
+# Polling interval (seconds) for the periodic reconciliation pass.
+interval_secs = 30
+
+[server]
+# Disk Arcana server endpoint (gRPC + REST). HTTPS required in production.
+url     = "https://disk.example.com"
+# Per-node API key issued by AuthService.RegisterNode (DISK-0004).
+api_key = "REPLACE_ME"
+
+[filter]
+# Skip files larger than this (megabytes). Omit to disable.
+max_file_size_mb = 200
+
+[ignore]
+# glob patterns relative to vault_path; merged with built-in defaults
+# (.git, .obsidian/.cache, target, node_modules, ...).
+patterns = [
+    "**/.DS_Store",
+    "**/.tmp/**",
+]
+
+[conflict]
+# fork-suffix | fork-prefix | server-wins | client-wins (DISK-0007)
+strategy = "fork-suffix"
+
+[archive]
+# Keep deleted files for `tombstone.ttl_days` before purging.
+enabled = true
+
+[daemon]
+# trace | debug | info | warn | error
+log_level = "info"
+
+[tombstone]
+ttl_days = 30
+
+[telemetry]
+# Anonymous usage telemetry (off by default).
+opt_in = false

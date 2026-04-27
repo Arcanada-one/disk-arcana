@@ -1,0 +1,26 @@
+[package]
+name         = "disk-core"
+version      = { workspace = true }
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+description  = "Core types, errors, config, and metadata DB for Disk Arcana."
+
+[features]
+default = []
+# Server-only schema (`002_nodes.sql`) is loaded when this feature is enabled.
+server-mode = []
+
+[dependencies]
+serde       = { workspace = true }
+toml        = { workspace = true }
+thiserror   = { workspace = true }
+sqlx        = { workspace = true }
+tokio       = { workspace = true }
+tracing     = { workspace = true }
+blake3      = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

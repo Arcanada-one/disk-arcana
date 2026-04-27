@@ -1,0 +1,133 @@
+// Disk Arcana wire format — Phase 1 scaffold.
+//
+// proto3 compat rules (enforced via CONTRIBUTING.md):
+//   1. Never delete a field — mark it `reserved`.
+//   2. Never change a field's type — add a new field with a new tag instead.
+//   3. Tags 1-15 are 1-byte; reserve them for hot-path fields.
+//   4. Forward-compat tags are populated with default ("" / 0 / empty bytes)
+//      in self-hosted v1.0 and filled in DISK-0015 (E2EE), DISK-0017 (multi-tenant),
+//      DISK-0020 (versioning).
+
+syntax = "proto3";
+
+package disk;
+
+// -----------------------------------------------------------------------------
+// File-level metadata
+// -----------------------------------------------------------------------------
+
+message FileMetadata {
+  string path                       = 1;
+  bytes  content_hash               = 2;
+  uint64 size                       = 3;
+  int64  mtime_ns                   = 4;
+  uint64 inode                      = 5;
+  map<string, uint64> vector_clock  = 6;
+  bool   deleted                    = 7;
+  int64  deleted_at                 = 8;
+  string node_id                    = 9;
+
+  // Forward-compat (Phase 1 lock-in — see DISK-0002 STRIDE T1/T2)
+  bytes  encryption_nonce           = 10;  // DISK-0015
+  string tenant_id                  = 11;  // DISK-0017
+  string vault_id                   = 12;  // DISK-0017 (multi-vault; "default" in v1.0)
+  string user_id                    = 13;  // DISK-0017
+  uint64 version_id                 = 14;  // DISK-0020
+  uint64 parent_version_id          = 15;  // DISK-0020 (root version when 0)
+
+  // Reserved for DISK-0022 sharing / DISK-0024 ACL.
+  reserved 16, 17, 18, 19;
+}
+
+// -----------------------------------------------------------------------------
+// Auth / node lifecycle
+// -----------------------------------------------------------------------------
+
+message NodeRegisterRequest {
+  string node_id      = 1;
+  string display_name = 2;
+  string platform     = 3;
+
+  // Forward-compat
+  string user_id      = 4;
+  string tenant_id    = 5;
+}
+
+message NodeRegisterResponse {
+  string api_key      = 1;
+  string assigned_id  = 2;
+  int64  registered_at = 3;
+}
+
+// -----------------------------------------------------------------------------
+// Sync exchange
+// -----------------------------------------------------------------------------
+
+message SyncStateRequest {
+  string node_id                    = 1;
+  string session_token              = 2;
+  repeated FileMetadata files       = 3;
+  map<string, uint64> node_clock    = 4;
+
+  // Forward-compat
+  string tenant_id                  = 5;
+  string vault_id                   = 6;
+}
+
+message SyncStateResponse {
+  repeated FileMetadata to_upload   = 1;
+  repeated FileMetadata to_download = 2;
+  repeated FileMetadata to_delete   = 3;
+  repeated ConflictReport conflicts = 4;
+  map<string, uint64> server_clock  = 5;
+}
+
+// -----------------------------------------------------------------------------
+// Delta transfer
+// -----------------------------------------------------------------------------
+
+message DeltaUploadRequest {
+  string path           = 1;
+  bytes  content_hash   = 2;
+  repeated DeltaChunk chunks = 3;
+
+  // Forward-compat
+  string tenant_id      = 4;
+  string vault_id       = 5;
+}
+
+message DeltaChunk {
+  uint64 offset         = 1;
+  uint32 weak_checksum  = 2;  // Adler32
+  bytes  strong_hash    = 3;  // blake3
+  bytes  data           = 4;
+}
+
+message DeltaUploadResponse {
+  bool   accepted       = 1;
+  bytes  resulting_hash = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Conflicts
+// -----------------------------------------------------------------------------
+
+message ConflictReport {
+  string path                       = 1;
+  FileMetadata local                = 2;
+  FileMetadata remote               = 3;
+  string suggested_resolution       = 4;  // "fork-local" | "fork-remote" | "merge"
+}
+
+// -----------------------------------------------------------------------------
+// Services
+// -----------------------------------------------------------------------------
+
+service AuthService {
+  rpc RegisterNode(NodeRegisterRequest) returns (NodeRegisterResponse);
+}
+
+service SyncService {
+  rpc ExchangeState(SyncStateRequest) returns (SyncStateResponse);
+  rpc UploadDelta(DeltaUploadRequest) returns (DeltaUploadResponse);
+}

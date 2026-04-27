@@ -1,0 +1,19 @@
+[package]
+name         = "disk-server"
+version      = { workspace = true }
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+description  = "Disk Arcana server daemon (Phase 1 stub)."
+
+[[bin]]
+name = "disk-server"
+path = "src/main.rs"
+
+[dependencies]
+disk-core          = { path = "../disk-core" }
+tokio              = { workspace = true }
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
