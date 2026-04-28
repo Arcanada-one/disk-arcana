@@ -1,5 +1,12 @@
-//! SQLite metadata index. Phase 1 supplies open + migrations only.
-//! CRUD methods land in DISK-0003.
+//! SQLite metadata index.
+//!
+//! Phase 1 (DISK-0002) shipped `MetaDb::open` with WAL + migrations. Phase 2
+//! (DISK-0003) layers CRUD methods for the `files`, `tombstones`, and
+//! `conflicts` tables and wires up `BEGIN ... COMMIT` batch transactions.
+
+mod conflicts;
+mod files;
+mod tombstones;
 
 use std::path::Path;
 
@@ -13,13 +20,14 @@ use crate::error::MetaDbError;
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
+/// Handle to the on-disk SQLite metadata index. Cheap to clone (wraps a pool).
 #[derive(Debug, Clone)]
 pub struct MetaDb {
     pool: SqlitePool,
 }
 
 impl MetaDb {
-    /// Open (or create) a SQLite database file and run migrations.
+    /// Open (or create) a SQLite database file and run pending migrations.
     pub async fn open(path: &Path) -> Result<Self, MetaDbError> {
         let opts = SqliteConnectOptions::new()
             .filename(path)
@@ -34,6 +42,7 @@ impl MetaDb {
         Ok(Self { pool })
     }
 
+    /// Read-only handle for code that needs to issue raw queries.
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
     }

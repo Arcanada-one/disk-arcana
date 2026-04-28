@@ -15,12 +15,17 @@ server-mode = []
 
 [dependencies]
 serde       = { workspace = true }
+serde_json  = "1"
 toml        = { workspace = true }
 thiserror   = { workspace = true }
 sqlx        = { workspace = true }
 tokio       = { workspace = true }
 tracing     = { workspace = true }
 blake3      = { workspace = true }
+walkdir     = "2.5"
+ignore      = "0.4"
+globset     = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
+proptest = "1.5"
