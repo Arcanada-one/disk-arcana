@@ -59,8 +59,7 @@ impl RollingChecksum {
     pub fn roll(&mut self, removed: u8, added: u8) {
         // Use wrapping u64 arithmetic to avoid underflow before the mod.
         self.s1 = (self.s1 + added as u64 + MOD_ADLER - removed as u64) % MOD_ADLER;
-        self.s2 =
-            (self.s2 + self.s1 + MOD_ADLER * self.n - self.n * removed as u64) % MOD_ADLER;
+        self.s2 = (self.s2 + self.s1 + MOD_ADLER * self.n - self.n * removed as u64) % MOD_ADLER;
     }
 
     /// Return the current 32-bit checksum: `(s2 << 16) | s1`.

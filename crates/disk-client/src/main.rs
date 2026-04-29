@@ -9,6 +9,6 @@ async fn main() {
         .init();
 
     let version = env!("CARGO_PKG_VERSION");
-    tracing::info!("disk-client v{version} (Phase 1 stub)");
-    println!("disk-client v{version} (Phase 1 stub)");
+    tracing::info!("disk-arcana-client v{version} (Phase 3 gRPC)");
+    println!("disk-arcana-client v{version} — use `disk sync` CLI command");
 }

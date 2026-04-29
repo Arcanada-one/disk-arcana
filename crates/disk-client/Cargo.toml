@@ -6,14 +6,28 @@ rust-version = { workspace = true }
 license      = { workspace = true }
 repository   = { workspace = true }
 authors      = { workspace = true }
-description  = "Disk Arcana client daemon (Phase 1 stub)."
+description  = "Disk Arcana gRPC client — Phase 3 transport."
 
 [[bin]]
-name = "disk-client"
+name = "disk-arcana-client"
 path = "src/main.rs"
+
+[lib]
+name = "disk_client"
+path = "src/lib.rs"
 
 [dependencies]
 disk-core          = { path = "../disk-core" }
+disk-proto         = { path = "../disk-proto" }
 tokio              = { workspace = true }
+tonic              = { workspace = true }
+prost              = { workspace = true }
+rustls             = { workspace = true }
 tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
+thiserror          = { workspace = true }
+anyhow             = { workspace = true }
+tokio-stream       = { version = "0.1", features = ["net"] }
+
+[dev-dependencies]
+tempfile = "3"

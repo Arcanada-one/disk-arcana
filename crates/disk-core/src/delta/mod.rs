@@ -9,6 +9,8 @@ pub mod rolling;
 pub mod strong;
 
 pub use chunker::{chunks, Chunk, BLOCK_SIZE};
-pub use reconcile::{apply_plan, build_plan, build_plan_with_data, ChunkSig, DeltaEntry, DeltaPlan};
+pub use reconcile::{
+    apply_plan, build_plan, build_plan_with_data, ChunkSig, DeltaEntry, DeltaPlan,
+};
 pub use rolling::{adler32_full, RollingChecksum};
 pub use strong::{hash as blake3_hash, verify as blake3_verify};

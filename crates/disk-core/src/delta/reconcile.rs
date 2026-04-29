@@ -45,14 +45,9 @@ impl From<&Chunk> for ChunkSig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeltaEntry {
     /// Server already has these bytes at `server_offset`; copy `len` bytes.
-    Hit {
-        server_offset: u64,
-        len: usize,
-    },
+    Hit { server_offset: u64, len: usize },
     /// Data not present on server; use these bytes verbatim.
-    Miss {
-        data: Vec<u8>,
-    },
+    Miss { data: Vec<u8> },
 }
 
 /// An ordered sequence of [`DeltaEntry`] values that, when applied to a base
@@ -211,7 +206,10 @@ mod tests {
         let data: Vec<u8> = (0u8..=255u8).cycle().take(8192).collect();
         let client_chunks = file_chunks(&data);
         let plan = build_plan_with_data(&client_chunks, &data);
-        assert!(plan.entries.iter().all(|e| matches!(e, DeltaEntry::Hit { .. })));
+        assert!(plan
+            .entries
+            .iter()
+            .all(|e| matches!(e, DeltaEntry::Hit { .. })));
         let reconstructed = apply_plan(&data, &plan).unwrap();
         assert_eq!(reconstructed, data);
     }
@@ -222,7 +220,10 @@ mod tests {
         let client: Vec<u8> = vec![0xffu8; 4096];
         let client_chunks = file_chunks(&client);
         let plan = build_plan_with_data(&client_chunks, &base);
-        assert!(plan.entries.iter().all(|e| matches!(e, DeltaEntry::Miss { .. })));
+        assert!(plan
+            .entries
+            .iter()
+            .all(|e| matches!(e, DeltaEntry::Miss { .. })));
         let reconstructed = apply_plan(&base, &plan).unwrap();
         assert_eq!(reconstructed, client);
     }
