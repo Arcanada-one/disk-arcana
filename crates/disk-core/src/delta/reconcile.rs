@@ -179,7 +179,7 @@ pub fn apply_edits(data: &[u8], edits: &[Edit]) -> Vec<u8> {
     let mut result = data.to_vec();
     // Sort edits by offset descending so each edit doesn't shift later ones.
     let mut sorted = edits.to_vec();
-    sorted.sort_by(|a, b| b.offset.cmp(&a.offset));
+    sorted.sort_by_key(|e| std::cmp::Reverse(e.offset));
     for edit in sorted {
         let start = edit.offset.min(result.len());
         let end = (edit.offset + edit.replace_len).min(result.len());

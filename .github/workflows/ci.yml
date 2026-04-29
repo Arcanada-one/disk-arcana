@@ -65,10 +65,10 @@ jobs:
       - name: Install protoc (macos)
         if: runner.os == 'macOS'
         run: brew install protobuf
-      - name: cargo audit
-        run: |
-          cargo install cargo-audit --locked --quiet
-          cargo audit --deny warnings
+      # cargo audit lives in the Lint job (rustsec/audit-check@v1) which honours
+      # .audit.toml ignore list. Duplicating it here via `cargo install cargo-audit`
+      # bypasses that config and re-flags suppressed advisories (e.g. RUSTSEC-2023-0071
+      # in unused sqlx-mysql). Single source of truth: Lint job.
       - name: Install cargo-llvm-cov (linux)
         if: runner.os == 'Linux'
         run: cargo install cargo-llvm-cov --locked --quiet
