@@ -12,8 +12,7 @@ ignore = [
     # Tracked upstream: https://github.com/launchbadge/sqlx/issues/2876
     "RUSTSEC-2023-0071",
 
-    # rustls-pemfile 2.x — unmaintained.
-    # Transitive via tonic 0.12. Removed in tonic 0.13. We will drop this ignore
-    # when the workspace upgrades tonic.
-    "RUSTSEC-2025-0134",
+    # RUSTSEC-2025-0134 (rustls-pemfile unmaintained) suppression removed in DISK-0004:
+    # tonic 0.13 no longer pulls rustls-pemfile as a direct dependency.
+    # If it resurfaces transitively at a flagged version, re-evaluate then.
 ]
