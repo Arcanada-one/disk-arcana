@@ -13,7 +13,7 @@ pub use disk::*;
 
 #[cfg(test)]
 mod tests {
-    use super::disk::FileMetadata;
+    use super::disk::*;
     use prost::Message;
 
     #[test]
@@ -42,24 +42,9 @@ mod tests {
 
     #[test]
     fn schema_forward_compat_unknown_fields_ignored() {
-        // Encode a FileMetadata with values, then prepend a junk field
-        // (tag 99, varint) and ensure decode succeeds (proto3 ignores unknown tags).
         let original = FileMetadata {
             path: "x".into(),
-            content_hash: vec![],
-            size: 0,
-            mtime_ns: 0,
-            inode: 0,
-            vector_clock: Default::default(),
-            deleted: false,
-            deleted_at: 0,
-            node_id: String::new(),
-            encryption_nonce: vec![],
-            tenant_id: String::new(),
-            vault_id: String::new(),
-            user_id: String::new(),
-            version_id: 0,
-            parent_version_id: 0,
+            ..Default::default()
         };
         let mut bytes = original.encode_to_vec();
         // Append unknown varint field tag=99 (wire type 0): tag = (99 << 3) | 0 = 792.
@@ -67,5 +52,62 @@ mod tests {
         bytes.extend_from_slice(&[0x98, 0x06, 0x01]);
         let decoded = FileMetadata::decode(bytes.as_slice()).expect("decode tolerates unknown");
         assert_eq!(decoded, original);
+    }
+
+    // Phase 3 new message roundtrips (DISK-0004)
+
+    #[test]
+    fn node_auth_request_roundtrip() {
+        let msg = NodeAuthRequest {
+            node_id: "node-abc".into(),
+            api_key: "arc_disk_AAABBBCCC".into(),
+        };
+        let decoded = NodeAuthRequest::decode(msg.encode_to_vec().as_slice()).unwrap();
+        assert_eq!(msg, decoded);
+    }
+
+    #[test]
+    fn node_auth_response_roundtrip() {
+        let msg = NodeAuthResponse {
+            session_token: "arc_disk_sess_XYZ".into(),
+            expires_at: 9_999_999_999,
+        };
+        let decoded = NodeAuthResponse::decode(msg.encode_to_vec().as_slice()).unwrap();
+        assert_eq!(msg, decoded);
+    }
+
+    #[test]
+    fn sync_state_ack_roundtrip() {
+        let msg = SyncStateAck {
+            session_token: "tok".into(),
+            sequence_id: 42,
+        };
+        let decoded = SyncStateAck::decode(msg.encode_to_vec().as_slice()).unwrap();
+        assert_eq!(msg.session_token, decoded.session_token);
+        assert_eq!(msg.sequence_id, decoded.sequence_id);
+    }
+
+    #[test]
+    fn delta_download_request_roundtrip() {
+        let msg = DeltaDownloadRequest {
+            path: "notes/a.md".into(),
+            expected_hash: vec![0xde, 0xad, 0xbe, 0xef],
+            tenant_id: "t1".into(),
+            vault_id: "default".into(),
+        };
+        let decoded = DeltaDownloadRequest::decode(msg.encode_to_vec().as_slice()).unwrap();
+        assert_eq!(msg, decoded);
+    }
+
+    #[test]
+    fn delta_chunk_roundtrip() {
+        let msg = DeltaChunk {
+            offset: 4096,
+            weak_checksum: 0xdeadbeef,
+            strong_hash: vec![0u8; 32],
+            data: b"hello world".to_vec(),
+        };
+        let decoded = DeltaChunk::decode(msg.encode_to_vec().as_slice()).unwrap();
+        assert_eq!(msg, decoded);
     }
 }
