@@ -9,6 +9,6 @@ async fn main() {
         .init();
 
     let version = env!("CARGO_PKG_VERSION");
-    tracing::info!("disk-server v{version} (Phase 1 stub)");
-    println!("disk-server v{version} (Phase 1 stub)");
+    tracing::info!("disk-arcana-server v{version} (Phase 3 gRPC)");
+    println!("disk-arcana-server v{version} — use disk.toml to configure");
 }

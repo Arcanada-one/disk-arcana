@@ -1,0 +1,181 @@
+//! `AuthService` gRPC implementation.
+//!
+//! - `RegisterNode`: issues a fresh `ApiKey` (one-time; stored blake3-hashed).
+//! - `Authenticate`: validates `ApiKey`, returns a 24h `SessionToken`.
+
+use tonic::{Request, Response, Status};
+
+use disk_proto::disk::{
+    auth_service_server::AuthService, NodeAuthRequest, NodeAuthResponse, NodeRegisterRequest,
+    NodeRegisterResponse,
+};
+
+use crate::auth::AuthStore;
+
+/// Concrete `AuthService` implementation.
+#[derive(Debug, Clone)]
+pub struct AuthServiceImpl {
+    pub store: AuthStore,
+}
+
+impl AuthServiceImpl {
+    pub fn new(store: AuthStore) -> Self {
+        Self { store }
+    }
+}
+
+#[tonic::async_trait]
+impl AuthService for AuthServiceImpl {
+    async fn register_node(
+        &self,
+        request: Request<NodeRegisterRequest>,
+    ) -> Result<Response<NodeRegisterResponse>, Status> {
+        let req = request.into_inner();
+        let node_id = req.node_id.trim();
+        let display_name = req.display_name.trim();
+        let platform = req.platform.trim();
+
+        if node_id.is_empty() {
+            return Err(Status::invalid_argument("node_id must not be empty"));
+        }
+
+        match self.store.register_node(node_id, display_name, platform) {
+            Ok(api_key) => {
+                let registered_at = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs() as i64;
+                Ok(Response::new(NodeRegisterResponse {
+                    api_key: api_key.as_str().to_owned(),
+                    assigned_id: node_id.to_owned(),
+                    registered_at,
+                }))
+            }
+            Err(crate::auth::storage::AuthError::AlreadyExists) => {
+                Err(Status::already_exists("node_id already registered"))
+            }
+            Err(e) => Err(Status::internal(e.to_string())),
+        }
+    }
+
+    async fn authenticate(
+        &self,
+        request: Request<NodeAuthRequest>,
+    ) -> Result<Response<NodeAuthResponse>, Status> {
+        let req = request.into_inner();
+
+        match self.store.authenticate(&req.node_id, &req.api_key) {
+            Ok((token, expires_at)) => Ok(Response::new(NodeAuthResponse {
+                session_token: token.as_str().to_owned(),
+                expires_at,
+            })),
+            Err(crate::auth::storage::AuthError::Unauthenticated) => {
+                Err(Status::unauthenticated("invalid node_id or api_key"))
+            }
+            Err(e) => Err(Status::internal(e.to_string())),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use disk_proto::disk::auth_service_server::AuthService;
+
+    fn make_service() -> AuthServiceImpl {
+        AuthServiceImpl::new(AuthStore::new())
+    }
+
+    #[tokio::test]
+    async fn register_ok() {
+        let svc = make_service();
+        let resp = svc
+            .register_node(Request::new(NodeRegisterRequest {
+                node_id: "node-test".into(),
+                display_name: "Test".into(),
+                platform: "darwin".into(),
+                ..Default::default()
+            }))
+            .await
+            .unwrap();
+        let inner = resp.into_inner();
+        assert_eq!(inner.assigned_id, "node-test");
+        assert!(inner.api_key.starts_with("arc_disk_"));
+    }
+
+    #[tokio::test]
+    async fn register_duplicate_fails() {
+        let svc = make_service();
+        svc.register_node(Request::new(NodeRegisterRequest {
+            node_id: "dup".into(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+        let err = svc
+            .register_node(Request::new(NodeRegisterRequest {
+                node_id: "dup".into(),
+                ..Default::default()
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), tonic::Code::AlreadyExists);
+    }
+
+    #[tokio::test]
+    async fn authenticate_ok() {
+        let svc = make_service();
+        let reg_resp = svc
+            .register_node(Request::new(NodeRegisterRequest {
+                node_id: "auth-node".into(),
+                ..Default::default()
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let auth_resp = svc
+            .authenticate(Request::new(NodeAuthRequest {
+                node_id: "auth-node".into(),
+                api_key: reg_resp.api_key.clone(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(auth_resp.session_token.starts_with("arc_disk_sess_"));
+        assert!(auth_resp.expires_at > 0);
+    }
+
+    #[tokio::test]
+    async fn authenticate_wrong_key_unauthenticated() {
+        let svc = make_service();
+        svc.register_node(Request::new(NodeRegisterRequest {
+            node_id: "n2".into(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+        let err = svc
+            .authenticate(Request::new(NodeAuthRequest {
+                node_id: "n2".into(),
+                api_key: "arc_disk_WRONGKEY".into(),
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), tonic::Code::Unauthenticated);
+    }
+
+    #[tokio::test]
+    async fn register_empty_node_id_invalid() {
+        let svc = make_service();
+        let err = svc
+            .register_node(Request::new(NodeRegisterRequest {
+                node_id: "".into(),
+                ..Default::default()
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+}
