@@ -18,10 +18,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_client(true);
 
     if std::env::var("CARGO_FEATURE_DEV_REFLECT").is_ok() {
-        config = config
-            .file_descriptor_set_path(
-                PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("disk_descriptor.bin"),
-            );
+        config = config.file_descriptor_set_path(
+            PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("disk_descriptor.bin"),
+        );
     }
 
     config.compile_protos(&[proto_file], &[proto_root])?;

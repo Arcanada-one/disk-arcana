@@ -25,6 +25,31 @@ patterns = [
     "**/.tmp/**",
 ]
 
+[transport]
+# gRPC transport settings (Phase 3, DISK-0004).
+#
+# Maximum size of a single compressed gRPC message before decompression (bytes).
+# Default: 4 MiB.  Must not exceed the decompression-bomb guard cap.
+max_compressed_message_bytes = 4194304
+# Maximum decompressed size of a single message (bytes). Default: 16 MiB.
+max_decompressed_message_bytes = 16777216
+# Maximum total decompressed bytes per streaming RPC (bytes). Default: 256 MiB.
+max_stream_decompressed_bytes = 268435456
+# zstd compression level for outbound chunks (1–22). Default: 3 (fast).
+zstd_level = 3
+
+[tls]
+# TLS certificate/key for the gRPC server (Phase 3, DISK-0004).
+#
+# Set cert_pem_path + key_pem_path to use a pre-provisioned certificate
+# (e.g., Let's Encrypt / Cloudflare Origin Cert).
+# Omit both to use an ephemeral self-signed cert (development only).
+#
+# cert_pem_path = "/etc/disk-arcana/tls/cert.pem"
+# key_pem_path  = "/etc/disk-arcana/tls/key.pem"
+#
+# Minimum TLS version is always 1.3 (non-configurable).
+
 [conflict]
 # fork-suffix | fork-prefix | server-wins | client-wins (DISK-0007)
 strategy = "fork-suffix"

@@ -34,7 +34,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           # Rationale lives in .audit.toml at the repo root.
-          ignore: RUSTSEC-2023-0071,RUSTSEC-2025-0134
+          ignore: RUSTSEC-2023-0071
       - name: Install cargo-deny
         uses: EmbarkStudios/cargo-deny-action@v1
         with:
@@ -65,8 +65,18 @@ jobs:
       - name: Install protoc (macos)
         if: runner.os == 'macOS'
         run: brew install protobuf
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --locked --quiet
+          cargo audit --deny warnings
+      - name: Install cargo-llvm-cov (linux)
+        if: runner.os == 'Linux'
+        run: cargo install cargo-llvm-cov --locked --quiet
       - name: cargo test
         run: cargo test --workspace --all-features
+      - name: Coverage gate (≥80 % lines, DISK-0032)
+        if: runner.os == 'Linux'
+        run: cargo llvm-cov --workspace --all-features --fail-under-lines 80
 
   build:
     name: Build (${{ matrix.target }})
