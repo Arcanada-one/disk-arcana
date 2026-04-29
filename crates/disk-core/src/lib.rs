@@ -5,9 +5,16 @@
 //! engine — file scanner, path-traversal guard, ignore filter, vector clock,
 //! tombstone helpers, metadata CRUD and the 30-scenario reconciliation engine.
 
+//! Disk Arcana core: types, errors, configuration, metadata DB, sync engine,
+//! and delta algorithm.
+//!
+//! Phase 3 (DISK-0004) adds the delta module: Adler32 rolling checksum, blake3
+//! strong hash, fixed-block chunker, and delta plan build/apply.
+
 #![forbid(unsafe_code)]
 
 pub mod config;
+pub mod delta;
 pub mod error;
 pub mod filter;
 pub mod meta_db;

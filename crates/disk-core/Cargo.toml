@@ -28,4 +28,4 @@ globset     = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
-proptest = "1.5"
+proptest = { workspace = true }
