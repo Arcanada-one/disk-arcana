@@ -34,6 +34,10 @@ use crate::acl::{AclEnforcer, AclError, CertFingerprint, EnforcedRole};
 use crate::audit::{AuditEmitter, AuditEvent, AuditKind};
 use crate::auth::{AuthStore, CertIdentity, SessionToken};
 use crate::middleware::replay::ReplayGuard;
+#[cfg(feature = "publisher-verify")]
+use crate::publisher::{
+    FileMetadata as PublisherFileMetadata, PublisherSignatureProof, PublisherVerifier,
+};
 
 /// Minimum role required to perform a write (upload/publish) operation.
 const WRITE_ROLES: &[EnforcedRole] = &[
@@ -57,6 +61,10 @@ pub struct SyncServiceImpl {
     pub acl_enforcer: Option<AclEnforcer>,
     /// Audit emitter — required when `acl_enforcer` is `Some`.
     pub audit: Option<AuditEmitter>,
+    /// Publisher signature verifier — active only when `publisher-verify` feature is on.
+    /// Populated via `with_publisher_verifier`.
+    #[cfg(feature = "publisher-verify")]
+    pub publisher_verifier: Option<Arc<PublisherVerifier>>,
 }
 
 impl SyncServiceImpl {
@@ -68,6 +76,8 @@ impl SyncServiceImpl {
             root,
             acl_enforcer: None,
             audit: None,
+            #[cfg(feature = "publisher-verify")]
+            publisher_verifier: None,
         }
     }
 
@@ -84,7 +94,16 @@ impl SyncServiceImpl {
             root,
             acl_enforcer: Some(acl_enforcer),
             audit: Some(audit),
+            #[cfg(feature = "publisher-verify")]
+            publisher_verifier: None,
         }
+    }
+
+    /// Attach a publisher verifier (only available with `publisher-verify` feature).
+    #[cfg(feature = "publisher-verify")]
+    pub fn with_publisher_verifier(mut self, verifier: Arc<PublisherVerifier>) -> Self {
+        self.publisher_verifier = Some(verifier);
+        self
     }
 
     /// Extract and validate the bearer session token from metadata.
@@ -301,6 +320,8 @@ impl SyncService for SyncServiceImpl {
         let mut assembled: Vec<u8> = Vec::new();
         let mut expected_hash: Option<Vec<u8>> = None;
         let mut last_path: Option<String> = None;
+        #[cfg(feature = "publisher-verify")]
+        let mut last_proto_proof: Option<disk_proto::disk::PublisherSignatureProof> = None;
 
         while let Some(msg) = stream.next().await {
             let req = msg?;
@@ -312,6 +333,10 @@ impl SyncService for SyncServiceImpl {
                     .map_err(|e| Status::invalid_argument(format!("path guard: {e}")))?;
                 last_path = Some(req.path.clone());
                 expected_hash = Some(req.content_hash.clone());
+                #[cfg(feature = "publisher-verify")]
+                {
+                    last_proto_proof = req.publisher_proof;
+                }
             }
 
             for chunk in &req.chunks {
@@ -345,10 +370,79 @@ impl SyncService for SyncServiceImpl {
             }
         }
 
-        let resulting_hash = disk_core::delta::blake3_hash(&assembled).to_vec();
+        let resulting_hash = disk_core::delta::blake3_hash(&assembled);
+
+        // ── Publisher verification gate (P4b step 15) ──────────────────────
+        // Only compiled when `publisher-verify` feature is enabled.
+        // On failure: quarantine the bytes (don't commit), emit audit row.
+        // On feature-off: skip entirely (preserves P4a behaviour).
+        #[cfg(feature = "publisher-verify")]
+        {
+            let maybe_verifier = self.publisher_verifier.as_ref();
+
+            if let (Some(verifier), Some(cert_id)) = (maybe_verifier, cert_id.as_ref()) {
+                if let Some(ref proto_proof) = last_proto_proof {
+                    let file_meta = PublisherFileMetadata {
+                        path: last_path.clone().unwrap_or_default(),
+                        blake3: resulting_hash,
+                    };
+                    let proof = PublisherSignatureProof {
+                        ed25519_signature: proto_proof.ed25519_signature.clone(),
+                        vault_key_ref: proto_proof.vault_key_ref.clone(),
+                        signed_at_unix_ms: proto_proof.signed_at_unix_ms,
+                        counter: proto_proof.counter,
+                    };
+                    match verifier
+                        .verify(&proof, &cert_id.fingerprint, &share, &file_meta)
+                        .await
+                    {
+                        Ok(()) => {} // Signature verified — proceed to commit.
+                        Err(e) => {
+                            // Write to quarantine.
+                            let short_fp: String = cert_id
+                                .fingerprint
+                                .iter()
+                                .take(8)
+                                .map(|b| format!("{b:02x}"))
+                                .collect();
+                            let qpath = self
+                                .root
+                                .join(".quarantine")
+                                .join(&share)
+                                .join(&short_fp)
+                                .join(last_path.as_deref().unwrap_or("unknown"));
+                            if let Some(parent) = qpath.parent() {
+                                let _ = std::fs::create_dir_all(parent);
+                            }
+                            let _ = std::fs::write(&qpath, &assembled);
+
+                            // Audit row.
+                            if let Some(ref audit) = self.audit {
+                                let _ = audit
+                                    .emit(
+                                        AuditEvent::new(AuditKind::PublisherSignatureFailure)
+                                            .with_cert(cert_id.fingerprint)
+                                            .with_share(&share)
+                                            .with_payload(&serde_json::json!({
+                                                "path": last_path,
+                                                "error": e.to_string(),
+                                            })),
+                                    )
+                                    .await;
+                            }
+
+                            return Err(Status::permission_denied(format!(
+                                "publisher signature invalid: {e}"
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(Response::new(DeltaUploadResponse {
             accepted: true,
-            resulting_hash,
+            resulting_hash: resulting_hash.to_vec(),
         }))
     }
 
