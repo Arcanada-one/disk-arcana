@@ -6,11 +6,16 @@
 
 #![forbid(unsafe_code)]
 
+pub mod acl;
 pub mod auth;
 pub mod middleware;
 pub mod services;
 pub mod tls;
 
+pub use acl::{
+    AclEnforcer, AclError, AclState, CertFingerprint, EnforcedRole, EnforcementTable,
+    UnhealthyReason,
+};
 pub use auth::{ApiKey, AuthStore, SessionToken};
 pub use middleware::{BombError, ReplayError, ReplayGuard};
 pub use services::{AuthServiceImpl, SyncServiceImpl};

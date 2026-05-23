@@ -111,6 +111,10 @@ message DeltaUploadRequest {
   // Forward-compat
   string tenant_id      = 4;
   string vault_id       = 5;
+
+  // DISK-0005 v1.1 — required when sender's enforced role = "publisher".
+  // See PRD-DISK-0001 v1.1 §4.11 and creative-DISK-0005-data-model-publisher-signatures.md.
+  PublisherSignatureProof publisher_proof = 6;
 }
 
 message DeltaChunk {
@@ -161,4 +165,77 @@ service SyncService {
   rpc SyncState      (stream SyncStateRequest)   returns (stream SyncStateAck);
   rpc DeltaUpload    (stream DeltaUploadRequest) returns (DeltaUploadResponse);
   rpc DeltaDownload  (DeltaDownloadRequest)      returns (stream DeltaChunk);
+}
+
+// -----------------------------------------------------------------------------
+// DISK-0005 v1.1 — Enrollment + ACL + Publisher integrity gate
+// See PRD-DISK-0001 v1.1 §4.11 / §4.12 and creative-DISK-0005-*.md.
+// Timestamps use int64 unix milliseconds for symmetry with existing
+// FileMetadata.mtime_ns / NodeRegisterResponse.registered_at conventions —
+// avoids pulling google.protobuf.Timestamp into the wire format.
+// -----------------------------------------------------------------------------
+
+// Admin-bearer-protected RPC: server admin issues a pending-enrollment token.
+message EnrollmentTokenRequest {
+  string node_id_hint = 1;
+  uint64 ttl_seconds  = 2;  // default 3600 (1h), max 86400 (24h)
+}
+
+message EnrollmentTokenResponse {
+  bytes  opaque_token   = 1;  // 256-bit cryptographic random
+  int64  expires_at_ms  = 2;  // unix ms
+}
+
+// Public RPC (TLS but not mTLS; bearer = opaque_token from EnrollmentTokenResponse).
+message EnrollRequest {
+  bytes  opaque_token  = 1;
+  bytes  csr_pem       = 2;   // PEM-encoded CSR (Ed25519 keypair generated client-side)
+  string node_id_hint  = 3;   // must match token's node_id_hint
+}
+
+message EnrollResponse {
+  bytes client_cert_pem = 1;
+  bytes ca_chain_pem    = 2;
+  int64 expires_at_ms   = 3;  // cert TTL — 90 days default
+}
+
+// Admin-bearer-protected RPC: revoke an unconsumed pending token.
+message RevokePendingRequest {
+  bytes opaque_token = 1;
+}
+
+message RevokePendingResponse {
+  bool revoked = 1;
+}
+
+// Structured tonic::Status detail returned with PermissionDenied when a node's
+// declared direction (client metadata) disagrees with server-enforced ACL role.
+// See creative-DISK-0005-architecture-acl-reload.md F1-F8.
+message AclMismatchDetails {
+  string claimed_role   = 1;  // from client metadata (informational only)
+  string enforced_role  = 2;  // server-side authoritative
+  string share          = 3;
+  bytes  cert_fingerprint = 4;  // SHA-256 of DER-encoded client cert
+  int64  ts_ms          = 5;
+}
+
+// Producer signature for publisher-role artefacts.
+// See creative-DISK-0005-data-model-publisher-signatures.md.
+// Signed payload (canonical byte order):
+//   blake3(content) || share || path || signed_at_unix_ms || counter
+// Verifier: ed25519_dalek::VerifyingKey::verify_strict against Vault-fetched pubkey.
+message PublisherSignatureProof {
+  bytes  ed25519_signature   = 1;  // 64 bytes
+  string vault_key_ref       = 2;  // e.g. "transit/keys/disk-arcana-arcana-ai-publisher"
+  int64  signed_at_unix_ms   = 3;
+  uint64 counter             = 4;  // monotonic per (cert_fp, share); replay anchor
+}
+
+service EnrollmentService {
+  // Admin-bearer scope; not invocable by regular nodes.
+  rpc IssuePendingToken (EnrollmentTokenRequest) returns (EnrollmentTokenResponse);
+  // Public scope (bearer = pending_token); pre-mTLS connection.
+  rpc Enroll            (EnrollRequest)          returns (EnrollResponse);
+  // Admin-bearer scope; revokes unconsumed token.
+  rpc RevokePending     (RevokePendingRequest)   returns (RevokePendingResponse);
 }
