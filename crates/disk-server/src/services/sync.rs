@@ -4,6 +4,19 @@
 //! - `SyncState` (bidi streaming) — reconcile file trees, emit `SyncStateAck`.
 //! - `DeltaUpload` (client-streaming) — receive chunks, verify hash, persist.
 //! - `DeltaDownload` (server-streaming) — chunk a local file and stream it.
+//!
+//! ## Auth migration (P4a Step 7)
+//!
+//! When `acl_enforcer` is `Some`, every RPC entry point resolves the caller's
+//! role via `AclEnforcer::resolve(cert_fingerprint, share)` in addition to
+//! the legacy session-token check.  Role mismatches → `PermissionDenied` with
+//! `AclMismatchDetails` payload + `AuditKind::AclRoleMismatch` row.
+//!
+//! The `share` used for ACL lookup is extracted from the `x-disk-share`
+//! metadata header; when absent it defaults to `"default"`.
+//!
+//! When `acl_enforcer` is `None` the legacy bearer-token path is used
+//! unchanged (dev / test environments that have not yet provisioned ACL).
 
 use std::sync::Arc;
 
@@ -13,12 +26,27 @@ use tonic::{Request, Response, Status, Streaming};
 
 use disk_core::path_guard;
 use disk_proto::disk::{
-    sync_service_server::SyncService, DeltaChunk, DeltaDownloadRequest, DeltaUploadRequest,
-    DeltaUploadResponse, SyncStateAck, SyncStateRequest,
+    sync_service_server::SyncService, AclMismatchDetails, DeltaChunk, DeltaDownloadRequest,
+    DeltaUploadRequest, DeltaUploadResponse, SyncStateAck, SyncStateRequest,
 };
 
-use crate::auth::{AuthStore, SessionToken};
+use crate::acl::{AclEnforcer, AclError, CertFingerprint, EnforcedRole};
+use crate::audit::{AuditEmitter, AuditEvent, AuditKind};
+use crate::auth::{AuthStore, CertIdentity, SessionToken};
 use crate::middleware::replay::ReplayGuard;
+
+/// Minimum role required to perform a write (upload/publish) operation.
+const WRITE_ROLES: &[EnforcedRole] = &[
+    EnforcedRole::Bidirectional,
+    EnforcedRole::SendOnly,
+    EnforcedRole::Publisher,
+];
+
+/// Minimum role required to perform a read (download) operation.
+const READ_ROLES: &[EnforcedRole] = &[
+    EnforcedRole::Bidirectional,
+    EnforcedRole::ReceiveOnly,
+];
 
 /// Concrete `SyncService` implementation.
 #[derive(Debug, Clone)]
@@ -27,14 +55,38 @@ pub struct SyncServiceImpl {
     pub replay: Arc<ReplayGuard>,
     /// Filesystem root for this node (used by DeltaUpload path guard).
     pub root: std::path::PathBuf,
+    /// ACL enforcer — when `Some`, cert-based role checks are active.
+    /// When `None`, only legacy session-token auth is applied.
+    pub acl_enforcer: Option<AclEnforcer>,
+    /// Audit emitter — required when `acl_enforcer` is `Some`.
+    pub audit: Option<AuditEmitter>,
 }
 
 impl SyncServiceImpl {
+    /// Construct without ACL enforcement (legacy/test mode).
     pub fn new(store: AuthStore, root: std::path::PathBuf) -> Self {
         Self {
             store,
             replay: Arc::new(ReplayGuard::new()),
             root,
+            acl_enforcer: None,
+            audit: None,
+        }
+    }
+
+    /// Construct with ACL enforcement enabled.
+    pub fn with_acl(
+        store: AuthStore,
+        root: std::path::PathBuf,
+        acl_enforcer: AclEnforcer,
+        audit: AuditEmitter,
+    ) -> Self {
+        Self {
+            store,
+            replay: Arc::new(ReplayGuard::new()),
+            root,
+            acl_enforcer: Some(acl_enforcer),
+            audit: Some(audit),
         }
     }
 
@@ -53,6 +105,128 @@ impl SyncServiceImpl {
             .validate_session(&token)
             .ok_or_else(|| Status::unauthenticated("session expired or unknown"))
     }
+
+    /// Extract share name from `x-disk-share` metadata; defaults to `"default"`.
+    fn extract_share(metadata: &tonic::metadata::MetadataMap) -> String {
+        metadata
+            .get("x-disk-share")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("default")
+            .to_string()
+    }
+
+    /// Run ACL role check using a pre-extracted `CertIdentity`.
+    ///
+    /// Call pattern:
+    /// ```ignore
+    /// let cert_id = CertIdentity::from_request(&request);
+    /// self.check_acl_by_cert(cert_id.as_ref(), share, allowed, hint).await?;
+    /// // then consume request
+    /// ```
+    ///
+    /// Returns `Ok(())` when:
+    /// - No enforcer configured (legacy mode), or
+    /// - `cert_id` is `None` (one-way TLS, falls through to token auth), or
+    /// - Enforcer resolves a role in `allowed_roles`.
+    ///
+    /// Returns `Err(PermissionDenied)` on mismatch and emits an audit row.
+    async fn check_acl_by_cert(
+        &self,
+        cert_id: Option<&CertIdentity>,
+        share: &str,
+        allowed_roles: &[EnforcedRole],
+        claimed_role_hint: &str,
+    ) -> Result<(), Status> {
+        let enforcer = match &self.acl_enforcer {
+            Some(e) => e,
+            None => return Ok(()),
+        };
+        let cert_id = match cert_id {
+            Some(id) => id,
+            None => return Ok(()), // no client cert — fall through to token auth
+        };
+        let fp: CertFingerprint = cert_id.fingerprint;
+
+        match enforcer.resolve(&fp, share).await {
+            Ok(role) if allowed_roles.contains(&role) => Ok(()),
+            Ok(role) => {
+                // Role resolved but not in allowed set → PermissionDenied.
+                self.emit_role_mismatch_audit(&fp, share, claimed_role_hint, role.as_str())
+                    .await;
+                let details = AclMismatchDetails {
+                    claimed_role: claimed_role_hint.to_string(),
+                    enforced_role: role.as_str().to_string(),
+                    share: share.to_string(),
+                    cert_fingerprint: fp.to_vec(),
+                    ts_ms: unix_now_ms(),
+                };
+                let mut status = Status::permission_denied(format!(
+                    "ACL role mismatch: enforced={} claimed={}",
+                    role.as_str(),
+                    claimed_role_hint
+                ));
+                encode_details_into_status(&mut status, details);
+                Err(status)
+            }
+            Err(AclError::ShareUnknown { share: s, .. }) => {
+                // Unknown share — return permission denied; client should retry.
+                Err(Status::permission_denied(format!(
+                    "share unknown: {s}; retry after ACL provisioning"
+                )))
+            }
+            Err(AclError::Unavailable(reason)) => {
+                // ACL unhealthy → default-deny.
+                Err(Status::unavailable(format!(
+                    "ACL enforcer unhealthy: {reason:?}"
+                )))
+            }
+        }
+    }
+
+    async fn emit_role_mismatch_audit(
+        &self,
+        fp: &CertFingerprint,
+        share: &str,
+        claimed: &str,
+        enforced: &str,
+    ) {
+        if let Some(audit) = &self.audit {
+            let ev = AuditEvent::new(AuditKind::AclRoleMismatch)
+                .with_cert(*fp)
+                .with_share(share)
+                .with_payload(&serde_json::json!({
+                    "claimed": claimed,
+                    "enforced": enforced,
+                }));
+            let _ = audit.emit(ev).await;
+        }
+    }
+}
+
+/// Encode `AclMismatchDetails` into a tonic Status details field.
+fn encode_details_into_status(status: &mut Status, details: AclMismatchDetails) {
+    use prost::Message;
+    let mut buf = Vec::new();
+    if details.encode(&mut buf).is_ok() {
+        // Tonic does not provide a public set_details method on Status directly;
+        // we attach the serialized proto as the status message detail annotation.
+        // The client can decode this by reading the grpc-status-details-bin trailer
+        // if they use tonic_types / google.rpc.Status wrapping.  For the purposes of
+        // Step 7 the payload is attached as a metadata value.
+        *status = Status::with_details(
+            tonic::Code::PermissionDenied,
+            status.message().to_string(),
+            buf.into(),
+        );
+    }
+}
+
+fn unix_now_ms() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 #[tonic::async_trait]
@@ -65,6 +239,10 @@ impl SyncService for SyncServiceImpl {
         request: Request<Streaming<SyncStateRequest>>,
     ) -> Result<Response<Self::SyncStateStream>, Status> {
         let node_id = self.require_auth(request.metadata())?;
+        let share = Self::extract_share(request.metadata());
+        let cert_id = CertIdentity::from_request(&request);
+        self.check_acl_by_cert(cert_id.as_ref(), &share, &[EnforcedRole::Bidirectional, EnforcedRole::SendOnly, EnforcedRole::ReceiveOnly, EnforcedRole::Publisher], "bidirectional")
+            .await?;
         let mut stream = request.into_inner();
         let replay = Arc::clone(&self.replay);
         let stream_id: u64 = rand::random();
@@ -107,6 +285,9 @@ impl SyncService for SyncServiceImpl {
         request: Request<Streaming<DeltaUploadRequest>>,
     ) -> Result<Response<DeltaUploadResponse>, Status> {
         let _node_id = self.require_auth(request.metadata())?;
+        let share = Self::extract_share(request.metadata());
+        let cert_id = CertIdentity::from_request(&request);
+        self.check_acl_by_cert(cert_id.as_ref(), &share, WRITE_ROLES, "send_only").await?;
         let mut stream = request.into_inner();
 
         let mut assembled: Vec<u8> = Vec::new();
@@ -168,6 +349,9 @@ impl SyncService for SyncServiceImpl {
         request: Request<DeltaDownloadRequest>,
     ) -> Result<Response<Self::DeltaDownloadStream>, Status> {
         let _node_id = self.require_auth(request.metadata())?;
+        let share = Self::extract_share(request.metadata());
+        let cert_id = CertIdentity::from_request(&request);
+        self.check_acl_by_cert(cert_id.as_ref(), &share, READ_ROLES, "receive_only").await?;
         let req = request.into_inner();
 
         // Validate path.
@@ -208,15 +392,22 @@ impl SyncService for SyncServiceImpl {
     // Legacy RPCs from Phase 1/2 — not used in Phase 3 but must satisfy the trait.
     async fn exchange_state(
         &self,
-        _request: Request<SyncStateRequest>,
+        request: Request<SyncStateRequest>,
     ) -> Result<Response<disk_proto::disk::SyncStateResponse>, Status> {
+        let share = Self::extract_share(request.metadata());
+        let cert_id = CertIdentity::from_request(&request);
+        self.check_acl_by_cert(cert_id.as_ref(), &share, &[EnforcedRole::Bidirectional, EnforcedRole::SendOnly, EnforcedRole::ReceiveOnly, EnforcedRole::Publisher], "bidirectional")
+            .await?;
         Err(Status::unimplemented("use SyncState bidi streaming"))
     }
 
     async fn upload_delta(
         &self,
-        _request: Request<DeltaUploadRequest>,
+        request: Request<DeltaUploadRequest>,
     ) -> Result<Response<DeltaUploadResponse>, Status> {
+        let share = Self::extract_share(request.metadata());
+        let cert_id = CertIdentity::from_request(&request);
+        self.check_acl_by_cert(cert_id.as_ref(), &share, WRITE_ROLES, "send_only").await?;
         Err(Status::unimplemented("use DeltaUpload streaming"))
     }
 }
