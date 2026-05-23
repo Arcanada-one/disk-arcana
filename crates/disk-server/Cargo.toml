@@ -58,3 +58,5 @@ rustls       = { workspace = true }
 wiremock = "0.6.5"
 proptest  = { workspace = true }
 ed25519-dalek = { workspace = true }
+rcgen        = { workspace = true }
+libc         = "0.2"

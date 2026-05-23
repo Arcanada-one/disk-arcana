@@ -9,6 +9,7 @@
 pub mod acl;
 pub mod audit;
 pub mod auth;
+pub mod config;
 pub mod enrollment;
 pub mod middleware;
 pub mod multi_node;
@@ -17,6 +18,7 @@ pub mod services;
 pub mod tls;
 
 pub use acl::reload::{ReloadHandle, SessionInvalidate};
+pub use config::{ConfigError, ServerConfig};
 
 pub use acl::{
     load_from_yaml, AclEnforcer, AclError, AclLoadError, AclState, AclYamlFile, AlwaysFailVerifier,
@@ -34,6 +36,6 @@ pub use publisher::{
 };
 pub use services::{AuthServiceImpl, SyncServiceImpl};
 pub use tls::{
-    tls13_mtls_server_config, CertProvider, DevSelfSignedMtlsProvider, DevSelfSignedProvider,
-    StaticPemProvider, TlsError,
+    build_mtls_from_files, tls13_mtls_server_config, CertProvider, DevSelfSignedMtlsProvider,
+    DevSelfSignedProvider, StaticPemProvider, TlsError,
 };

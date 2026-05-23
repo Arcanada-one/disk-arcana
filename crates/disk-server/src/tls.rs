@@ -206,6 +206,24 @@ fn parse_cert_pem(
     Ok(certs)
 }
 
+/// Production mTLS provider: load server cert + key + client CA root from PEM files.
+///
+/// Returned `ServerConfig` requires every client to present a certificate
+/// signed by `ca_root_path`. Used by `disk-arcana-server` boot in `main.rs`.
+pub fn build_mtls_from_files(
+    server_cert_path: &std::path::Path,
+    server_key_path: &std::path::Path,
+    ca_root_path: &std::path::Path,
+) -> Result<Arc<ServerConfig>, TlsError> {
+    let server_cert_pem = std::fs::read(server_cert_path)?;
+    let server_key_pem = std::fs::read(server_key_path)?;
+    let ca_root_pem = std::fs::read(ca_root_path)?;
+
+    let server_certs = parse_cert_pem(&server_cert_pem)?;
+    let server_key = parse_key_pem(&server_key_pem)?;
+    tls13_mtls_server_config(server_certs, server_key, &ca_root_pem)
+}
+
 fn parse_key_pem(pem_bytes: &[u8]) -> Result<rustls::pki_types::PrivateKeyDer<'static>, TlsError> {
     let pem_str =
         std::str::from_utf8(pem_bytes).map_err(|e| TlsError::PemParseError(e.to_string()))?;

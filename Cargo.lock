@@ -609,6 +609,7 @@ dependencies = [
  "disk-core",
  "disk-proto",
  "ed25519-dalek",
+ "libc",
  "notify",
  "pem",
  "proptest",
