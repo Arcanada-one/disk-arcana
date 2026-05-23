@@ -19,6 +19,9 @@ dev-reflect = ["disk-proto/dev-reflect"]
 [dependencies]
 disk-core          = { path = "../disk-core" }
 disk-proto         = { path = "../disk-proto" }
+serde              = { workspace = true }
+serde_json         = { workspace = true }
+serde_yaml_ng      = { workspace = true }
 tokio              = { workspace = true }
 tonic              = { workspace = true }
 prost              = { workspace = true }

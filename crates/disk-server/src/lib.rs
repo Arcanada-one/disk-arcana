@@ -7,15 +7,18 @@
 #![forbid(unsafe_code)]
 
 pub mod acl;
+pub mod audit;
 pub mod auth;
 pub mod middleware;
 pub mod services;
 pub mod tls;
 
 pub use acl::{
-    AclEnforcer, AclError, AclState, CertFingerprint, EnforcedRole, EnforcementTable,
-    UnhealthyReason,
+    load_from_yaml, AclEnforcer, AclError, AclLoadError, AclState, AclYamlFile, AlwaysFailVerifier,
+    CertFingerprint, EnforcedRole, EnforcementTable, LoadOutcome, NoopVerifier,
+    RevokedSignerVerifier, SignatureVerifier, UnhealthyReason,
 };
+pub use audit::{AuditEmitter, AuditError, AuditEvent, AuditKind};
 pub use auth::{ApiKey, AuthStore, SessionToken};
 pub use middleware::{BombError, ReplayError, ReplayGuard};
 pub use services::{AuthServiceImpl, SyncServiceImpl};

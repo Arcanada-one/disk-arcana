@@ -16,6 +16,13 @@
 //!
 //! [`resolve`]: AclEnforcer::resolve
 
+pub mod loader;
+
+pub use loader::{
+    load_from_yaml, AclLoadError, AclYamlFile, AlwaysFailVerifier, LoadOutcome, NoopVerifier,
+    RevokedSignerVerifier, SignatureVerifier,
+};
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
