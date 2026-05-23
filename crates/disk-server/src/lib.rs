@@ -9,7 +9,10 @@
 pub mod acl;
 pub mod audit;
 pub mod auth;
+pub mod enrollment;
 pub mod middleware;
+pub mod multi_node;
+pub mod publisher;
 pub mod services;
 pub mod tls;
 
@@ -22,7 +25,13 @@ pub use acl::{
 };
 pub use audit::{AuditEmitter, AuditError, AuditEvent, AuditKind};
 pub use auth::{ApiKey, AuthStore, CertIdentity, SessionToken};
+pub use enrollment::{EnrollErrorKind, EnrollmentServiceImpl};
 pub use middleware::{BombError, ReplayError, ReplayGuard};
+pub use multi_node::{lifecycle::revoke_node, vclock::VClock};
+pub use publisher::{
+    build_signed_payload, FileMetadata as PublisherFileMetadata, PublisherSignatureProof,
+    PublisherVerifier, StubKeyFetcher, VerifyError,
+};
 pub use services::{AuthServiceImpl, SyncServiceImpl};
 pub use tls::{
     tls13_mtls_server_config, CertProvider, DevSelfSignedMtlsProvider, DevSelfSignedProvider,
