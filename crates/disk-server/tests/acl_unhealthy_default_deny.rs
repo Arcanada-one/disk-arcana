@@ -7,7 +7,9 @@
 //! the crate root to confirm the contract surface that downstream services
 //! (`services::sync`) will actually consume.
 
-use disk_server::{AclEnforcer, AclError, AclState, EnforcedRole, EnforcementTable, UnhealthyReason};
+use disk_server::{
+    AclEnforcer, AclError, AclState, EnforcedRole, EnforcementTable, UnhealthyReason,
+};
 
 const CERT_A: [u8; 32] = [0xA1; 32];
 const CERT_B: [u8; 32] = [0xB2; 32];
@@ -68,7 +70,10 @@ async fn loaded_state_distinguishes_share_unknown_from_unhealthy() {
     assert_eq!(role, EnforcedRole::Bidirectional);
 
     // Missing share on a known cert: ShareUnknown, not Unavailable.
-    let err = enforcer.resolve(&CERT_A, "hermes-artefacts").await.unwrap_err();
+    let err = enforcer
+        .resolve(&CERT_A, "hermes-artefacts")
+        .await
+        .unwrap_err();
     assert!(
         matches!(err, AclError::ShareUnknown { .. }),
         "Loaded state with missing entry MUST return ShareUnknown, got {err:?}"

@@ -9,9 +9,7 @@
 
 use std::sync::Arc;
 
-use disk_server::{
-    acl::{AclEnforcer, AclState, CertFingerprint, EnforcedRole, EnforcementTable},
-};
+use disk_server::acl::{AclEnforcer, AclState, CertFingerprint, EnforcedRole, EnforcementTable};
 
 fn fp(seed: u8) -> CertFingerprint {
     [seed; 32]
@@ -25,7 +23,10 @@ fn table_v(version: u64, role: EnforcedRole) -> EnforcementTable {
 
 #[tokio::test]
 async fn concurrent_resolve_and_swap_no_deadlock() {
-    let enforcer = Arc::new(AclEnforcer::new_loaded(table_v(1, EnforcedRole::ReceiveOnly)));
+    let enforcer = Arc::new(AclEnforcer::new_loaded(table_v(
+        1,
+        EnforcedRole::ReceiveOnly,
+    )));
 
     // Spawn 8 readers and 2 writers racing for 50 iterations each.
     let readers: Vec<_> = (0..8)

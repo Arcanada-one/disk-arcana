@@ -76,7 +76,12 @@ impl EnforcementTable {
         }
     }
 
-    pub fn insert(&mut self, cert_fp: CertFingerprint, share: impl Into<String>, role: EnforcedRole) {
+    pub fn insert(
+        &mut self,
+        cert_fp: CertFingerprint,
+        share: impl Into<String>,
+        role: EnforcedRole,
+    ) {
         self.entries.insert((cert_fp, share.into()), role);
     }
 
@@ -135,7 +140,9 @@ impl AclEnforcer {
     /// permissive default if the loader fails on boot.
     pub fn new_unhealthy() -> Self {
         Self {
-            state: Arc::new(RwLock::new(AclState::Unhealthy(UnhealthyReason::NeverLoaded))),
+            state: Arc::new(RwLock::new(AclState::Unhealthy(
+                UnhealthyReason::NeverLoaded,
+            ))),
         }
     }
 
@@ -158,12 +165,14 @@ impl AclEnforcer {
         share: &str,
     ) -> Result<EnforcedRole, AclError> {
         match &*self.state.read().await {
-            AclState::Loaded(table) => table.lookup(cert_fp, share).ok_or_else(|| {
-                AclError::ShareUnknown {
-                    share: share.to_string(),
-                    cert_fp_short: short_fp(cert_fp),
-                }
-            }),
+            AclState::Loaded(table) => {
+                table
+                    .lookup(cert_fp, share)
+                    .ok_or_else(|| AclError::ShareUnknown {
+                        share: share.to_string(),
+                        cert_fp_short: short_fp(cert_fp),
+                    })
+            }
             AclState::Unhealthy(reason) => Err(AclError::Unavailable(reason.clone())),
         }
     }

@@ -7,9 +7,7 @@
 //! Uses `SyncServiceImpl::with_acl` to inject a pre-seeded `AclEnforcer` and
 //! an in-memory SQLite `AuditEmitter`.
 
-use disk_proto::disk::{
-    sync_service_server::SyncService, DeltaDownloadRequest,
-};
+use disk_proto::disk::{sync_service_server::SyncService, DeltaDownloadRequest};
 use disk_server::{
     acl::{AclEnforcer, CertFingerprint, EnforcedRole, EnforcementTable},
     audit::AuditEmitter,
@@ -104,13 +102,15 @@ async fn acl_role_mismatch_returns_permission_denied_and_writes_audit_row() {
     );
 
     // ---- Verify audit row ----
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM audit_event WHERE kind = 'acl.role_mismatch'",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("count query");
-    assert_eq!(count, 1, "exactly one AclRoleMismatch audit row must be written");
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM audit_event WHERE kind = 'acl.role_mismatch'")
+            .fetch_one(&pool)
+            .await
+            .expect("count query");
+    assert_eq!(
+        count, 1,
+        "exactly one AclRoleMismatch audit row must be written"
+    );
 }
 
 #[tokio::test]
@@ -160,11 +160,10 @@ async fn acl_receive_only_can_download_but_not_upload() {
     );
 
     // No mismatch audit rows expected.
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM audit_event WHERE kind = 'acl.role_mismatch'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM audit_event WHERE kind = 'acl.role_mismatch'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(count, 0, "no mismatch audit rows for permitted download");
 }

@@ -154,9 +154,7 @@ pub fn tls13_mtls_server_config(
     let ca_certs = parse_cert_pem(ca_root_pem)?;
     let mut root_store = rustls::RootCertStore::empty();
     for ca_cert in ca_certs {
-        root_store
-            .add(ca_cert)
-            .map_err(TlsError::RustlsError)?;
+        root_store.add(ca_cert).map_err(TlsError::RustlsError)?;
     }
     let client_verifier = rustls::server::WebPkiClientVerifier::builder(Arc::new(root_store))
         .build()

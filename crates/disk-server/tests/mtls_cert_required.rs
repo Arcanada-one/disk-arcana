@@ -21,7 +21,9 @@ use disk_server::tls13_mtls_server_config;
 fn tls13_no_client_cert_config(server_cert_der: &[u8]) -> Arc<ClientConfig> {
     let mut roots = RootCertStore::empty();
     roots
-        .add(rustls::pki_types::CertificateDer::from(server_cert_der.to_vec()))
+        .add(rustls::pki_types::CertificateDer::from(
+            server_cert_der.to_vec(),
+        ))
         .expect("add server cert");
 
     Arc::new(
@@ -34,8 +36,10 @@ fn tls13_no_client_cert_config(server_cert_der: &[u8]) -> Arc<ClientConfig> {
 #[test]
 fn mtls_server_rejects_client_without_cert() {
     // --- Generate server cert ---
-    let CertifiedKey { cert: srv_cert, key_pair: srv_key } =
-        generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let CertifiedKey {
+        cert: srv_cert,
+        key_pair: srv_key,
+    } = generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     let srv_cert_der = srv_cert.der().to_vec();
     let srv_key_der = srv_key.serialize_der();
 
@@ -44,7 +48,9 @@ fn mtls_server_rejects_client_without_cert() {
     // that the client sends no cert, so the CA contents don't matter.
     let ca_pem = srv_cert.pem().into_bytes();
 
-    let server_chain = vec![rustls::pki_types::CertificateDer::from(srv_cert_der.clone())];
+    let server_chain = vec![rustls::pki_types::CertificateDer::from(
+        srv_cert_der.clone(),
+    )];
     let server_key = rustls::pki_types::PrivateKeyDer::Pkcs8(srv_key_der.into());
 
     let server_cfg = tls13_mtls_server_config(server_chain, server_key, &ca_pem)

@@ -43,10 +43,7 @@ const WRITE_ROLES: &[EnforcedRole] = &[
 ];
 
 /// Minimum role required to perform a read (download) operation.
-const READ_ROLES: &[EnforcedRole] = &[
-    EnforcedRole::Bidirectional,
-    EnforcedRole::ReceiveOnly,
-];
+const READ_ROLES: &[EnforcedRole] = &[EnforcedRole::Bidirectional, EnforcedRole::ReceiveOnly];
 
 /// Concrete `SyncService` implementation.
 #[derive(Debug, Clone)]
@@ -241,8 +238,18 @@ impl SyncService for SyncServiceImpl {
         let node_id = self.require_auth(request.metadata())?;
         let share = Self::extract_share(request.metadata());
         let cert_id = CertIdentity::from_request(&request);
-        self.check_acl_by_cert(cert_id.as_ref(), &share, &[EnforcedRole::Bidirectional, EnforcedRole::SendOnly, EnforcedRole::ReceiveOnly, EnforcedRole::Publisher], "bidirectional")
-            .await?;
+        self.check_acl_by_cert(
+            cert_id.as_ref(),
+            &share,
+            &[
+                EnforcedRole::Bidirectional,
+                EnforcedRole::SendOnly,
+                EnforcedRole::ReceiveOnly,
+                EnforcedRole::Publisher,
+            ],
+            "bidirectional",
+        )
+        .await?;
         let mut stream = request.into_inner();
         let replay = Arc::clone(&self.replay);
         let stream_id: u64 = rand::random();
@@ -287,7 +294,8 @@ impl SyncService for SyncServiceImpl {
         let _node_id = self.require_auth(request.metadata())?;
         let share = Self::extract_share(request.metadata());
         let cert_id = CertIdentity::from_request(&request);
-        self.check_acl_by_cert(cert_id.as_ref(), &share, WRITE_ROLES, "send_only").await?;
+        self.check_acl_by_cert(cert_id.as_ref(), &share, WRITE_ROLES, "send_only")
+            .await?;
         let mut stream = request.into_inner();
 
         let mut assembled: Vec<u8> = Vec::new();
@@ -351,7 +359,8 @@ impl SyncService for SyncServiceImpl {
         let _node_id = self.require_auth(request.metadata())?;
         let share = Self::extract_share(request.metadata());
         let cert_id = CertIdentity::from_request(&request);
-        self.check_acl_by_cert(cert_id.as_ref(), &share, READ_ROLES, "receive_only").await?;
+        self.check_acl_by_cert(cert_id.as_ref(), &share, READ_ROLES, "receive_only")
+            .await?;
         let req = request.into_inner();
 
         // Validate path.
@@ -396,8 +405,18 @@ impl SyncService for SyncServiceImpl {
     ) -> Result<Response<disk_proto::disk::SyncStateResponse>, Status> {
         let share = Self::extract_share(request.metadata());
         let cert_id = CertIdentity::from_request(&request);
-        self.check_acl_by_cert(cert_id.as_ref(), &share, &[EnforcedRole::Bidirectional, EnforcedRole::SendOnly, EnforcedRole::ReceiveOnly, EnforcedRole::Publisher], "bidirectional")
-            .await?;
+        self.check_acl_by_cert(
+            cert_id.as_ref(),
+            &share,
+            &[
+                EnforcedRole::Bidirectional,
+                EnforcedRole::SendOnly,
+                EnforcedRole::ReceiveOnly,
+                EnforcedRole::Publisher,
+            ],
+            "bidirectional",
+        )
+        .await?;
         Err(Status::unimplemented("use SyncState bidi streaming"))
     }
 
@@ -407,7 +426,8 @@ impl SyncService for SyncServiceImpl {
     ) -> Result<Response<DeltaUploadResponse>, Status> {
         let share = Self::extract_share(request.metadata());
         let cert_id = CertIdentity::from_request(&request);
-        self.check_acl_by_cert(cert_id.as_ref(), &share, WRITE_ROLES, "send_only").await?;
+        self.check_acl_by_cert(cert_id.as_ref(), &share, WRITE_ROLES, "send_only")
+            .await?;
         Err(Status::unimplemented("use DeltaUpload streaming"))
     }
 }

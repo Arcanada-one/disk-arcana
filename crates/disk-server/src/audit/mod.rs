@@ -126,8 +126,8 @@ impl AuditEmitter {
     pub async fn emit(&self, event: AuditEvent) -> Result<i64, AuditError> {
         let ts_ms = unix_now_ms()?;
         let kind = event.kind.as_str();
-        let payload_json = serde_json::to_string(&event.payload)
-            .unwrap_or_else(|_| "{}".to_string());
+        let payload_json =
+            serde_json::to_string(&event.payload).unwrap_or_else(|_| "{}".to_string());
 
         let id = sqlx::query_scalar::<_, i64>(
             "INSERT INTO audit_event (ts_ms, kind, cert_fp, share, payload_json)
@@ -146,21 +146,17 @@ impl AuditEmitter {
 
     /// Read events of a given kind for assertions and tooling.
     pub async fn count_by_kind(&self, kind: AuditKind) -> Result<i64, AuditError> {
-        let count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM audit_event WHERE kind = ?1",
-        )
-        .bind(kind.as_str())
-        .fetch_one(&self.pool)
-        .await?;
+        let count =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM audit_event WHERE kind = ?1")
+                .bind(kind.as_str())
+                .fetch_one(&self.pool)
+                .await?;
         Ok(count)
     }
 
     /// Snapshot the most recent event of a given kind. Returns the raw
     /// payload JSON string and timestamp. None when no row of that kind exists.
-    pub async fn latest(
-        &self,
-        kind: AuditKind,
-    ) -> Result<Option<(i64, String)>, AuditError> {
+    pub async fn latest(&self, kind: AuditKind) -> Result<Option<(i64, String)>, AuditError> {
         let row = sqlx::query_as::<_, (i64, String)>(
             "SELECT ts_ms, payload_json FROM audit_event
              WHERE kind = ?1

@@ -110,20 +110,16 @@ async fn reload_loop<V>(
     let watched_path = yaml_path.clone();
     let fs_tx_clone = fs_tx.clone();
     std::thread::spawn(move || {
-        let mut watcher =
-            notify::recommended_watcher(move |ev: notify::Result<notify::Event>| {
-                if let Ok(event) = ev {
-                    use notify::EventKind;
-                    let relevant = matches!(
-                        event.kind,
-                        EventKind::Create(_) | EventKind::Modify(_)
-                    );
-                    if relevant {
-                        let _ = fs_tx_clone.blocking_send(());
-                    }
+        let mut watcher = notify::recommended_watcher(move |ev: notify::Result<notify::Event>| {
+            if let Ok(event) = ev {
+                use notify::EventKind;
+                let relevant = matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_));
+                if relevant {
+                    let _ = fs_tx_clone.blocking_send(());
                 }
-            })
-            .expect("create file watcher");
+            }
+        })
+        .expect("create file watcher");
 
         // Watch the parent directory (more robust than watching the file directly —
         // editors that do write-temp + rename may create a new inode).
@@ -189,32 +185,28 @@ async fn reload_loop<V>(
                 }
                 last_table = Some(outcome.table.clone());
 
-                enforcer
-                    .try_swap(AclState::Loaded(outcome.table))
-                    .await;
+                enforcer.try_swap(AclState::Loaded(outcome.table)).await;
 
-                let ev = AuditEvent::new(AuditKind::AclLoadOk)
-                    .with_payload(&serde_json::json!({
-                        "version": stored_version,
-                        "signed_by": outcome.signed_by,
-                    }));
+                let ev = AuditEvent::new(AuditKind::AclLoadOk).with_payload(&serde_json::json!({
+                    "version": stored_version,
+                    "signed_by": outcome.signed_by,
+                }));
                 let _ = audit.emit(ev).await;
             }
             Err(AclLoadError::VersionRegress { stored, attempted }) => {
                 // Refuse-and-keep: keep existing Loaded state, only log.
-                let ev = AuditEvent::new(AuditKind::AclVersionRegress)
-                    .with_payload(&serde_json::json!({
+                let ev = AuditEvent::new(AuditKind::AclVersionRegress).with_payload(
+                    &serde_json::json!({
                         "stored": stored,
                         "attempted": attempted,
-                    }));
+                    }),
+                );
                 let _ = audit.emit(ev).await;
             }
             Err(e) => {
                 // Non-regress failure → transition to Unhealthy.
                 let reason = e.into_unhealthy_reason();
-                enforcer
-                    .try_swap(AclState::Unhealthy(reason.clone()))
-                    .await;
+                enforcer.try_swap(AclState::Unhealthy(reason.clone())).await;
                 let ev = AuditEvent::new(AuditKind::AclLoadFailure)
                     .with_payload(&serde_json::json!({ "reason": format!("{reason:?}") }));
                 let _ = audit.emit(ev).await;
@@ -230,7 +222,6 @@ fn broadcast_invalidations(
     next: &EnforcementTable,
     tx: &broadcast::Sender<SessionInvalidate>,
 ) {
-
     // Collect all fingerprints from both tables.
     // `EnforcementTable` doesn't expose an iterator directly; we use the
     // `lookup` API via a fingerprint set that we build from both tables.

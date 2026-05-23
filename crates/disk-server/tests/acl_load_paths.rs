@@ -7,7 +7,7 @@
 
 use disk_core::MetaDb;
 use disk_server::{
-    load_from_yaml, AclState, AclEnforcer, AlwaysFailVerifier, AuditEmitter, AuditEvent, AuditKind,
+    load_from_yaml, AclEnforcer, AclState, AlwaysFailVerifier, AuditEmitter, AuditEvent, AuditKind,
     EnforcedRole, NoopVerifier, RevokedSignerVerifier, UnhealthyReason,
 };
 use std::io::Write;
@@ -79,9 +79,10 @@ async fn promote(
             };
             enforcer.try_swap(AclState::Unhealthy(reason.clone())).await;
             audit
-                .emit(AuditEvent::new(kind).with_payload(
-                    &serde_json::json!({ "reason": format!("{reason:?}") }),
-                ))
+                .emit(
+                    AuditEvent::new(kind)
+                        .with_payload(&serde_json::json!({ "reason": format!("{reason:?}") })),
+                )
                 .await
                 .expect("audit emit");
         }
@@ -111,7 +112,10 @@ async fn cold_boot_load_ok_promotes_enforcer_and_writes_audit_row() {
     // Audit row written.
     assert_eq!(audit.count_by_kind(AuditKind::AclLoadOk).await.unwrap(), 1);
     assert_eq!(
-        audit.count_by_kind(AuditKind::AclLoadFailure).await.unwrap(),
+        audit
+            .count_by_kind(AuditKind::AclLoadFailure)
+            .await
+            .unwrap(),
         0
     );
 
@@ -152,11 +156,17 @@ async fn version_regress_keeps_previous_and_emits_distinct_audit_kind() {
     // Distinct audit kind so dashboards can alarm separately on regress vs
     // generic load_failure.
     assert_eq!(
-        audit.count_by_kind(AuditKind::AclVersionRegress).await.unwrap(),
+        audit
+            .count_by_kind(AuditKind::AclVersionRegress)
+            .await
+            .unwrap(),
         1
     );
     assert_eq!(
-        audit.count_by_kind(AuditKind::AclLoadFailure).await.unwrap(),
+        audit
+            .count_by_kind(AuditKind::AclLoadFailure)
+            .await
+            .unwrap(),
         0
     );
 }
@@ -178,7 +188,10 @@ async fn file_missing_emits_acl_file_missing_audit_kind() {
     // Per creative-DISK-0005-architecture-acl-reload §F7, file-missing has
     // its own audit kind separate from generic load_failure.
     assert_eq!(
-        audit.count_by_kind(AuditKind::AclFileMissing).await.unwrap(),
+        audit
+            .count_by_kind(AuditKind::AclFileMissing)
+            .await
+            .unwrap(),
         1
     );
 }
@@ -193,12 +206,7 @@ async fn signature_failed_emits_generic_load_failure_audit_kind() {
 
     // Use AlwaysFailVerifier explicitly — promote() helper always uses Noop,
     // so we inline the failure path here for the negative case.
-    let err = load_from_yaml(
-        &yaml_path,
-        0,
-        &AlwaysFailVerifier("gpg verify exit=1"),
-    )
-    .unwrap_err();
+    let err = load_from_yaml(&yaml_path, 0, &AlwaysFailVerifier("gpg verify exit=1")).unwrap_err();
     let reason = err.into_unhealthy_reason();
     assert_eq!(
         reason,
@@ -207,14 +215,18 @@ async fn signature_failed_emits_generic_load_failure_audit_kind() {
 
     enforcer.try_swap(AclState::Unhealthy(reason.clone())).await;
     audit
-        .emit(AuditEvent::new(AuditKind::AclLoadFailure).with_payload(
-            &serde_json::json!({ "reason": format!("{reason:?}") }),
-        ))
+        .emit(
+            AuditEvent::new(AuditKind::AclLoadFailure)
+                .with_payload(&serde_json::json!({ "reason": format!("{reason:?}") })),
+        )
         .await
         .expect("audit emit");
 
     assert_eq!(
-        audit.count_by_kind(AuditKind::AclLoadFailure).await.unwrap(),
+        audit
+            .count_by_kind(AuditKind::AclLoadFailure)
+            .await
+            .unwrap(),
         1
     );
     // No load_ok was issued.

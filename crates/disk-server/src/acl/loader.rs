@@ -250,8 +250,8 @@ where
 
     verifier.verify(&bytes)?;
 
-    let parsed: AclYamlFile = serde_yaml_ng::from_slice(&bytes)
-        .map_err(|e| AclLoadError::Parse(e.to_string()))?;
+    let parsed: AclYamlFile =
+        serde_yaml_ng::from_slice(&bytes).map_err(|e| AclLoadError::Parse(e.to_string()))?;
 
     if parsed.version <= stored_version && stored_version > 0 {
         return Err(AclLoadError::VersionRegress {
@@ -478,7 +478,11 @@ nodes:
 "#;
         let (_dir, path) = write_tmp(with_disabled);
         let out = load_from_yaml(&path, 0, &NoopVerifier).expect("load ok");
-        assert_eq!(out.table.len(), 0, "disabled node MUST not contribute rules");
+        assert_eq!(
+            out.table.len(),
+            0,
+            "disabled node MUST not contribute rules"
+        );
     }
 
     #[test]

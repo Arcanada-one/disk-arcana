@@ -42,11 +42,7 @@ Expire-Date: 1d\n\
 
     let out = Command::new("gpg")
         .env("GNUPGHOME", gnupghome)
-        .args([
-            "--batch",
-            "--gen-key",
-            batch_file.to_str().unwrap(),
-        ])
+        .args(["--batch", "--gen-key", batch_file.to_str().unwrap()])
         .output()
         .expect("gpg --gen-key");
     assert!(
@@ -58,7 +54,12 @@ Expire-Date: 1d\n\
     // Retrieve the fingerprint of the generated key.
     let list = Command::new("gpg")
         .env("GNUPGHOME", gnupghome)
-        .args(["--batch", "--with-colons", "--fingerprint", "test@disk-arcana.test"])
+        .args([
+            "--batch",
+            "--with-colons",
+            "--fingerprint",
+            "test@disk-arcana.test",
+        ])
         .output()
         .expect("gpg --fingerprint");
     let stdout = String::from_utf8_lossy(&list.stdout);
