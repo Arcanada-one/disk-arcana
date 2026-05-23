@@ -1,0 +1,10 @@
+# cargo audit configuration — DISK-0005
+# Ignored advisories are pre-existing and documented in deny.toml.
+
+[advisories]
+ignore = [
+    # rsa 0.9.10 Marvin timing attack — pulled only by sqlx-mysql which is
+    # never enabled in this workspace (sqlx features: sqlite only, no mysql).
+    # See deny.toml for full rationale.
+    "RUSTSEC-2023-0071",
+]
