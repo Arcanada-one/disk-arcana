@@ -13,13 +13,18 @@ pub mod middleware;
 pub mod services;
 pub mod tls;
 
+pub use acl::reload::{ReloadHandle, SessionInvalidate};
+
 pub use acl::{
     load_from_yaml, AclEnforcer, AclError, AclLoadError, AclState, AclYamlFile, AlwaysFailVerifier,
-    CertFingerprint, EnforcedRole, EnforcementTable, LoadOutcome, NoopVerifier,
+    CertFingerprint, EnforcedRole, EnforcementTable, GpgVerifier, LoadOutcome, NoopVerifier,
     RevokedSignerVerifier, SignatureVerifier, UnhealthyReason,
 };
 pub use audit::{AuditEmitter, AuditError, AuditEvent, AuditKind};
-pub use auth::{ApiKey, AuthStore, SessionToken};
+pub use auth::{ApiKey, AuthStore, CertIdentity, SessionToken};
 pub use middleware::{BombError, ReplayError, ReplayGuard};
 pub use services::{AuthServiceImpl, SyncServiceImpl};
-pub use tls::{CertProvider, DevSelfSignedProvider, StaticPemProvider, TlsError};
+pub use tls::{
+    tls13_mtls_server_config, CertProvider, DevSelfSignedMtlsProvider, DevSelfSignedProvider,
+    StaticPemProvider, TlsError,
+};

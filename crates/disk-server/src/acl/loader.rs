@@ -142,6 +142,79 @@ impl SignatureVerifier for RevokedSignerVerifier {
     }
 }
 
+/// Production GPG signature verifier. Shells out to `gpg --verify`.
+///
+/// Expects a detached ASCII-armored signature in `sig_path` alongside the
+/// YAML file. The GNUPGHOME environment variable controls the keyring used;
+/// operators should provision a dedicated keyring containing trusted public
+/// keys. If the `gpg` binary is absent from PATH the verifier returns
+/// `SignatureFailed("gpg binary not found")` so the enforcer transitions to
+/// `Unhealthy` rather than panicking.
+pub struct GpgVerifier {
+    /// Path to the detached `.asc` signature file.
+    pub sig_path: std::path::PathBuf,
+    /// Optional GNUPGHOME override; defaults to the process env when `None`.
+    pub gnupghome: Option<std::path::PathBuf>,
+}
+
+impl GpgVerifier {
+    pub fn new(sig_path: std::path::PathBuf) -> Self {
+        Self {
+            sig_path,
+            gnupghome: None,
+        }
+    }
+
+    pub fn with_gnupghome(mut self, home: std::path::PathBuf) -> Self {
+        self.gnupghome = Some(home);
+        self
+    }
+}
+
+impl SignatureVerifier for GpgVerifier {
+    fn verify(&self, file_bytes: &[u8]) -> Result<(), AclLoadError> {
+        // Write YAML bytes to a temp file so gpg can read a named path.
+        let tmp = tempfile_for_gpg(file_bytes).map_err(|e| {
+            AclLoadError::SignatureFailed(format!("failed to write temp file: {e}"))
+        })?;
+
+        let mut cmd = std::process::Command::new("gpg");
+        if let Some(home) = &self.gnupghome {
+            cmd.env("GNUPGHOME", home);
+        }
+        cmd.args(["--batch", "--quiet", "--verify"]);
+        cmd.arg(&self.sig_path);
+        cmd.arg(tmp.path());
+
+        let output = cmd.output().map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                AclLoadError::SignatureFailed("gpg binary not found".into())
+            } else {
+                AclLoadError::SignatureFailed(format!("gpg exec error: {e}"))
+            }
+        })?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let code = output.status.code().unwrap_or(-1);
+            Err(AclLoadError::SignatureFailed(format!(
+                "gpg verify exit={code}: {stderr}"
+            )))
+        }
+    }
+}
+
+/// Write `bytes` to a NamedTempFile (auto-deleted on drop).
+fn tempfile_for_gpg(bytes: &[u8]) -> std::io::Result<tempfile::NamedTempFile> {
+    use std::io::Write;
+    let mut f = tempfile::NamedTempFile::new()?;
+    f.write_all(bytes)?;
+    f.flush()?;
+    Ok(f)
+}
+
 /// Successful load result. Caller wraps `table` in `AclState::Loaded` and
 /// swaps it into the enforcer.
 #[derive(Debug)]

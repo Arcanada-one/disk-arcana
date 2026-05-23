@@ -17,10 +17,11 @@
 //! [`resolve`]: AclEnforcer::resolve
 
 pub mod loader;
+pub mod reload;
 
 pub use loader::{
-    load_from_yaml, AclLoadError, AclYamlFile, AlwaysFailVerifier, LoadOutcome, NoopVerifier,
-    RevokedSignerVerifier, SignatureVerifier,
+    load_from_yaml, AclLoadError, AclYamlFile, AlwaysFailVerifier, GpgVerifier, LoadOutcome,
+    NoopVerifier, RevokedSignerVerifier, SignatureVerifier,
 };
 
 use std::collections::BTreeMap;

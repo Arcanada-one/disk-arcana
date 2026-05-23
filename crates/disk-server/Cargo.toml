@@ -39,6 +39,10 @@ tracing-subscriber = { workspace = true }
 thiserror          = { workspace = true }
 anyhow             = { workspace = true }
 tokio-stream       = { version = "0.1", features = ["net"] }
+notify             = { workspace = true }
+
+[dependencies.tempfile]
+version = "3"
 
 [dev-dependencies]
 tempfile     = "3"
