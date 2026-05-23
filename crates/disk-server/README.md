@@ -46,6 +46,44 @@ let provider = StaticPemProvider::from_files("cert.pem", "key.pem");
 let server_cfg = provider.server_config()?;
 ```
 
+## ACL enforcement (P4a)
+
+Phase 4a adds cert-based ACL enforcement on top of the bearer-token layer:
+
+- **`acl::AclEnforcer`** — resolves `(cert_fingerprint, share) → EnforcedRole`.
+- **`auth::CertIdentity`** — extracts blake3(DER) fingerprint from request extensions.
+- **`acl::reload`** — SIGHUP + file-watcher hot-reload with 500ms debounce; emits
+  `SessionInvalidate` broadcasts when cert roles change.
+- **`audit::AuditEmitter`** — writes structured audit rows to SQLite.
+
+`SyncServiceImpl::with_acl(store, root, enforcer, audit)` enables ACL mode;
+`SyncServiceImpl::new(store, root)` uses legacy token-only mode for dev/tests.
+
+## Security lint: no branch on `intended_direction`
+
+The `x-disk-intended-direction` client metadata is an informational hint only.
+Server code MUST NOT use it for ACL or routing decisions (T-DIR-1).
+
+**Pre-commit hook** (`lints/no_branch_on_client_config.sh`) enforces this
+automatically. The same check runs in CI (`ci.yml` Lint job step
+"ACL direction-spoofing lint").
+
+To run manually:
+```sh
+bash crates/disk-server/lints/no_branch_on_client_config.sh .
+```
+
+## mTLS (P4a Step 5)
+
+Mutual TLS requires `DISK_INTERNAL_CA_ROOT_PEM` env var (path to CA PEM file).
+When absent the server falls back to one-way TLS (dev/test).
+
+```rust
+// Production mTLS server config:
+use disk_server::tls13_mtls_server_config;
+let cfg = tls13_mtls_server_config(server_certs, server_key, &ca_root_pem)?;
+```
+
 ## Minimum example (test harness)
 
 See `tests/two_node_round_trip.rs` for a complete two-node loopback example
