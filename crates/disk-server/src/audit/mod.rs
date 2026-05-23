@@ -1,14 +1,14 @@
 //! Audit event emitter.
 //!
 //! Writes structured audit events to the `audit_event` table (migration
-//! `003_acl_enrollment.sql`). Per plan §Implementation Steps P4a step 9, this
-//! milestone is **local-only** — Ops Bot HTTP delivery is added in P4b step 16
-//! via a sibling `ops_bot::Forwarder` consuming the same `AuditEmitter` trait
-//! surface.
+//! `003_acl_enrollment.sql`). P4b step 16 adds `ops_bot::Forwarder` which
+//! receives the same events via `AuditEmitter::emit_with_forwarder`.
 //!
 //! Event-kind enumeration matches creative-DISK-0005-architecture-acl-reload.md
 //! §F1-F8 and creative-DISK-0005-data-model-publisher-signatures.md §6. The
 //! kind strings are part of the contract (audit consumers grep on them).
+
+pub mod ops_bot;
 
 use serde::Serialize;
 use sqlx::SqlitePool;
@@ -129,6 +129,35 @@ impl AuditEmitter {
         let payload_json =
             serde_json::to_string(&event.payload).unwrap_or_else(|_| "{}".to_string());
 
+        let id = sqlx::query_scalar::<_, i64>(
+            "INSERT INTO audit_event (ts_ms, kind, cert_fp, share, payload_json)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             RETURNING id",
+        )
+        .bind(ts_ms as i64)
+        .bind(kind)
+        .bind(event.cert_fp.as_ref().map(|fp| fp.as_slice()))
+        .bind(event.share.as_deref())
+        .bind(&payload_json)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(id)
+    }
+
+    /// Emit with optional Ops Bot forwarding. The forwarder is fire-and-forget;
+    /// failure to enqueue never fails the audit write.
+    pub async fn emit_with_forwarder(
+        &self,
+        event: AuditEvent,
+        forwarder: Option<&ops_bot::Forwarder>,
+    ) -> Result<i64, AuditError> {
+        let ts_ms = unix_now_ms()?;
+        if let Some(fwd) = forwarder {
+            fwd.enqueue(&event, ts_ms);
+        }
+        let kind = event.kind.as_str();
+        let payload_json =
+            serde_json::to_string(&event.payload).unwrap_or_else(|_| "{}".to_string());
         let id = sqlx::query_scalar::<_, i64>(
             "INSERT INTO audit_event (ts_ms, kind, cert_fp, share, payload_json)
              VALUES (?1, ?2, ?3, ?4, ?5)
