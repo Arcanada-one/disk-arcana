@@ -10,6 +10,7 @@ pub mod connection;
 pub mod enrollment;
 pub mod keychain;
 pub mod mtls;
+pub mod rest_api;
 pub mod sync_loop;
 pub mod watcher;
 
@@ -24,6 +25,11 @@ pub use keychain::{
 };
 pub use mtls::{
     audit_key_permissions, build_client_tls_config, load_client_identity, load_server_ca, MtlsError,
+};
+pub use rest_api::{
+    assert_loopback_bind, direction_to_schema, format_iso8601, loop_state_to_schema, router, serve,
+    AcceptedResponse, DaemonState, RestApiError, ShareSnapshot, StatusResponse, StatusShare,
+    DEFAULT_PORT, LOOPBACK_BIND_PREFIX,
 };
 pub use sync_loop::{
     classify_client_error, classify_tonic_status, Backoff, LoopError, LoopState, LoopTrigger,

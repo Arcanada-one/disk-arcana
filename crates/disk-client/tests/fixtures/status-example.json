@@ -1,0 +1,19 @@
+{
+  "node": "arcana-ai",
+  "daemon_uptime_s": 12345,
+  "config_version": "1.1",
+  "shares": [
+    {
+      "name": "hermes-artefacts",
+      "path": "/home/hermes/.hermes/cache",
+      "declared_direction": "publisher",
+      "server_confirmed_role": "publisher",
+      "state": "idle",
+      "last_success_at": "2026-05-23T18:00:00Z",
+      "last_error": null,
+      "bytes_sent_session": 47185920,
+      "bytes_received_session": 0,
+      "pending_local_changes": 0
+    }
+  ]
+}

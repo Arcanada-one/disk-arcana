@@ -36,9 +36,13 @@ keyring            = { workspace = true }
 pem                = { workspace = true }
 notify             = { workspace = true }
 rand               = { workspace = true }
+axum               = { workspace = true }
+serde_json         = { workspace = true }
+time               = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
 rand     = { workspace = true }
 pem      = { workspace = true }
 rcgen    = { workspace = true }
+reqwest  = { workspace = true }
