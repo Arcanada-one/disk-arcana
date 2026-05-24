@@ -47,6 +47,7 @@ rand        = "0.8"
 proptest    = "1"
 reqwest     = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "json"] }
 ed25519-dalek = { version = "2", features = ["rand_core"] }
+keyring     = "3"
 
 [profile.release]
 lto             = "fat"

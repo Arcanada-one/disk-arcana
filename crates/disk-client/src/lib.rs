@@ -8,9 +8,18 @@
 pub mod config;
 pub mod connection;
 pub mod enrollment;
+pub mod keychain;
+pub mod mtls;
 
 pub use connection::{ClientConfig, ClientError, DiskClient};
 pub use enrollment::{
     gen_keypair_and_csr, parse_bootstrap_file, redact_token, write_cert_file, write_key_file,
     BootstrapFile, EnrollmentClient, EnrollmentError,
+};
+pub use keychain::{
+    detect_or_file, validate_label, FileKeyStore, KeyStore, KeyStoreError, OsKeyStore,
+    DEFAULT_OS_KEYRING_SERVICE,
+};
+pub use mtls::{
+    audit_key_permissions, build_client_tls_config, load_client_identity, load_server_ca, MtlsError,
 };
