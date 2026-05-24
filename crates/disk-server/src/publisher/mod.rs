@@ -147,6 +147,14 @@ pub struct PublisherVerifier {
     vault: std::sync::Arc<dyn VaultKeyFetcher>,
 }
 
+impl std::fmt::Debug for PublisherVerifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PublisherVerifier")
+            .field("vault", &"<dyn VaultKeyFetcher>")
+            .finish_non_exhaustive()
+    }
+}
+
 impl PublisherVerifier {
     pub fn new(pool: SqlitePool, vault: std::sync::Arc<dyn VaultKeyFetcher>) -> Self {
         Self { pool, vault }
