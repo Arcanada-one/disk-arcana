@@ -1,6 +1,13 @@
 #![forbid(unsafe_code)]
 
+use std::path::PathBuf;
+
+use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
+use disk_client::{
+    gen_keypair_and_csr, parse_bootstrap_file, redact_token, write_cert_file, write_key_file,
+    BootstrapFile, EnrollmentClient,
+};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
@@ -21,6 +28,14 @@ enum Command {
 
     /// Sync vault with a remote Disk Arcana server (Phase 3).
     Sync(SyncArgs),
+
+    /// Enrol this node with a Disk Arcana server: generate Ed25519 keypair,
+    /// build CSR, submit it with the operator-issued opaque token, and write
+    /// the returned cert + private key to disk.
+    Enroll(EnrollArgs),
+
+    /// Operator-side admin commands (require `DISK_ADMIN_TOKEN`).
+    Admin(AdminArgs),
 }
 
 /// Arguments for the `sync` subcommand.
@@ -41,18 +56,101 @@ pub struct SyncArgs {
 
     /// Path to `disk.toml` configuration file.
     #[arg(long, default_value = "disk.toml")]
-    pub config: std::path::PathBuf,
+    pub config: PathBuf,
 }
 
-fn main() {
-    tracing_subscriber::fmt()
+/// `disk enroll` — exchange an opaque enrollment token for a signed cert.
+#[derive(clap::Args, Debug)]
+pub struct EnrollArgs {
+    /// EnrollmentService gRPC endpoint (e.g. `https://disk.arcanada.one:9445`).
+    #[arg(long)]
+    pub server: Option<String>,
+
+    /// Hex-encoded opaque token from `disk admin pending-token`.
+    #[arg(long, conflicts_with = "from_bootstrap_file")]
+    pub token: Option<String>,
+
+    /// TOML file containing `server` + `token` (+ optional `node_id_hint`,
+    /// `ca_cert_pem`). Overrides `--server` / `--token` when present.
+    #[arg(long)]
+    pub from_bootstrap_file: Option<PathBuf>,
+
+    /// Subject CN for the CSR. Defaults to the system hostname.
+    #[arg(long)]
+    pub node_id: Option<String>,
+
+    /// Path to PEM-encoded CA bundle for TLS verification.
+    #[arg(long)]
+    pub ca_cert: Option<PathBuf>,
+
+    /// Disable TLS — localhost test only. Server must be reachable via `http://`.
+    #[arg(long, default_value_t = false)]
+    pub insecure_localhost: bool,
+
+    /// Output path for the signed client cert (PEM).
+    #[arg(long, default_value = "/etc/disk-arcana/client.crt")]
+    pub cert_out: PathBuf,
+
+    /// Output path for the private key (PEM, mode 0600).
+    #[arg(long, default_value = "/etc/disk-arcana/client.key")]
+    pub key_out: PathBuf,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct AdminArgs {
+    #[command(subcommand)]
+    pub command: AdminCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum AdminCommand {
+    /// Issue a fresh enrollment token bound to a hostname.
+    PendingToken(PendingTokenArgs),
+}
+
+/// `disk admin pending-token` — admin-bearer-protected RPC.
+#[derive(clap::Args, Debug)]
+pub struct PendingTokenArgs {
+    /// EnrollmentService gRPC endpoint.
+    #[arg(long, default_value = "https://disk.arcanada.one:9445")]
+    pub server: String,
+
+    /// Target hostname / node_id_hint to bind the token to.
+    #[arg(long)]
+    pub hostname: String,
+
+    /// Token TTL in seconds (server clamps to 3600 default, 86400 max).
+    #[arg(long, default_value_t = 3600)]
+    pub ttl_secs: u64,
+
+    /// Admin bearer token (overrides `DISK_ADMIN_TOKEN` env var).
+    #[arg(long)]
+    pub admin_token: Option<String>,
+
+    /// Path to PEM-encoded CA bundle for TLS verification.
+    #[arg(long)]
+    pub ca_cert: Option<PathBuf>,
+
+    /// Disable TLS — localhost test only.
+    #[arg(long, default_value_t = false)]
+    pub insecure_localhost: bool,
+}
+
+fn init_tracing() {
+    let _ = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
-        .init();
+        .try_init();
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    init_tracing();
 
     let cli = Cli::parse();
     match cli.command {
         Some(Command::Init) => {
             println!("disk init: not implemented yet (DISK-0010)");
+            Ok(())
         }
         Some(Command::Sync(args)) => {
             println!("disk sync: connecting to {}", args.server);
@@ -62,12 +160,159 @@ fn main() {
                 args.config.display()
             );
             println!("  Full sync loop not yet implemented — use disk-client library.");
+            Ok(())
         }
+        Some(Command::Enroll(args)) => run_enroll(args).await,
+        Some(Command::Admin(args)) => match args.command {
+            AdminCommand::PendingToken(p) => run_admin_pending_token(p).await,
+        },
         None => {
             let version = env!("CARGO_PKG_VERSION");
             println!("disk v{version} — run `disk --help` for available commands");
+            Ok(())
         }
     }
+}
+
+/// Resolve effective enrollment inputs from CLI flags and the optional
+/// bootstrap file. The bootstrap file is the canonical source when present;
+/// CLI flags override individual fields.
+fn resolve_enroll_inputs(args: &EnrollArgs) -> Result<ResolvedEnroll> {
+    let bf: Option<BootstrapFile> = match &args.from_bootstrap_file {
+        Some(path) => {
+            let raw = std::fs::read_to_string(path)
+                .with_context(|| format!("read bootstrap file {}", path.display()))?;
+            Some(parse_bootstrap_file(&raw)?)
+        }
+        None => None,
+    };
+
+    let server = args
+        .server
+        .clone()
+        .or_else(|| bf.as_ref().map(|b| b.server.clone()))
+        .ok_or_else(|| anyhow!("--server (or bootstrap-file server=) required"))?;
+
+    let token_hex = args
+        .token
+        .clone()
+        .or_else(|| bf.as_ref().map(|b| b.token.clone()))
+        .ok_or_else(|| anyhow!("--token (or bootstrap-file token=) required"))?;
+
+    let node_id = args
+        .node_id
+        .clone()
+        .or_else(|| bf.as_ref().and_then(|b| b.node_id_hint.clone()))
+        .unwrap_or_else(default_hostname);
+
+    let ca_pem = match &args.ca_cert {
+        Some(path) => {
+            Some(std::fs::read(path).with_context(|| format!("read {}", path.display()))?)
+        }
+        None => bf
+            .as_ref()
+            .and_then(|b| b.ca_cert_pem.clone())
+            .map(|s| s.into_bytes()),
+    };
+
+    Ok(ResolvedEnroll {
+        server,
+        token_hex,
+        node_id,
+        ca_pem,
+        insecure_localhost: args.insecure_localhost,
+        cert_out: args.cert_out.clone(),
+        key_out: args.key_out.clone(),
+    })
+}
+
+struct ResolvedEnroll {
+    server: String,
+    token_hex: String,
+    node_id: String,
+    ca_pem: Option<Vec<u8>>,
+    insecure_localhost: bool,
+    cert_out: PathBuf,
+    key_out: PathBuf,
+}
+
+fn default_hostname() -> String {
+    std::env::var("HOSTNAME")
+        .ok()
+        .or_else(|| std::env::var("COMPUTERNAME").ok())
+        .unwrap_or_else(|| "disk-node".to_owned())
+}
+
+async fn run_enroll(args: EnrollArgs) -> Result<()> {
+    let inputs = resolve_enroll_inputs(&args)?;
+    let token_bytes = hex::decode(&inputs.token_hex).context("decode --token (expected hex)")?;
+    tracing::info!(
+        server = %inputs.server,
+        node_id = %inputs.node_id,
+        token = %redact_token(&inputs.token_hex),
+        "enrolling node"
+    );
+
+    let (key_pem, csr_pem) = gen_keypair_and_csr(&inputs.node_id)?;
+
+    let client = EnrollmentClient::connect(
+        &inputs.server,
+        inputs.ca_pem.as_deref(),
+        inputs.insecure_localhost,
+    )
+    .await
+    .context("connect to enrollment endpoint")?;
+
+    let resp = client
+        .enroll(token_bytes, csr_pem.into_bytes(), inputs.node_id.clone())
+        .await
+        .context("Enroll RPC failed")?;
+
+    let cert_pem =
+        String::from_utf8(resp.client_cert_pem).context("server returned non-UTF8 cert")?;
+    write_cert_file(&inputs.cert_out, &cert_pem).context("write cert file")?;
+    write_key_file(&inputs.key_out, &key_pem).context("write key file")?;
+
+    println!(
+        "enrolled node_id={} cert={} key={} expires_at_unix_ms={}",
+        inputs.node_id,
+        inputs.cert_out.display(),
+        inputs.key_out.display(),
+        resp.expires_at_ms
+    );
+    Ok(())
+}
+
+async fn run_admin_pending_token(args: PendingTokenArgs) -> Result<()> {
+    let admin_token = args
+        .admin_token
+        .clone()
+        .or_else(|| std::env::var("DISK_ADMIN_TOKEN").ok())
+        .ok_or_else(|| anyhow!("--admin-token or DISK_ADMIN_TOKEN required"))?;
+
+    let ca_pem = match &args.ca_cert {
+        Some(path) => {
+            Some(std::fs::read(path).with_context(|| format!("read {}", path.display()))?)
+        }
+        None => None,
+    };
+
+    let client =
+        EnrollmentClient::connect(&args.server, ca_pem.as_deref(), args.insecure_localhost)
+            .await
+            .context("connect to enrollment endpoint")?;
+
+    let resp = client
+        .issue_pending_token(&admin_token, &args.hostname, args.ttl_secs)
+        .await
+        .context("IssuePendingToken RPC failed")?;
+
+    let token_hex = hex::encode(&resp.opaque_token);
+    println!(
+        "token={} expires_at_unix_ms={} hostname={}",
+        token_hex, resp.expires_at_ms, args.hostname
+    );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -120,5 +365,133 @@ mod tests {
     fn cli_help_does_not_panic() {
         // Verify the CLI structure is valid.
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn cli_parses_enroll_subcommand() {
+        let cli = Cli::try_parse_from([
+            "disk",
+            "enroll",
+            "--server",
+            "https://disk.example:9445",
+            "--token",
+            "deadbeef",
+            "--node-id",
+            "macos-1",
+            "--cert-out",
+            "/tmp/c.crt",
+            "--key-out",
+            "/tmp/c.key",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Command::Enroll(args)) => {
+                assert_eq!(args.server.as_deref(), Some("https://disk.example:9445"));
+                assert_eq!(args.token.as_deref(), Some("deadbeef"));
+                assert_eq!(args.node_id.as_deref(), Some("macos-1"));
+            }
+            _ => panic!("expected enroll subcommand"),
+        }
+    }
+
+    #[test]
+    fn cli_rejects_token_with_bootstrap_file() {
+        let res = Cli::try_parse_from([
+            "disk",
+            "enroll",
+            "--token",
+            "ab",
+            "--from-bootstrap-file",
+            "/tmp/bf.toml",
+        ]);
+        assert!(res.is_err(), "clap should reject conflicting flags");
+    }
+
+    #[test]
+    fn cli_parses_admin_pending_token() {
+        let cli = Cli::try_parse_from([
+            "disk",
+            "admin",
+            "pending-token",
+            "--server",
+            "https://disk.example:9445",
+            "--hostname",
+            "new-node-1",
+            "--ttl-secs",
+            "7200",
+            "--admin-token",
+            "secret",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Command::Admin(AdminArgs {
+                command: AdminCommand::PendingToken(p),
+            })) => {
+                assert_eq!(p.hostname, "new-node-1");
+                assert_eq!(p.ttl_secs, 7200);
+                assert_eq!(p.admin_token.as_deref(), Some("secret"));
+            }
+            _ => panic!("expected admin pending-token subcommand"),
+        }
+    }
+
+    #[test]
+    fn resolve_enroll_inputs_uses_bootstrap_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bf_path = tmp.path().join("bf.toml");
+        std::fs::write(
+            &bf_path,
+            r#"
+server = "https://disk.example:9445"
+token = "cafef00d"
+node_id_hint = "from-bf"
+"#,
+        )
+        .unwrap();
+
+        let args = EnrollArgs {
+            server: None,
+            token: None,
+            from_bootstrap_file: Some(bf_path),
+            node_id: None,
+            ca_cert: None,
+            insecure_localhost: false,
+            cert_out: PathBuf::from("/tmp/c.crt"),
+            key_out: PathBuf::from("/tmp/c.key"),
+        };
+        let r = resolve_enroll_inputs(&args).unwrap();
+        assert_eq!(r.server, "https://disk.example:9445");
+        assert_eq!(r.token_hex, "cafef00d");
+        assert_eq!(r.node_id, "from-bf");
+    }
+
+    #[test]
+    fn resolve_enroll_inputs_cli_overrides_bootstrap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bf_path = tmp.path().join("bf.toml");
+        std::fs::write(
+            &bf_path,
+            r#"
+server = "https://disk.example:9445"
+token = "cafef00d"
+node_id_hint = "from-bf"
+"#,
+        )
+        .unwrap();
+
+        let args = EnrollArgs {
+            server: Some("https://override:9999".into()),
+            token: None,
+            from_bootstrap_file: Some(bf_path),
+            node_id: Some("override-node".into()),
+            ca_cert: None,
+            insecure_localhost: false,
+            cert_out: PathBuf::from("/tmp/c.crt"),
+            key_out: PathBuf::from("/tmp/c.key"),
+        };
+        let r = resolve_enroll_inputs(&args).unwrap();
+        assert_eq!(r.server, "https://override:9999");
+        assert_eq!(r.token_hex, "cafef00d"); // still from bf
+        assert_eq!(r.node_id, "override-node");
     }
 }

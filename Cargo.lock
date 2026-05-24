@@ -542,8 +542,13 @@ dependencies = [
 name = "disk-cli"
 version = "0.0.1"
 dependencies = [
+ "anyhow",
  "clap",
+ "disk-client",
  "disk-core",
+ "hex",
+ "tempfile",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]
@@ -555,12 +560,18 @@ dependencies = [
  "anyhow",
  "disk-core",
  "disk-proto",
+ "hex",
+ "pem",
  "prost",
+ "rand 0.8.6",
+ "rcgen",
  "rustls",
+ "serde",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
+ "toml",
  "tonic",
  "tracing",
  "tracing-subscriber",
