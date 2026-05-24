@@ -562,6 +562,7 @@ dependencies = [
  "disk-proto",
  "hex",
  "keyring",
+ "notify",
  "pem",
  "prost",
  "rand 0.8.6",

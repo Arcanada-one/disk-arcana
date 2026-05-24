@@ -10,6 +10,8 @@ pub mod connection;
 pub mod enrollment;
 pub mod keychain;
 pub mod mtls;
+pub mod sync_loop;
+pub mod watcher;
 
 pub use connection::{ClientConfig, ClientError, DiskClient};
 pub use enrollment::{
@@ -22,4 +24,12 @@ pub use keychain::{
 };
 pub use mtls::{
     audit_key_permissions, build_client_tls_config, load_client_identity, load_server_ca, MtlsError,
+};
+pub use sync_loop::{
+    Backoff, LoopError, LoopState, LoopTrigger, SyncLoop, BACKOFF_BASE, BACKOFF_CAP,
+    BACKOFF_JITTER, POLL_INTERVAL,
+};
+pub use watcher::{
+    translate_notify_event, FsEvent, FsEventDebouncer, FsWatcher, WatcherError,
+    DEFAULT_DEBOUNCE_WINDOW,
 };
