@@ -8,12 +8,14 @@
 //! that hold a previous valid config keep using it (the eventual hot-reload
 //! loop in R9 relies on this property).
 
+pub mod reload;
 pub mod schema;
 pub mod validate;
 
 use std::path::Path;
 use std::str::FromStr;
 
+pub use reload::{spawn_config_watcher, ConfigSnapshot, ConfigWatcher, ReloadStatus};
 pub use schema::{
     Direction, DiskConfig, FilterMode, FilterSection, NodeDefault, NodeSection, PublisherSection,
     ServerSection, ShareSection,
