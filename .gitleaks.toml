@@ -1,0 +1,41 @@
+# gitleaks configuration — false-positive allowlist for test fixtures.
+#
+# Background: gitleaks scans every file for high-entropy strings that *look*
+# like secrets. Inside test modules we intentionally use deterministic
+# placeholders so behaviour is reproducible — those are not real secrets but
+# they trip the default rule set.
+#
+# The allowlist below extends the default `gitleaks` rules (no rules
+# disabled). Each entry is narrow and tied to a specific test fixture; the
+# rationale is documented inline so a future audit can re-validate.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Bootstrap-file parser unit test — deterministic placeholder token + dummy PEM body. Lives inside `#[cfg(test)]` and never compiles into the production binary."
+paths = [
+    '''crates/disk-client/src/enrollment\.rs''',
+]
+regexes = [
+    '''token = "0123456789abcdef"''',
+    '''ca_cert_pem = "-----BEGIN CERTIFICATE-----\\nMIIB\.\.\.\\n-----END CERTIFICATE-----\\n"''',
+]
+
+[[allowlists]]
+description = "Filesystem keystore round-trip unit test — literal `\"fake\"` body inside PEM markers. The string `fake` is the entire 'secret' (4 chars). Lives inside `#[cfg(test)]`."
+paths = [
+    '''crates/disk-client/src/keychain\.rs''',
+]
+regexes = [
+    '''"-----BEGIN PRIVATE KEY-----\\nfake\\n-----END PRIVATE KEY-----"''',
+]
+
+[[allowlists]]
+description = "Publisher signature integration tests — `vault_key_ref: \"transit/keys/publisher\"` is a Vault Transit *path*, not a secret. No key material; Vault enforces ACL on the path itself. Test file under `crates/disk-server/tests/`."
+paths = [
+    '''crates/disk-server/tests/publisher_signature_success\.rs''',
+]
+regexes = [
+    '''vault_key_ref: "transit/keys/publisher"''',
+]
