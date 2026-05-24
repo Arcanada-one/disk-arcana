@@ -26,8 +26,8 @@ pub use mtls::{
     audit_key_permissions, build_client_tls_config, load_client_identity, load_server_ca, MtlsError,
 };
 pub use sync_loop::{
-    Backoff, LoopError, LoopState, LoopTrigger, SyncLoop, BACKOFF_BASE, BACKOFF_CAP,
-    BACKOFF_JITTER, POLL_INTERVAL,
+    classify_client_error, classify_tonic_status, Backoff, LoopError, LoopState, LoopTrigger,
+    RemoteSync, SyncLoop, SyncTransport, BACKOFF_BASE, BACKOFF_CAP, BACKOFF_JITTER, POLL_INTERVAL,
 };
 pub use watcher::{
     translate_notify_event, FsEvent, FsEventDebouncer, FsWatcher, WatcherError,

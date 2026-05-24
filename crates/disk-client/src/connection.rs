@@ -5,11 +5,13 @@
 //! - Bearer token injection on each RPC call.
 //! - Session token caching from `Authenticate`.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use disk_proto::disk::{
     auth_service_client::AuthServiceClient, sync_service_client::SyncServiceClient,
-    DeltaDownloadRequest, NodeAuthRequest, NodeRegisterRequest,
+    DeltaDownloadRequest, FileMetadata, NodeAuthRequest, NodeRegisterRequest, SyncStateRequest,
+    SyncStateResponse,
 };
 use tonic::{
     metadata::MetadataValue,
@@ -126,6 +128,63 @@ impl DiskClient {
             .await
             .clone()
             .ok_or(ClientError::NotAuthenticated)
+    }
+
+    /// Inject a session token directly into the cache.
+    ///
+    /// Production code should obtain a token via [`authenticate`]; this entry
+    /// point exists for resuming a persisted session and for in-process
+    /// integration tests that bypass the AuthService round-trip.
+    ///
+    /// [`authenticate`]: Self::authenticate
+    pub async fn set_session_token(&self, token: String) {
+        *self.session_token.write().await = Some(token);
+    }
+
+    /// Call `SyncService::ExchangeState` with the cached session token and
+    /// the `x-disk-share` metadata header set to `share`.
+    ///
+    /// DISK-0006 R6: this is the minimal gRPC wire-up the [`SyncLoop`] uses
+    /// to probe ACL admission. The unary RPC is sufficient for ACL/share
+    /// classification — the streaming `SyncState` path lands in a later
+    /// round once the Scan/Hash/Reconcile pipeline is in place.
+    ///
+    /// [`SyncLoop`]: crate::sync_loop::SyncLoop
+    pub async fn exchange_state(
+        &self,
+        share: &str,
+        files: Vec<FileMetadata>,
+        node_clock: HashMap<String, u64>,
+    ) -> Result<SyncStateResponse, ClientError> {
+        let token = self.session_token().await?;
+        let mut client = SyncServiceClient::new(self.channel.clone());
+
+        let mut req = Request::new(SyncStateRequest {
+            node_id: self.node_id.clone(),
+            session_token: token.clone(),
+            files,
+            node_clock,
+            tenant_id: String::new(),
+            vault_id: String::new(),
+        });
+
+        let bearer: MetadataValue<tonic::metadata::Ascii> = format!("Bearer {token}")
+            .parse()
+            .map_err(|e: tonic::metadata::errors::InvalidMetadataValue| {
+                ClientError::MetadataError(e.to_string())
+            })?;
+        req.metadata_mut().insert("authorization", bearer);
+
+        let share_value: MetadataValue<tonic::metadata::Ascii> =
+            share
+                .parse()
+                .map_err(|e: tonic::metadata::errors::InvalidMetadataValue| {
+                    ClientError::MetadataError(format!("x-disk-share: {e}"))
+                })?;
+        req.metadata_mut().insert("x-disk-share", share_value);
+
+        let resp = client.exchange_state(req).await?.into_inner();
+        Ok(resp)
     }
 
     /// Download a file as a stream of `DeltaChunk`s, returning reassembled bytes.

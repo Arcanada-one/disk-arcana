@@ -24,6 +24,9 @@ use std::time::{Duration, Instant};
 use rand::Rng;
 use thiserror::Error;
 
+pub mod wire;
+pub use wire::{classify_client_error, classify_tonic_status, RemoteSync, SyncTransport};
+
 /// Default polling tick — sync loop wakes every `POLL_INTERVAL` even
 /// without inbound fs events to drive pull-side reconciliation.
 pub const POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -294,6 +297,32 @@ impl SyncLoop {
             self.last_error = None;
             self.backoff.reset();
         }
+    }
+
+    /// DISK-0006 R6: drive one full iteration through the supplied
+    /// transport.
+    ///
+    /// Steps: `begin_sync(trigger)` (skipped during backoff dwell or
+    /// sticky `AclMismatch`) → `transport.execute().await` →
+    /// `finish_sync(outcome)`. Returns `None` when the loop refused to
+    /// begin (still in Backoff / AclMismatch); otherwise returns the
+    /// transport outcome verbatim so callers can also log it.
+    pub async fn run_iteration<T, R>(
+        &mut self,
+        transport: &mut T,
+        trigger: LoopTrigger,
+        rng: &mut R,
+    ) -> Option<Result<(), LoopError>>
+    where
+        T: wire::SyncTransport,
+        R: Rng + ?Sized,
+    {
+        if !self.begin_sync(Instant::now(), trigger) {
+            return None;
+        }
+        let outcome = transport.execute().await;
+        self.finish_sync(outcome, Instant::now(), rng);
+        Some(outcome)
     }
 }
 
