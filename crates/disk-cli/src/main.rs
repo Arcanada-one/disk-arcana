@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod share_init;
+
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
@@ -9,6 +11,8 @@ use disk_client::{
     BootstrapFile, EnrollmentClient,
 };
 use tracing_subscriber::EnvFilter;
+
+use crate::share_init::Preset;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -40,6 +44,46 @@ enum Command {
     /// Seed the local SQLite `MetaDb` from an existing filesystem tree —
     /// the DISK-RB-003 cutover entry point for migrating off the bash MVP.
     ImportState(ImportStateArgs),
+
+    /// Manage shares declared in `disk.toml`.
+    Share(ShareArgs),
+}
+
+/// `disk share <subcmd>` — wrapper for share management subcommands.
+#[derive(clap::Args, Debug)]
+pub struct ShareArgs {
+    #[command(subcommand)]
+    pub command: ShareCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ShareCommand {
+    /// Append a new `[[share]]` block to `disk.toml` using a preset.
+    Init(ShareInitArgs),
+}
+
+/// `disk share init` — declare a new share with one of the four directional presets.
+#[derive(clap::Args, Debug)]
+pub struct ShareInitArgs {
+    /// Preset directional intent. `publish` additionally requires `--sign-key-ref`.
+    #[arg(long, value_enum)]
+    pub preset: Preset,
+
+    /// Logical share name (must be unique within `disk.toml`).
+    #[arg(long)]
+    pub name: String,
+
+    /// Absolute path to the directory the share covers.
+    #[arg(long)]
+    pub path: PathBuf,
+
+    /// Vault key reference for the `publish` preset (e.g. `vault:transit/keys/foo`).
+    #[arg(long)]
+    pub sign_key_ref: Option<String>,
+
+    /// Path to the `disk.toml` to extend. Defaults to `/etc/disk-arcana/disk.toml`.
+    #[arg(long, default_value = "/etc/disk-arcana/disk.toml")]
+    pub config: PathBuf,
 }
 
 /// `disk import-state` — seed MetaDb without driving any network sync.
@@ -196,6 +240,9 @@ async fn main() -> Result<()> {
             AdminCommand::PendingToken(p) => run_admin_pending_token(p).await,
         },
         Some(Command::ImportState(args)) => run_import_state(args).await,
+        Some(Command::Share(args)) => match args.command {
+            ShareCommand::Init(s) => run_share_init(s),
+        },
         None => {
             let version = env!("CARGO_PKG_VERSION");
             println!("disk v{version} — run `disk --help` for available commands");
@@ -399,6 +446,30 @@ async fn run_import_state(args: ImportStateArgs) -> Result<()> {
         bytes = report.bytes_total,
         esc = report.escapes_blocked,
         dry = report.dry_run,
+    );
+    Ok(())
+}
+
+fn run_share_init(args: ShareInitArgs) -> Result<()> {
+    let written = share_init::append_share(
+        &args.config,
+        args.preset,
+        &args.name,
+        &args.path,
+        args.sign_key_ref.as_deref(),
+    )?;
+    tracing::info!(
+        share = %args.name,
+        preset = ?args.preset,
+        path = %args.path.display(),
+        config = %written.display(),
+        "share declared in disk.toml",
+    );
+    println!(
+        "share '{}' added to {} (preset={:?})",
+        args.name,
+        written.display(),
+        args.preset
     );
     Ok(())
 }
