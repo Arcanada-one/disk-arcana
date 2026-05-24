@@ -19,6 +19,12 @@ allow = [
     "Zlib",
     "CC0-1.0",
     "OpenSSL",
+    # webpki-roots@1.0.7+ ships the Mozilla CA bundle under CDLA-Permissive-2.0
+    # (the Linux Foundation's Community Data License Agreement). It allows
+    # unrestricted use, modification, and distribution of the data, so it sits
+    # comfortably with the rest of the permissive allowlist. Pulled in via
+    # reqwest → hyper-rustls.
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
 
