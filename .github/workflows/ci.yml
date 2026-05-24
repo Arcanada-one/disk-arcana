@@ -41,6 +41,8 @@ jobs:
           command: check licenses
       - name: ACL direction-spoofing lint (P4a Step 10)
         run: bash crates/disk-server/lints/no_branch_on_client_config.sh .
+      - name: REST loopback-bind lint (R14)
+        run: bash crates/disk-client/lints/check_loopback_bind.sh .
       - name: gitleaks
         # Run gitleaks directly via the upstream binary — gitleaks/gitleaks-action
         # requires a paid licence for organisation accounts.
