@@ -71,6 +71,7 @@ impl EnrollErrorKind {
     }
 }
 
+#[derive(Clone)]
 pub struct EnrollmentServiceImpl {
     pool: SqlitePool,
     audit: AuditEmitter,

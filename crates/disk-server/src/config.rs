@@ -5,6 +5,7 @@
 //! | Variable | Purpose |
 //! |---|---|
 //! | `DISK_BIND_ADDR` | gRPC bind address, e.g. `0.0.0.0:9443`. Default `127.0.0.1:9443`. |
+//! | `DISK_ENROLLMENT_BIND_ADDR` | TLS-only enrollment public listener address. Default `0.0.0.0:9445`. |
 //! | `DISK_DB_PATH` | SQLite database file. Use `:memory:` for ephemeral tests. |
 //! | `DISK_SYNC_ROOT` | Filesystem root where SyncService stores artefacts. |
 //! | `DISK_TLS_CERT_PATH` | PEM file with server certificate chain. |
@@ -43,6 +44,7 @@ pub enum ConfigError {
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     pub bind_addr: SocketAddr,
+    pub enrollment_bind_addr: SocketAddr,
     pub db_path: PathBuf,
     pub sync_root: PathBuf,
     pub tls_cert_path: PathBuf,
@@ -81,8 +83,17 @@ impl ServerConfig {
                     ConfigError::InvalidValue("DISK_HEALTH_BIND_ADDR", e.to_string())
                 })?;
 
+        let enrollment_bind_addr_raw = std::env::var("DISK_ENROLLMENT_BIND_ADDR")
+            .unwrap_or_else(|_| "0.0.0.0:9445".to_string());
+        let enrollment_bind_addr: SocketAddr = enrollment_bind_addr_raw
+            .parse()
+            .map_err(|e: std::net::AddrParseError| {
+                ConfigError::InvalidValue("DISK_ENROLLMENT_BIND_ADDR", e.to_string())
+            })?;
+
         Ok(Self {
             bind_addr,
+            enrollment_bind_addr,
             db_path: require_path("DISK_DB_PATH")?,
             sync_root: require_path("DISK_SYNC_ROOT")?,
             tls_cert_path: require_path("DISK_TLS_CERT_PATH")?,
@@ -131,6 +142,7 @@ mod tests {
     fn clear_env() {
         for v in [
             "DISK_BIND_ADDR",
+            "DISK_ENROLLMENT_BIND_ADDR",
             "DISK_DB_PATH",
             "DISK_SYNC_ROOT",
             "DISK_TLS_CERT_PATH",
@@ -244,5 +256,38 @@ mod tests {
             err,
             ConfigError::InvalidValue("DISK_HEALTH_BIND_ADDR", _)
         ));
+    }
+
+    #[test]
+    fn invalid_enrollment_bind_addr_fails() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_env();
+        set_required();
+        std::env::set_var("DISK_ENROLLMENT_BIND_ADDR", "not-a-socket");
+        let err = ServerConfig::from_env().unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::InvalidValue("DISK_ENROLLMENT_BIND_ADDR", _)
+        ));
+    }
+
+    #[test]
+    fn enrollment_bind_addr_defaults_to_9445() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_env();
+        set_required();
+        let cfg = ServerConfig::from_env().unwrap();
+        assert_eq!(cfg.enrollment_bind_addr.port(), 9445);
+        assert!(cfg.enrollment_bind_addr.ip().is_unspecified());
+    }
+
+    #[test]
+    fn enrollment_bind_addr_override_applied() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_env();
+        set_required();
+        std::env::set_var("DISK_ENROLLMENT_BIND_ADDR", "127.0.0.1:7777");
+        let cfg = ServerConfig::from_env().unwrap();
+        assert_eq!(cfg.enrollment_bind_addr.to_string(), "127.0.0.1:7777");
     }
 }

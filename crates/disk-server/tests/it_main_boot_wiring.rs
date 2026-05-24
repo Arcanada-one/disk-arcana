@@ -76,12 +76,17 @@ impl ServerFixture {
     }
 
     fn spawn_server(&self, bind_addr: &str) -> Command {
+        self.spawn_server_with(bind_addr, "127.0.0.1:0")
+    }
+
+    fn spawn_server_with(&self, bind_addr: &str, enrollment_bind_addr: &str) -> Command {
         let bin = env!("CARGO_BIN_EXE_disk-arcana-server");
         let mut cmd = Command::new(bin);
         cmd.env_clear()
             .env("PATH", std::env::var("PATH").unwrap_or_default())
             .env("RUST_LOG", "info")
             .env("DISK_BIND_ADDR", bind_addr)
+            .env("DISK_ENROLLMENT_BIND_ADDR", enrollment_bind_addr)
             .env("DISK_DB_PATH", &self.db_path)
             .env("DISK_SYNC_ROOT", &self.sync_root)
             .env("DISK_TLS_CERT_PATH", &self.tls_cert)
@@ -138,6 +143,7 @@ async fn boot_wiring_emits_f1_markers_and_shuts_down_clean() {
     let mut saw_tombstone = false;
     let mut saw_listening = false;
     let mut saw_acl_reload = false;
+    let mut saw_public_listening = false;
     let mut collected = String::new();
 
     let scan = async {
@@ -156,7 +162,15 @@ async fn boot_wiring_emits_f1_markers_and_shuts_down_clean() {
             if line.contains("disk-arcana-server listening") {
                 saw_listening = true;
             }
-            if saw_forwarder && saw_tombstone && saw_acl_reload && saw_listening {
+            if line.contains("enrollment public listener listening") {
+                saw_public_listening = true;
+            }
+            if saw_forwarder
+                && saw_tombstone
+                && saw_acl_reload
+                && saw_listening
+                && saw_public_listening
+            {
                 break;
             }
         }
@@ -181,6 +195,10 @@ async fn boot_wiring_emits_f1_markers_and_shuts_down_clean() {
         "ACL reload loop spawn marker missing; log:\n{collected}"
     );
     assert!(saw_listening, "listening marker missing; log:\n{collected}");
+    assert!(
+        saw_public_listening,
+        "enrollment public listener marker missing; log:\n{collected}"
+    );
 
     // Drain in background to avoid a stalled pipe interfering with shutdown.
     tokio::spawn(async move {
