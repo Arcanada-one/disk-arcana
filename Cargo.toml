@@ -34,7 +34,7 @@ clap        = { version = "4", features = ["derive"] }
 tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 axum       = "0.7"
-thiserror  = "1"
+thiserror  = "2"
 anyhow     = "1"
 rustls      = { version = "0.23", default-features = false, features = ["ring", "std"] }
 rustls-acme = { version = "0.12", features = ["tokio"] }
