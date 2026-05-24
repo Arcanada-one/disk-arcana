@@ -1,0 +1,69 @@
+# DISK-0006 R11 — systemd unit for Disk Arcana client.
+#
+# Install path: /etc/systemd/system/disk-arcana.service (owner root:root, mode 0644).
+# Enable: sudo systemctl enable --now disk-arcana
+# Logs: journalctl -u disk-arcana -f
+# Status: systemctl status disk-arcana
+#
+# Hardening: see `documentation/mandates/operational-resilience.md` —
+# ProtectHome + ProtectSystem flags block writes outside the declared
+# ReadWritePaths set, so any rogue write outside /var/lib/disk-arcana
+# fails closed.
+
+[Unit]
+Description=Disk Arcana client daemon (gRPC sync + loopback REST :9444)
+Documentation=https://github.com/Arcanada-one/disk-arcana
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/disk daemon start --foreground --config /etc/disk-arcana/disk.toml
+
+# Run as a dedicated unprivileged user; install script provisions it.
+User=disk-arcana
+Group=disk-arcana
+
+# Restart policy — launchd KeepAlive equivalent.
+Restart=on-failure
+RestartSec=10s
+StartLimitIntervalSec=120s
+StartLimitBurst=5
+
+# Working directory holds MetaDb + transient state.
+WorkingDirectory=/var/lib/disk-arcana
+
+# Environment.
+Environment=RUST_LOG=info
+
+# --- Hardening (systemd sandbox) ---
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectSystem=strict
+ProtectHome=tmpfs
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@mount @debug @cpu-emulation @keyring @module @raw-io @reboot @swap @obsolete
+# Read-only system trees; explicit writable carve-outs below.
+ReadOnlyPaths=/etc/disk-arcana
+ReadWritePaths=/var/lib/disk-arcana /var/log/disk-arcana
+
+# Loopback REST :9444 is internal — IPAddressDeny+Allow keep egress
+# limited to the gRPC server upstream (operator must specialise via
+# drop-in /etc/systemd/system/disk-arcana.service.d/upstream.conf).
+
+[Install]
+WantedBy=multi-user.target

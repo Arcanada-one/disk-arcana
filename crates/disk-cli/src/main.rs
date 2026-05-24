@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod daemon;
 mod share_init;
 
 use std::path::PathBuf;
@@ -47,6 +48,22 @@ enum Command {
 
     /// Manage shares declared in `disk.toml`.
     Share(ShareArgs),
+
+    /// Daemon lifecycle (foreground; launchd / systemd own background).
+    Daemon(DaemonArgs),
+}
+
+/// `disk daemon <subcmd>` — wrapper.
+#[derive(clap::Args, Debug)]
+pub struct DaemonArgs {
+    #[command(subcommand)]
+    pub command: DaemonCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DaemonCommand {
+    /// Run the daemon in the foreground (the only supported mode in v0.0.1).
+    Start(daemon::DaemonStartArgs),
 }
 
 /// `disk share <subcmd>` — wrapper for share management subcommands.
@@ -240,6 +257,9 @@ async fn main() -> Result<()> {
             AdminCommand::PendingToken(p) => run_admin_pending_token(p).await,
         },
         Some(Command::ImportState(args)) => run_import_state(args).await,
+        Some(Command::Daemon(args)) => match args.command {
+            DaemonCommand::Start(s) => daemon::run_start(s).await,
+        },
         Some(Command::Share(args)) => match args.command {
             ShareCommand::Init(s) => run_share_init(s),
         },

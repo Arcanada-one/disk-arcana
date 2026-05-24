@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  DISK-0006 R11 — launchd LaunchDaemon for Disk Arcana client.
+
+  Install path: /Library/LaunchDaemons/com.arcanada.disk-arcana.plist
+  Owner: root:wheel, mode 0644 (launchd refuses world-writable plists).
+  Load: sudo launchctl bootstrap system /Library/LaunchDaemons/com.arcanada.disk-arcana.plist
+  Unload: sudo launchctl bootout system /Library/LaunchDaemons/com.arcanada.disk-arcana.plist
+  Status: sudo launchctl print system/com.arcanada.disk-arcana
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.arcanada.disk-arcana</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/disk</string>
+        <string>daemon</string>
+        <string>start</string>
+        <string>--foreground</string>
+        <string>--config</string>
+        <string>/etc/disk-arcana/disk.toml</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/var/log/disk-arcana/disk-daemon.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/var/log/disk-arcana/disk-daemon.err.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>RUST_LOG</key>
+        <string>info</string>
+        <key>HOME</key>
+        <string>/var/lib/disk-arcana</string>
+    </dict>
+
+    <key>UserName</key>
+    <string>root</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>WorkingDirectory</key>
+    <string>/var/lib/disk-arcana</string>
+</dict>
+</plist>
