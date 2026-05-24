@@ -6,36 +6,28 @@
 # they trip the default rule set.
 #
 # The allowlist below extends the default `gitleaks` rules (no rules
-# disabled). Each entry is narrow and tied to a specific test fixture; the
-# rationale is documented inline so a future audit can re-validate.
+# disabled). Each path/regex pair is tied to a specific test fixture; the
+# rationale is documented in the commit that introduced the entry.
+#
+# Compatibility note: gitleaks v8.18+ supports `[[allowlists]]` (array of
+# tables); older v8.x only supports singular `[allowlist]`. This file uses
+# singular form so it works with both CI (v8.21.2) and local (v8.30.1)
+# scanners.
 
 [extend]
 useDefault = true
 
-[[allowlists]]
-description = "Bootstrap-file parser unit test — deterministic placeholder token + dummy PEM body. Lives inside `#[cfg(test)]` and never compiles into the production binary."
+[allowlist]
+description = "Test fixtures: deterministic placeholder tokens, dummy PEM bodies, Vault Transit paths. All entries live inside `#[cfg(test)]` modules or under `tests/` and never compile into the production binary."
 paths = [
+    # bootstrap-file parser unit test — `token = "0123456789abcdef"` hex
+    # placeholder + `ca_cert_pem = "-----BEGIN CERTIFICATE-----\\nMIIB...\\n..."`
+    # dummy body.
     '''crates/disk-client/src/enrollment\.rs''',
-]
-regexes = [
-    '''token = "0123456789abcdef"''',
-    '''ca_cert_pem = "-----BEGIN CERTIFICATE-----\\nMIIB\.\.\.\\n-----END CERTIFICATE-----\\n"''',
-]
-
-[[allowlists]]
-description = "Filesystem keystore round-trip unit test — literal `\"fake\"` body inside PEM markers. The string `fake` is the entire 'secret' (4 chars). Lives inside `#[cfg(test)]`."
-paths = [
+    # keystore round-trip unit test — literal `"fake"` body inside PEM markers.
     '''crates/disk-client/src/keychain\.rs''',
-]
-regexes = [
-    '''"-----BEGIN PRIVATE KEY-----\\nfake\\n-----END PRIVATE KEY-----"''',
-]
-
-[[allowlists]]
-description = "Publisher signature integration tests — `vault_key_ref: \"transit/keys/publisher\"` is a Vault Transit *path*, not a secret. No key material; Vault enforces ACL on the path itself. Test file under `crates/disk-server/tests/`."
-paths = [
+    # publisher signature integration tests — `vault_key_ref` is a Vault Transit
+    # *path* (`transit/keys/publisher`), not a secret; Vault enforces ACL on
+    # the path itself.
     '''crates/disk-server/tests/publisher_signature_success\.rs''',
-]
-regexes = [
-    '''vault_key_ref: "transit/keys/publisher"''',
 ]
