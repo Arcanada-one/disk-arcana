@@ -1,0 +1,10 @@
+[node]
+id = "dev-server"
+
+[node.default]
+intended_direction = "receive_only"
+
+[server]
+address = "disk.arcanada.one:9443"
+client_cert = "/etc/disk-arcana/client.crt"
+client_key  = "/etc/disk-arcana/client.key"

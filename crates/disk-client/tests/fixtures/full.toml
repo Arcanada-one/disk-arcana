@@ -1,0 +1,45 @@
+[node]
+id = "arcana-ai"
+display_name = "Arcana AI server"
+
+[node.default]
+intended_direction = "bidirectional"
+
+[server]
+address = "disk.arcanada.one:9443"
+tls = "auto"
+client_cert = "/etc/disk-arcana/client.crt"
+client_key  = "/etc/disk-arcana/client.key"
+server_ca   = "/etc/disk-arcana/server-ca.crt"
+
+[[share]]
+name = "hermes-artefacts"
+path = "/home/hermes/.hermes/cache"
+intended_direction = "publisher"
+
+[share.filter]
+mode = "whitelist"
+extensions = ["png", "jpg", "pdf", "docx", "md", "txt"]
+include = ["images/**", "documents/**"]
+exclude = [".env", "logs/**", "memories/**"]
+
+[share.publisher]
+sign_key_ref = "vault:transit/keys/disk-arcana-arcana-ai-publisher"
+quarantine_on_failure = true
+
+[[share]]
+name = "wiki"
+path = "/home/operator/wiki"
+
+[share.filter]
+mode = "whitelist"
+extensions = ["md", "txt", "html", "pdf", "json", "yaml"]
+
+[[share]]
+name = "downloads"
+path = "/home/operator/downloads"
+intended_direction = "receive_only"
+
+[share.filter]
+mode = "blacklist"
+exclude = ["*.tmp", "*.partial"]
