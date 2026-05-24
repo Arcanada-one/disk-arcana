@@ -614,6 +614,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "axum 0.7.9",
+ "blake3",
  "disk-core",
  "disk-proto",
  "hex",
@@ -636,6 +637,7 @@ dependencies = [
  "tonic",
  "tracing",
  "tracing-subscriber",
+ "walkdir",
 ]
 
 [[package]]

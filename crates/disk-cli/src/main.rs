@@ -36,6 +36,35 @@ enum Command {
 
     /// Operator-side admin commands (require `DISK_ADMIN_TOKEN`).
     Admin(AdminArgs),
+
+    /// Seed the local SQLite `MetaDb` from an existing filesystem tree —
+    /// the DISK-RB-003 cutover entry point for migrating off the bash MVP.
+    ImportState(ImportStateArgs),
+}
+
+/// `disk import-state` — seed MetaDb without driving any network sync.
+#[derive(clap::Args, Debug)]
+pub struct ImportStateArgs {
+    /// Directory holding the legacy rsync / bash-MVP layout.
+    #[arg(long)]
+    pub from_rsync: PathBuf,
+
+    /// Share name — free-form label until disk.toml lookup lands in R10.
+    #[arg(long = "as-share")]
+    pub as_share: String,
+
+    /// Path to the SQLite metadata database the daemon will use.
+    #[arg(long, default_value = "/var/lib/disk-arcana/meta.db")]
+    pub db_path: PathBuf,
+
+    /// Node ID recorded as the writer of every seeded row. Defaults to
+    /// hostname (the same fallback `disk enroll` uses).
+    #[arg(long)]
+    pub node_id: Option<String>,
+
+    /// Print the plan but do not write any DB rows.
+    #[arg(long, default_value_t = false)]
+    pub dry_run: bool,
 }
 
 /// Arguments for the `sync` subcommand.
@@ -166,6 +195,7 @@ async fn main() -> Result<()> {
         Some(Command::Admin(args)) => match args.command {
             AdminCommand::PendingToken(p) => run_admin_pending_token(p).await,
         },
+        Some(Command::ImportState(args)) => run_import_state(args).await,
         None => {
             let version = env!("CARGO_PKG_VERSION");
             println!("disk v{version} — run `disk --help` for available commands");
@@ -311,6 +341,64 @@ async fn run_admin_pending_token(args: PendingTokenArgs) -> Result<()> {
     println!(
         "token={} expires_at_unix_ms={} hostname={}",
         token_hex, resp.expires_at_ms, args.hostname
+    );
+    Ok(())
+}
+
+async fn run_import_state(args: ImportStateArgs) -> Result<()> {
+    use disk_client::{import_state, ImportError};
+    use disk_core::MetaDb;
+
+    let node_id = args.node_id.unwrap_or_else(default_hostname);
+    let from = args.from_rsync.clone();
+
+    if !from.exists() {
+        return Err(anyhow!(
+            "--from-rsync path does not exist: {}",
+            from.display()
+        ));
+    }
+
+    if let Some(parent) = args.db_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("create MetaDb parent dir {}", parent.display()))?;
+        }
+    }
+    let db = MetaDb::open(&args.db_path)
+        .await
+        .with_context(|| format!("open MetaDb at {}", args.db_path.display()))?;
+
+    tracing::info!(
+        share = %args.as_share,
+        from = %from.display(),
+        db_path = %args.db_path.display(),
+        dry_run = args.dry_run,
+        "disk import-state seeding"
+    );
+
+    let report = import_state(&from, &node_id, &db, args.dry_run)
+        .await
+        .map_err(|e: ImportError| anyhow!("import-state failed: {e}"))?;
+
+    if args.dry_run {
+        for entry in &report.entries {
+            println!(
+                "DRY {hash} {size:>10}  {path}",
+                hash = hex::encode(entry.content_hash),
+                size = entry.size,
+                path = entry.relative_path.display(),
+            );
+        }
+    }
+    println!(
+        "import-state: share={share} files_seen={seen} files_imported={imp} bytes_total={bytes} escapes_blocked={esc} dry_run={dry}",
+        share = args.as_share,
+        seen = report.files_seen,
+        imp = report.files_imported,
+        bytes = report.bytes_total,
+        esc = report.escapes_blocked,
+        dry = report.dry_run,
     );
     Ok(())
 }

@@ -49,6 +49,7 @@ reqwest     = { version = "0.12", default-features = false, features = ["rustls-
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 keyring     = "3"
 time        = { version = "0.3", default-features = false, features = ["std", "formatting", "macros"] }
+walkdir     = "2.5"
 
 [profile.release]
 lto             = "fat"
