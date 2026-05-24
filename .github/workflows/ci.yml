@@ -36,7 +36,7 @@ jobs:
           # Rationale lives in .audit.toml at the repo root.
           ignore: RUSTSEC-2023-0071
       - name: Install cargo-deny
-        uses: EmbarkStudios/cargo-deny-action@v1
+        uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check licenses
       - name: ACL direction-spoofing lint (P4a Step 10)
