@@ -16,15 +16,15 @@ env:
 jobs:
   lint:
     name: Lint (fmt + clippy + audit + deny)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Verify protoc
+        run: protoc --version
       - name: cargo fmt
         run: cargo fmt --all -- --check
       - name: cargo clippy
@@ -53,33 +53,19 @@ jobs:
           /tmp/gitleaks detect --source . --no-banner --redact --verbose --config .gitleaks.toml
 
   test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    name: Test (linux)
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install protoc (linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      - name: Install protoc (macos)
-        if: runner.os == 'macOS'
-        run: brew install protobuf
-      # cargo audit lives in the Lint job (rustsec/audit-check@v1) which honours
-      # .audit.toml ignore list. Duplicating it here via `cargo install cargo-audit`
-      # bypasses that config and re-flags suppressed advisories (e.g. RUSTSEC-2023-0071
-      # in unused sqlx-mysql). Single source of truth: Lint job.
-      - name: Install cargo-llvm-cov (linux)
-        if: runner.os == 'Linux'
+      - name: Verify protoc
+        run: protoc --version
+      - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov --locked --quiet
       - name: cargo test
         run: cargo test --workspace --all-features
       - name: Coverage gate (≥80 % lines, DISK-0032)
-        if: runner.os == 'Linux'
         run: cargo llvm-cov --workspace --all-features --fail-under-lines 80
 
   build:
@@ -91,30 +77,18 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
             use_cross: true
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
             use_cross: true
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            use_cross: false
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            use_cross: false
-    runs-on: ${{ matrix.os }}
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      - name: Install protoc (linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      - name: Install protoc (macos)
-        if: runner.os == 'macOS'
-        run: brew install protobuf
+      - name: Verify protoc
+        run: protoc --version
       - name: Install cross
         if: matrix.use_cross
         run: cargo install cross --locked
