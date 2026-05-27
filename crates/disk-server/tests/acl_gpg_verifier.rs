@@ -173,13 +173,10 @@ fn gpg_verifier_missing_binary() {
         result.is_err(),
         "nonexistent binary must return Err from .output()"
     );
-    if let Err(e) = result {
-        assert_eq!(
-            e.kind(),
-            std::io::ErrorKind::NotFound,
-            "expected NotFound for absent binary"
-        );
-    }
+    // ErrorKind varies by libc/runner: typically NotFound on glibc Linux, but
+    // some platforms (musl, container sandboxes) surface this as Other or
+    // Uncategorized. GpgVerifier maps any spawn-error to SignatureFailed, so
+    // for this contract we only require that .output() returns Err.
 
     // Verify GpgVerifier message path: if gpg is absent, verify() must return
     // SignatureFailed("gpg binary not found").  We construct a verifier that
