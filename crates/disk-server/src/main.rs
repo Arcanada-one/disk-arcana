@@ -27,6 +27,7 @@ use disk_server::{
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
+use tokio::sync::watch;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -121,7 +122,10 @@ async fn main() -> anyhow::Result<()> {
         enrollment_impl = enrollment_impl.with_admin_token(tok);
     }
 
-    // gRPC service wrappers.
+    // gRPC service wrappers. EnrollmentServiceImpl is Clone (Arc-wrapped fields)
+    // so we can host the same backing service on both listeners. Admin RPCs
+    // remain gated by `require_admin()` metadata check — the public listener
+    // returns PermissionDenied because external clients lack `x-disk-admin-token`.
     let auth_svc = AuthServiceServer::new(AuthServiceImpl::new(auth_store.clone()));
     let sync_svc = SyncServiceServer::new(SyncServiceImpl::with_acl(
         auth_store.clone(),
@@ -129,12 +133,14 @@ async fn main() -> anyhow::Result<()> {
         acl_enforcer.clone(),
         audit_emitter.clone(),
     ));
-    let enroll_svc = EnrollmentServiceServer::new(enrollment_impl);
+    let enroll_svc = EnrollmentServiceServer::new(enrollment_impl.clone());
+    let enroll_svc_public = EnrollmentServiceServer::new(enrollment_impl);
 
-    // mTLS: tonic-native identity + client CA root. The `tls13_mtls_server_config`
-    // rustls helper remains in `disk_server::tls` for non-tonic consumers, but
-    // here we prefer the tonic-native code path for graceful shutdown integration.
-    let tls = build_tls(&cfg)?;
+    // Dual TLS configs: mTLS (with client_ca_root) for the private listener,
+    // TLS-only (no client_ca_root) for the public enrollment listener so cold-
+    // boot nodes without client certs can call `Enroll`.
+    let tls_mtls = build_tls(&cfg)?;
+    let tls_public = build_tls_public_only(&cfg)?;
 
     // Install signal handlers BEFORE logging "listening". The async runtime
     // does not poll the shutdown future until serve_with_shutdown enters its
@@ -143,16 +149,43 @@ async fn main() -> anyhow::Result<()> {
     // ungracefully (test asserts WEXITSTATUS == 0).
     let shutdown = make_shutdown_future().await?;
 
+    // Fan out a single shutdown event to both listeners via a watch channel.
+    // tonic's `serve_with_shutdown` consumes the future by-value, so the
+    // shared signal must be replicated; using `watch::channel` keeps the
+    // pattern self-contained without pulling in `futures::FutureExt::shared`.
+    let (shutdown_tx, _) = watch::channel(false);
+    let mut rx_mtls = shutdown_tx.subscribe();
+    let mut rx_public = shutdown_tx.subscribe();
+    tokio::spawn(async move {
+        shutdown.await;
+        let _ = shutdown_tx.send(true);
+    });
+
     tracing::info!(addr = %cfg.bind_addr, "disk-arcana-server listening");
-    Server::builder()
-        .tls_config(tls)
-        .context("apply ServerTlsConfig")?
+    tracing::info!(
+        addr = %cfg.enrollment_bind_addr,
+        "enrollment public listener listening"
+    );
+
+    let srv_mtls = Server::builder()
+        .tls_config(tls_mtls)
+        .context("apply ServerTlsConfig (mTLS)")?
         .add_service(auth_svc)
         .add_service(sync_svc)
         .add_service(enroll_svc)
-        .serve_with_shutdown(cfg.bind_addr, shutdown)
-        .await
-        .context("tonic server terminated with error")?;
+        .serve_with_shutdown(cfg.bind_addr, async move {
+            let _ = rx_mtls.changed().await;
+        });
+
+    let srv_public = Server::builder()
+        .tls_config(tls_public)
+        .context("apply ServerTlsConfig (public)")?
+        .add_service(enroll_svc_public)
+        .serve_with_shutdown(cfg.enrollment_bind_addr, async move {
+            let _ = rx_public.changed().await;
+        });
+
+    tokio::try_join!(srv_mtls, srv_public).context("tonic listeners terminated with error")?;
 
     tracing::info!("disk-arcana-server shutdown complete");
     Ok(())
@@ -180,6 +213,19 @@ fn build_tls(cfg: &ServerConfig) -> anyhow::Result<ServerTlsConfig> {
     let identity = Identity::from_pem(cert_pem, key_pem);
     let ca = Certificate::from_pem(ca_pem);
     Ok(ServerTlsConfig::new().identity(identity).client_ca_root(ca))
+}
+
+/// TLS-only server config (no `client_ca_root`) for the public enrollment
+/// listener. Cold-boot clients without an Arcanada-issued client certificate
+/// rely on `EnrollmentService.Enroll`'s opaque-token bearer for authentication,
+/// not on mTLS.
+fn build_tls_public_only(cfg: &ServerConfig) -> anyhow::Result<ServerTlsConfig> {
+    let cert_pem = std::fs::read(&cfg.tls_cert_path)
+        .with_context(|| format!("read {}", cfg.tls_cert_path.display()))?;
+    let key_pem = std::fs::read(&cfg.tls_key_path)
+        .with_context(|| format!("read {}", cfg.tls_key_path.display()))?;
+    let identity = Identity::from_pem(cert_pem, key_pem);
+    Ok(ServerTlsConfig::new().identity(identity))
 }
 
 /// Install signal handlers synchronously and return a future that resolves on
