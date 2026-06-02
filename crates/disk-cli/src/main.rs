@@ -1,8 +1,10 @@
 #![forbid(unsafe_code)]
 
+mod commands;
 mod daemon;
 mod share_init;
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
@@ -51,6 +53,12 @@ enum Command {
 
     /// Daemon lifecycle (foreground; launchd / systemd own background).
     Daemon(DaemonArgs),
+
+    /// Show the running daemon's status snapshot (GET loopback /status).
+    Status(StatusArgs),
+
+    /// Inspect or manage the `disk.toml` configuration.
+    Config(ConfigArgs),
 }
 
 /// `disk daemon <subcmd>` — wrapper.
@@ -64,6 +72,47 @@ pub struct DaemonArgs {
 pub enum DaemonCommand {
     /// Run the daemon in the foreground (the only supported mode in v0.0.1).
     Start(daemon::DaemonStartArgs),
+}
+
+/// `disk status` — query the loopback REST `/status` endpoint.
+#[derive(clap::Args, Debug)]
+pub struct StatusArgs {
+    /// Daemon REST address. Defaults to `127.0.0.1:9444`.
+    #[arg(long)]
+    pub addr: Option<SocketAddr>,
+}
+
+/// `disk config <subcmd>` — wrapper for config subcommands.
+#[derive(clap::Args, Debug)]
+pub struct ConfigArgs {
+    #[command(subcommand)]
+    pub command: ConfigCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ConfigCommand {
+    /// Statically load + validate a `disk.toml` (no daemon required).
+    Validate(ConfigValidateArgs),
+
+    /// Ask the running daemon to hot-reload its config (POST /config/reload).
+    Reload(ConfigReloadArgs),
+}
+
+/// `disk config validate [--file <path>]`.
+#[derive(clap::Args, Debug)]
+pub struct ConfigValidateArgs {
+    /// Path to the `disk.toml` to validate. Defaults to
+    /// `/etc/disk-arcana/disk.toml`.
+    #[arg(long)]
+    pub file: Option<PathBuf>,
+}
+
+/// `disk config reload [--addr <ip:port>]`.
+#[derive(clap::Args, Debug)]
+pub struct ConfigReloadArgs {
+    /// Daemon REST address. Defaults to `127.0.0.1:9444`.
+    #[arg(long)]
+    pub addr: Option<SocketAddr>,
 }
 
 /// `disk share <subcmd>` — wrapper for share management subcommands.
@@ -262,6 +311,11 @@ async fn main() -> Result<()> {
         },
         Some(Command::Share(args)) => match args.command {
             ShareCommand::Init(s) => run_share_init(s),
+        },
+        Some(Command::Status(args)) => commands::run_status(args.addr).await,
+        Some(Command::Config(args)) => match args.command {
+            ConfigCommand::Validate(c) => commands::run_config_validate(c.file),
+            ConfigCommand::Reload(c) => commands::run_config_reload(c.addr).await,
         },
         None => {
             let version = env!("CARGO_PKG_VERSION");

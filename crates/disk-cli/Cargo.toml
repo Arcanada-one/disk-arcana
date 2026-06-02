@@ -21,9 +21,9 @@ tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow             = { workspace = true }
 hex                = "0.4"
+reqwest            = { workspace = true }
 
 [dev-dependencies]
 tempfile           = "3"
-reqwest            = { workspace = true }
 serde              = { workspace = true }
 libc               = "0.2"
