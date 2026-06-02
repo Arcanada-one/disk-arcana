@@ -12,7 +12,8 @@ ignore = [
     # Tracked upstream: https://github.com/launchbadge/sqlx/issues/2876
     "RUSTSEC-2023-0071",
 
-    # RUSTSEC-2025-0134 (rustls-pemfile unmaintained) suppression removed in DISK-0004:
-    # tonic 0.13 no longer pulls rustls-pemfile as a direct dependency.
-    # If it resurfaces transitively at a flagged version, re-evaluate then.
+    # RUSTSEC-2025-0134 (rustls-pemfile unmaintained) is intentionally NOT
+    # suppressed: the tonic 0.13 upgrade removed rustls-pemfile from the
+    # dependency tree entirely, so the advisory matches no crate. Re-add a
+    # suppression here only if it resurfaces transitively at a flagged version.
 ]

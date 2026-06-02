@@ -37,7 +37,11 @@ yanked = "warn"
 # See `.audit.toml` for full rationale.
 ignore = [
     "RUSTSEC-2023-0071",  # rsa Marvin — only via sqlx-mysql, never enabled.
-    "RUSTSEC-2025-0134",  # rustls-pemfile unmaintained — drops with tonic upgrade.
+    # RUSTSEC-2025-0134 (rustls-pemfile unmaintained) dropped: the tonic 0.13
+    # upgrade removed rustls-pemfile from the dependency tree entirely, so the
+    # advisory no longer matches any crate. Keeping the suppression made
+    # cargo-deny emit `advisory-not-detected` and would silently mask the
+    # advisory if it ever resurfaced transitively. Re-add only if it returns.
 ]
 
 [sources]
