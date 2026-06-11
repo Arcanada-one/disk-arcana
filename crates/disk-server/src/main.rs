@@ -22,8 +22,8 @@ use disk_server::audit;
 use disk_server::enrollment::ca_client::{CaClient, HttpCaClient, StubCaClient};
 use disk_server::multi_node;
 use disk_server::{
-    AclEnforcer, AuditEmitter, AuthServiceImpl, AuthStore, EnrollmentServiceImpl, NoopVerifier,
-    ServerConfig, SyncServiceImpl,
+    AclEnforcer, AuditEmitter, AuthServiceImpl, AuthStore, EnrollmentServiceImpl, GpgVerifier,
+    NoopVerifier, ServerConfig, SyncServiceImpl,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
@@ -76,16 +76,15 @@ async fn main() -> anyhow::Result<()> {
     // YAML load.
     let acl_enforcer = AclEnforcer::new_unhealthy();
 
-    // ACL hot-reload watcher (filesystem + SIGHUP). NoopVerifier today; a
-    // production signing-verifier (e.g. GpgVerifier) is wired in a later round
-    // of DISK-0006 once the operator chooses the signing toolchain.
-    let verifier = Arc::new(NoopVerifier);
-    let _reload_handle = start_reload_loop(
-        cfg.acl_yaml_path.clone(),
-        acl_enforcer.clone(),
-        audit_emitter.clone(),
-        verifier,
-    );
+    // ACL hot-reload watcher (filesystem + SIGHUP).
+    //
+    // Production: `DISK_ACL_SIG_PATH` must be set to the detached `.asc`
+    // signature file. When absent and `DISK_USE_STUB_CA` is not `1`, the
+    // server refuses to start (fail-closed: public server must verify ACL).
+    //
+    // Dev/test: set `DISK_USE_STUB_CA=1` to allow NoopVerifier. Never use
+    // NoopVerifier in a deployment reachable from the public internet.
+    let _reload_handle = build_reload_handle(&cfg, acl_enforcer.clone(), audit_emitter.clone());
     tracing::info!("acl reload loop spawned");
 
     // F-1: Ops Bot audit forwarder. `spawn` returns a no-op `Forwarder` when
@@ -141,7 +140,16 @@ async fn main() -> anyhow::Result<()> {
     // select loop; between the listening log and the first poll, a stray
     // SIGTERM would otherwise be handled by libc default and kill the process
     // ungracefully (test asserts WEXITSTATUS == 0).
-    let shutdown = make_shutdown_future().await?;
+    let (grpc_shutdown, health_shutdown) = make_shutdown_futures().await?;
+
+    // Health HTTP server — plain HTTP on DISK_HEALTH_BIND_ADDR (default 0.0.0.0:9446).
+    // Runs concurrently with the gRPC server; both shut down on SIGTERM/SIGINT.
+    let health_addr = cfg.health_bind_addr;
+    let _health_task = tokio::spawn(async move {
+        if let Err(e) = disk_server::health::serve(health_addr, health_shutdown).await {
+            tracing::error!(error = %e, "health server exited with error");
+        }
+    });
 
     tracing::info!(addr = %cfg.bind_addr, "disk-arcana-server listening");
     Server::builder()
@@ -150,12 +158,55 @@ async fn main() -> anyhow::Result<()> {
         .add_service(auth_svc)
         .add_service(sync_svc)
         .add_service(enroll_svc)
-        .serve_with_shutdown(cfg.bind_addr, shutdown)
+        .serve_with_shutdown(cfg.bind_addr, grpc_shutdown)
         .await
         .context("tonic server terminated with error")?;
 
     tracing::info!("disk-arcana-server shutdown complete");
     Ok(())
+}
+
+/// Choose the ACL signature verifier based on config and start the reload loop.
+///
+/// - `DISK_ACL_SIG_PATH` set → GpgVerifier (production path).
+/// - `DISK_ACL_SIG_PATH` absent + `DISK_USE_STUB_CA=1` → NoopVerifier (dev only).
+/// - `DISK_ACL_SIG_PATH` absent + `DISK_USE_STUB_CA` unset → **panic** (fail-closed).
+fn build_reload_handle(
+    cfg: &ServerConfig,
+    enforcer: AclEnforcer,
+    audit: AuditEmitter,
+) -> disk_server::ReloadHandle {
+    match cfg.acl_sig_path.clone() {
+        Some(sig_path) => {
+            let mut v = GpgVerifier::new(sig_path);
+            if let Some(ref gnupghome) = cfg.acl_gnupghome {
+                v = v.with_gnupghome(gnupghome.clone());
+            }
+            tracing::info!(
+                acl.verifier = "GpgVerifier",
+                "acl signature verification active"
+            );
+            start_reload_loop(cfg.acl_yaml_path.clone(), enforcer, audit, Arc::new(v))
+        }
+        None => {
+            if !cfg.use_stub_ca {
+                panic!(
+                    "DISK_ACL_SIG_PATH must be set in production. \
+                     Set DISK_USE_STUB_CA=1 only for local development."
+                );
+            }
+            tracing::warn!(
+                acl.verifier = "NoopVerifier",
+                "ACL signature verification DISABLED (dev mode)"
+            );
+            start_reload_loop(
+                cfg.acl_yaml_path.clone(),
+                enforcer,
+                audit,
+                Arc::new(NoopVerifier),
+            )
+        }
+    }
 }
 
 fn init_tracing() {
@@ -182,31 +233,45 @@ fn build_tls(cfg: &ServerConfig) -> anyhow::Result<ServerTlsConfig> {
     Ok(ServerTlsConfig::new().identity(identity).client_ca_root(ca))
 }
 
-/// Install signal handlers synchronously and return a future that resolves on
-/// the first SIGTERM or SIGINT. Installation happens here (sync) so the kernel
-/// queues signals into the streams before the future is awaited — closing the
-/// window where a stray SIGTERM between «listening» log and the first poll of
-/// the future would invoke libc's default handler and kill the process.
+type ShutdownFuture = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>;
+
+/// Install signal handlers synchronously and return two shutdown futures — one
+/// for the gRPC server and one for the health HTTP server. Both resolve on the
+/// first SIGTERM or SIGINT. Signal streams are installed here (sync) so the
+/// kernel queues signals before the futures are awaited, closing the window
+/// where a stray SIGTERM would invoke libc's default handler.
 #[cfg(unix)]
-async fn make_shutdown_future(
-) -> anyhow::Result<std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>> {
+async fn make_shutdown_futures() -> anyhow::Result<(ShutdownFuture, ShutdownFuture)> {
     use tokio::signal::unix::{signal, SignalKind};
     let mut sigterm = signal(SignalKind::terminate()).context("install SIGTERM handler")?;
     let mut sigint = signal(SignalKind::interrupt()).context("install SIGINT handler")?;
-    Ok(Box::pin(async move {
+
+    // Broadcast the signal to both futures via a oneshot channel.
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    let grpc_shutdown: ShutdownFuture = Box::pin(async move {
+        let _ = rx.await;
+    });
+    let health_shutdown: ShutdownFuture = Box::pin(async move {
         tokio::select! {
             _ = sigterm.recv() => tracing::info!("SIGTERM received, draining"),
-            _ = sigint.recv() => tracing::info!("SIGINT received, draining"),
+            _ = sigint.recv()  => tracing::info!("SIGINT received, draining"),
         }
-    }))
+        let _ = tx.send(());
+    });
+    Ok((grpc_shutdown, health_shutdown))
 }
 
 #[cfg(not(unix))]
-async fn make_shutdown_future(
-) -> anyhow::Result<std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>> {
-    Ok(Box::pin(async {
+async fn make_shutdown_futures() -> anyhow::Result<(ShutdownFuture, ShutdownFuture)> {
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    let grpc_shutdown: ShutdownFuture = Box::pin(async move {
+        let _ = rx.await;
+    });
+    let health_shutdown: ShutdownFuture = Box::pin(async move {
         if let Err(e) = tokio::signal::ctrl_c().await {
             tracing::error!(error = %e, "ctrl_c handler failed; shutting down anyway");
         }
-    }))
+        let _ = tx.send(());
+    });
+    Ok((grpc_shutdown, health_shutdown))
 }

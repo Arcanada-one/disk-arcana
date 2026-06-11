@@ -11,6 +11,7 @@ pub mod audit;
 pub mod auth;
 pub mod config;
 pub mod enrollment;
+pub mod health;
 pub mod middleware;
 pub mod multi_node;
 pub mod publisher;

@@ -1,9 +1,5 @@
 //! Server configuration loaded from environment variables.
 //!
-//! DISK-0006 R1 — production server bootstrap. Earlier rounds had no `main.rs`
-//! consumer; tests built bootstrap inline. This module is the single source of
-//! truth for runtime parameters the binary needs.
-//!
 //! ### Required environment variables
 //!
 //! | Variable | Purpose |
@@ -23,6 +19,9 @@
 //! | `OPS_BOT_URL` / `OPS_BOT_KEY` | Forwarder destination. Without `OPS_BOT_KEY` forwarder runs no-op. |
 //! | `DISK_ADMIN_TOKEN` | Override for the admin metadata token (enrollment helpers). |
 //! | `DISK_USE_STUB_CA=1` | Force `StubCaClient` instead of `HttpCaClient::from_env`. |
+//! | `DISK_ACL_SIG_PATH` | Path to the detached `.asc` GPG signature for the ACL YAML (production). When absent and `DISK_USE_STUB_CA` is not `1`, the binary panics (fail-closed). |
+//! | `DISK_ACL_GNUPGHOME` | Override `GNUPGHOME` for the GPG verifier. |
+//! | `DISK_HEALTH_BIND_ADDR` | HTTP health listener bind address. Default `0.0.0.0:9446`. |
 //!
 //! Missing required vars surface as `ConfigError::MissingEnv` so the binary
 //! refuses to start (fail-closed per Appendix A).
@@ -50,6 +49,13 @@ pub struct ServerConfig {
     pub tls_key_path: PathBuf,
     pub tls_ca_path: PathBuf,
     pub acl_yaml_path: PathBuf,
+    /// Path to detached `.asc` GPG signature for the ACL YAML. `None` only
+    /// when `DISK_USE_STUB_CA=1` (dev/test mode); production must set this.
+    pub acl_sig_path: Option<PathBuf>,
+    /// Optional GNUPGHOME override passed to the GPG verifier subprocess.
+    pub acl_gnupghome: Option<PathBuf>,
+    /// HTTP health listener (plain HTTP, proxied via Cloudflare). Default `0.0.0.0:9446`.
+    pub health_bind_addr: SocketAddr,
     pub ops_bot_url: Option<String>,
     pub admin_token: Option<String>,
     pub use_stub_ca: bool,
@@ -66,6 +72,15 @@ impl ServerConfig {
                     ConfigError::InvalidValue("DISK_BIND_ADDR", e.to_string())
                 })?;
 
+        let health_bind_raw =
+            std::env::var("DISK_HEALTH_BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:9446".to_string());
+        let health_bind_addr: SocketAddr =
+            health_bind_raw
+                .parse()
+                .map_err(|e: std::net::AddrParseError| {
+                    ConfigError::InvalidValue("DISK_HEALTH_BIND_ADDR", e.to_string())
+                })?;
+
         Ok(Self {
             bind_addr,
             db_path: require_path("DISK_DB_PATH")?,
@@ -74,6 +89,9 @@ impl ServerConfig {
             tls_key_path: require_path("DISK_TLS_KEY_PATH")?,
             tls_ca_path: require_path("DISK_TLS_CA_PATH")?,
             acl_yaml_path: require_path("DISK_ACL_YAML_PATH")?,
+            acl_sig_path: opt_path("DISK_ACL_SIG_PATH"),
+            acl_gnupghome: opt_path("DISK_ACL_GNUPGHOME"),
+            health_bind_addr,
             ops_bot_url: std::env::var("OPS_BOT_URL").ok().filter(|s| !s.is_empty()),
             admin_token: std::env::var("DISK_ADMIN_TOKEN")
                 .ok()
@@ -89,6 +107,13 @@ fn require_path(var: &'static str) -> Result<PathBuf, ConfigError> {
         return Err(ConfigError::MissingEnv(var));
     }
     Ok(PathBuf::from(raw))
+}
+
+fn opt_path(var: &'static str) -> Option<PathBuf> {
+    std::env::var(var)
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
 }
 
 #[cfg(test)]
@@ -112,6 +137,9 @@ mod tests {
             "DISK_TLS_KEY_PATH",
             "DISK_TLS_CA_PATH",
             "DISK_ACL_YAML_PATH",
+            "DISK_ACL_SIG_PATH",
+            "DISK_ACL_GNUPGHOME",
+            "DISK_HEALTH_BIND_ADDR",
             "DISK_ADMIN_TOKEN",
             "DISK_USE_STUB_CA",
             "OPS_BOT_URL",
@@ -168,5 +196,53 @@ mod tests {
         assert!(cfg.ops_bot_url.is_none());
         assert!(cfg.admin_token.is_none());
         assert!(!cfg.use_stub_ca);
+        assert!(cfg.acl_sig_path.is_none());
+        assert!(cfg.acl_gnupghome.is_none());
+        // Default health bind addr
+        assert_eq!(cfg.health_bind_addr.to_string(), "0.0.0.0:9446");
+    }
+
+    #[test]
+    fn verifier_wiring_produces_verifier() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_env();
+        set_required();
+        std::env::set_var("DISK_BIND_ADDR", "127.0.0.1:0");
+        std::env::set_var("DISK_ACL_SIG_PATH", "/tmp/disk-acl.yaml.asc");
+        std::env::set_var("DISK_ACL_GNUPGHOME", "/etc/disk-arcana/gpg");
+        let cfg = ServerConfig::from_env().unwrap();
+        assert_eq!(
+            cfg.acl_sig_path,
+            Some(PathBuf::from("/tmp/disk-acl.yaml.asc"))
+        );
+        assert_eq!(
+            cfg.acl_gnupghome,
+            Some(PathBuf::from("/etc/disk-arcana/gpg"))
+        );
+    }
+
+    #[test]
+    fn health_bind_addr_custom() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_env();
+        set_required();
+        std::env::set_var("DISK_BIND_ADDR", "127.0.0.1:0");
+        std::env::set_var("DISK_HEALTH_BIND_ADDR", "127.0.0.1:19446");
+        let cfg = ServerConfig::from_env().unwrap();
+        assert_eq!(cfg.health_bind_addr.to_string(), "127.0.0.1:19446");
+    }
+
+    #[test]
+    fn invalid_health_bind_addr_fails() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_env();
+        set_required();
+        std::env::set_var("DISK_BIND_ADDR", "127.0.0.1:0");
+        std::env::set_var("DISK_HEALTH_BIND_ADDR", "not-a-socket");
+        let err = ServerConfig::from_env().unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::InvalidValue("DISK_HEALTH_BIND_ADDR", _)
+        ));
     }
 }
