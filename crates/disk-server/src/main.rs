@@ -26,6 +26,7 @@ use disk_server::{
     NoopVerifier, ServerConfig, SyncServiceImpl,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+use tonic::service::interceptor::InterceptedService;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
 use tracing_subscriber::EnvFilter;
 
@@ -151,13 +152,20 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // mTLS peer-cert propagation: bridge the verified client certificate from
+    // the connection-level TlsConnectInfo into per-request extensions so the
+    // ACL enforcer's cert-fingerprint lookup resolves a real identity. Without
+    // this, CertIdentity::from_request is always None and ACL roles are never
+    // enforced on the wire (fail-open). See middleware::peer_cert.
+    use disk_server::middleware::propagate_peer_cert;
+
     tracing::info!(addr = %cfg.bind_addr, "disk-arcana-server listening");
     Server::builder()
         .tls_config(tls)
         .context("apply ServerTlsConfig")?
-        .add_service(auth_svc)
-        .add_service(sync_svc)
-        .add_service(enroll_svc)
+        .add_service(InterceptedService::new(auth_svc, propagate_peer_cert))
+        .add_service(InterceptedService::new(sync_svc, propagate_peer_cert))
+        .add_service(InterceptedService::new(enroll_svc, propagate_peer_cert))
         .serve_with_shutdown(cfg.bind_addr, grpc_shutdown)
         .await
         .context("tonic server terminated with error")?;

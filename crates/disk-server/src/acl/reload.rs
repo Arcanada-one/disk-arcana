@@ -142,6 +142,23 @@ async fn reload_loop<V>(
     let mut stored_version: u64 = 0;
     let mut last_table: Option<EnforcementTable> = None;
 
+    // Initial synchronous load at startup. Without this the enforcer stays
+    // `Unhealthy::NeverLoaded` (default-deny → all syncs rejected) until the
+    // first file-change or SIGHUP event pokes the watcher — on a clean boot
+    // with a valid signed ACL already in place, that event never comes and the
+    // server denies every request indefinitely. Load once up front so a
+    // freshly-started server with a valid ACL is immediately healthy.
+    apply_load(
+        &yaml_path,
+        &enforcer,
+        &audit,
+        verifier.as_ref(),
+        &invalidate_tx,
+        &mut stored_version,
+        &mut last_table,
+    )
+    .await;
+
     loop {
         // Wait for either a file-system event or SIGHUP.
         #[cfg(unix)]
@@ -175,42 +192,71 @@ async fn reload_loop<V>(
         }
 
         // Run the load pipeline.
-        match load_from_yaml(&yaml_path, stored_version, verifier.as_ref()) {
-            Ok(outcome) => {
-                stored_version = outcome.new_version;
+        apply_load(
+            &yaml_path,
+            &enforcer,
+            &audit,
+            verifier.as_ref(),
+            &invalidate_tx,
+            &mut stored_version,
+            &mut last_table,
+        )
+        .await;
+    }
+}
 
-                // Compute which certs changed role.
-                if let Some(ref prev) = last_table {
-                    broadcast_invalidations(prev, &outcome.table, &invalidate_tx);
-                }
-                last_table = Some(outcome.table.clone());
+/// Run the ACL load pipeline once and apply the outcome to the enforcer.
+///
+/// Shared by the startup load and every reload event so both paths have
+/// identical semantics (swap on success, refuse-and-keep on version regress,
+/// transition to Unhealthy on any other failure).
+#[allow(clippy::too_many_arguments)]
+async fn apply_load<V>(
+    yaml_path: &std::path::Path,
+    enforcer: &AclEnforcer,
+    audit: &AuditEmitter,
+    verifier: &V,
+    invalidate_tx: &broadcast::Sender<SessionInvalidate>,
+    stored_version: &mut u64,
+    last_table: &mut Option<EnforcementTable>,
+) where
+    V: SignatureVerifier,
+{
+    match load_from_yaml(yaml_path, *stored_version, verifier) {
+        Ok(outcome) => {
+            *stored_version = outcome.new_version;
 
-                enforcer.try_swap(AclState::Loaded(outcome.table)).await;
+            // Compute which certs changed role.
+            if let Some(ref prev) = last_table {
+                broadcast_invalidations(prev, &outcome.table, invalidate_tx);
+            }
+            *last_table = Some(outcome.table.clone());
 
-                let ev = AuditEvent::new(AuditKind::AclLoadOk).with_payload(&serde_json::json!({
-                    "version": stored_version,
-                    "signed_by": outcome.signed_by,
-                }));
-                let _ = audit.emit(ev).await;
-            }
-            Err(AclLoadError::VersionRegress { stored, attempted }) => {
-                // Refuse-and-keep: keep existing Loaded state, only log.
-                let ev = AuditEvent::new(AuditKind::AclVersionRegress).with_payload(
-                    &serde_json::json!({
-                        "stored": stored,
-                        "attempted": attempted,
-                    }),
-                );
-                let _ = audit.emit(ev).await;
-            }
-            Err(e) => {
-                // Non-regress failure → transition to Unhealthy.
-                let reason = e.into_unhealthy_reason();
-                enforcer.try_swap(AclState::Unhealthy(reason.clone())).await;
-                let ev = AuditEvent::new(AuditKind::AclLoadFailure)
-                    .with_payload(&serde_json::json!({ "reason": format!("{reason:?}") }));
-                let _ = audit.emit(ev).await;
-            }
+            enforcer.try_swap(AclState::Loaded(outcome.table)).await;
+
+            let ev = AuditEvent::new(AuditKind::AclLoadOk).with_payload(&serde_json::json!({
+                "version": *stored_version,
+                "signed_by": outcome.signed_by,
+            }));
+            let _ = audit.emit(ev).await;
+        }
+        Err(AclLoadError::VersionRegress { stored, attempted }) => {
+            // Refuse-and-keep: keep existing Loaded state, only log.
+            let ev = AuditEvent::new(AuditKind::AclVersionRegress).with_payload(
+                &serde_json::json!({
+                    "stored": stored,
+                    "attempted": attempted,
+                }),
+            );
+            let _ = audit.emit(ev).await;
+        }
+        Err(e) => {
+            // Non-regress failure → transition to Unhealthy.
+            let reason = e.into_unhealthy_reason();
+            enforcer.try_swap(AclState::Unhealthy(reason.clone())).await;
+            let ev = AuditEvent::new(AuditKind::AclLoadFailure)
+                .with_payload(&serde_json::json!({ "reason": format!("{reason:?}") }));
+            let _ = audit.emit(ev).await;
         }
     }
 }
@@ -274,6 +320,75 @@ mod tests {
         let handle = start_reload_loop(yaml_path, enforcer, audit, verifier);
         let _rx = handle.subscribe();
         // If we got here without panic, the handle construction works.
+    }
+
+    #[tokio::test]
+    async fn apply_load_at_startup_heals_enforcer_without_any_fs_event() {
+        // Regression: a freshly-booted server with a valid signed ACL already
+        // in place must become Loaded immediately — not stay NeverLoaded until
+        // a file-change/SIGHUP event arrives. apply_load is the startup path.
+        use sqlx::SqlitePool;
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::query(
+            "CREATE TABLE audit_event (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts_ms INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                cert_fp BLOB,
+                share TEXT,
+                payload_json TEXT NOT NULL DEFAULT '{}'
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let yaml = r#"version: 1
+updated_at: "2026-06-12T00:00:00Z"
+signed_by: disk-acl-signer@arcanada.one
+nodes:
+  - cert_fingerprint: sha256:0101010101010101010101010101010101010101010101010101010101010101
+    node_id_hint: mac-node
+    shares:
+      kb-push-share: send_only
+"#;
+        let tmp = tempfile::tempdir().unwrap();
+        let yaml_path = tmp.path().join("disk-acl.yaml");
+        std::fs::write(&yaml_path, yaml).unwrap();
+
+        let enforcer = AclEnforcer::new_unhealthy();
+        assert!(
+            enforcer.current_version().await.is_none(),
+            "precondition: enforcer starts NeverLoaded"
+        );
+
+        let audit = AuditEmitter::new(pool);
+        let (tx, _) = broadcast::channel(8);
+        let mut stored_version = 0u64;
+        let mut last_table = None;
+
+        apply_load(
+            &yaml_path,
+            &enforcer,
+            &audit,
+            &NoopVerifier,
+            &tx,
+            &mut stored_version,
+            &mut last_table,
+        )
+        .await;
+
+        assert_eq!(
+            enforcer.current_version().await,
+            Some(1),
+            "startup load must swap the enforcer to Loaded(version=1)"
+        );
+        let fp = [0x01u8; 32];
+        assert_eq!(
+            enforcer.resolve(&fp, "kb-push-share").await.unwrap(),
+            EnforcedRole::SendOnly,
+            "loaded ACL must resolve the node's role"
+        );
     }
 
     #[tokio::test]
