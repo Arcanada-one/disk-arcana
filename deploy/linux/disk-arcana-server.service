@@ -1,0 +1,70 @@
+# Disk Arcana server daemon (gRPC mTLS :9443 + enrollment :9445 + health HTTP :9446).
+#
+# Install path: /etc/systemd/system/disk-arcana-server.service (owner root:root, mode 0644).
+# Enable: sudo systemctl enable --now disk-arcana-server
+# Logs:   journalctl -u disk-arcana-server -f
+# Status: systemctl status disk-arcana-server
+#
+# Secrets live in /etc/disk-arcana/env (EnvironmentFile, mode 0640, owner root:disk-arcana).
+# TLS cert/key:   /etc/disk-arcana/tls/{cert.pem,key.pem,ca.pem}
+# ACL + sig:      /etc/disk-arcana/disk-acl.yaml + disk-acl.yaml.asc
+# GPG keyring:    /etc/disk-arcana/gpg/ (GNUPGHOME)
+
+[Unit]
+Description=Disk Arcana production gRPC server
+Documentation=https://github.com/Arcanada-one/disk-arcana
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/disk-arcana-server
+
+# Secrets injected from /etc/disk-arcana/env — never committed to git.
+# The EnvironmentFile must exist; ExecStart fails if it is absent.
+EnvironmentFile=/etc/disk-arcana/env
+
+# Run as a dedicated unprivileged user.
+User=disk-arcana
+Group=disk-arcana
+
+# Restart policy.
+Restart=on-failure
+RestartSec=10s
+StartLimitIntervalSec=120s
+StartLimitBurst=5
+
+# Working directory.
+WorkingDirectory=/var/lib/disk-arcana
+
+# Basic env visible to systemd journal.
+Environment=RUST_LOG=info
+
+# --- Hardening (systemd sandbox) ---
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectSystem=strict
+ProtectHome=tmpfs
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@mount @debug @cpu-emulation @keyring @module @raw-io @reboot @swap @obsolete
+# Explicit writable carve-outs; everything else read-only via ProtectSystem=strict.
+ReadWritePaths=/var/lib/disk-arcana /var/log/disk-arcana
+# TLS + ACL + GPG are read-only config.
+ReadOnlyPaths=/etc/disk-arcana
+
+[Install]
+WantedBy=multi-user.target

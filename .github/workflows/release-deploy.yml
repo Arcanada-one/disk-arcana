@@ -1,0 +1,183 @@
+name: Release + Deploy
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Deploy target (dev or prod)"
+        required: true
+        default: "dev"
+        type: choice
+        options:
+          - dev
+          - prod
+
+permissions:
+  contents: write    # upload release artifacts
+  packages: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  BINARY_NAME: disk-arcana-server
+  BUILD_TARGET: x86_64-unknown-linux-gnu
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # 1. Build a release binary for Linux x86_64 using cross.
+  # ──────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build (${{ env.BUILD_TARGET }})
+    runs-on: [self-hosted, Linux, X64]
+    outputs:
+      artifact_name: ${{ steps.meta.outputs.artifact_name }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.BUILD_TARGET }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Verify protoc
+        run: protoc --version
+
+      - name: Install cross
+        run: cargo install cross --locked --quiet
+
+      - name: Build release binary
+        run: cross build --release --target ${{ env.BUILD_TARGET }} --bin ${{ env.BINARY_NAME }}
+
+      - name: Set artifact metadata
+        id: meta
+        run: |
+          TAG="${GITHUB_REF_NAME:-workflow-dispatch}"
+          NAME="${{ env.BINARY_NAME }}-${TAG}-${{ env.BUILD_TARGET }}"
+          echo "artifact_name=${NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact_name }}
+          path: target/${{ env.BUILD_TARGET }}/release/${{ env.BINARY_NAME }}
+          retention-days: 7
+
+      # Upload to GitHub Release if triggered by a tag push.
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" \
+            "target/${{ env.BUILD_TARGET }}/release/${{ env.BINARY_NAME }}" \
+            --clobber
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 2. Deploy to arcana-dev (dev target — always runs for workflow_dispatch
+  #    target=dev; also serves as staging for tag pushes).
+  # ──────────────────────────────────────────────────────────────────────────
+  deploy-dev:
+    name: Deploy (arcana-dev)
+    needs: build
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'dev') ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))
+    runs-on: [self-hosted, Linux, X64, arcana-dev]
+    environment: dev
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact_name }}
+          path: /tmp/disk-release
+
+      - name: Install binary
+        run: |
+          chmod +x /tmp/disk-release/${{ env.BINARY_NAME }}
+          # Keep previous binary for rollback.
+          if [[ -f /usr/local/bin/${{ env.BINARY_NAME }} ]]; then
+            cp /usr/local/bin/${{ env.BINARY_NAME }} /usr/local/bin/${{ env.BINARY_NAME }}.prev
+          fi
+          cp /tmp/disk-release/${{ env.BINARY_NAME }} /usr/local/bin/${{ env.BINARY_NAME }}
+          chmod 755 /usr/local/bin/${{ env.BINARY_NAME }}
+
+      - name: Restart service
+        run: systemctl restart disk-arcana-server
+
+      - name: Health check
+        run: |
+          echo "Waiting for server to start..."
+          for i in $(seq 1 12); do
+            if curl -sf "http://127.0.0.1:9446/health" > /tmp/health_resp.json 2>&1; then
+              cat /tmp/health_resp.json
+              echo
+              STATUS=$(jq -r '.status' /tmp/health_resp.json)
+              if [[ "$STATUS" == "ok" ]]; then
+                echo "Health check passed."
+                exit 0
+              fi
+            fi
+            echo "Attempt $i/12 failed, waiting 5s..."
+            sleep 5
+          done
+          echo "Health check failed after 60s — rolling back"
+          if [[ -f /usr/local/bin/${{ env.BINARY_NAME }}.prev ]]; then
+            cp /usr/local/bin/${{ env.BINARY_NAME }}.prev /usr/local/bin/${{ env.BINARY_NAME }}
+            systemctl restart disk-arcana-server
+          fi
+          exit 1
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 3. Deploy to arcana-prod (hard-gated: only on tag push via explicit
+  #    workflow_dispatch target=prod, NOT auto-run on tag).
+  #    Operator must manually trigger with target=prod after staging passes.
+  # ──────────────────────────────────────────────────────────────────────────
+  deploy-prod:
+    name: Deploy (arcana-prod) [HARD-GATED]
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'prod'
+    runs-on: [self-hosted, Linux, X64, arcana-prod]
+    environment: production
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact_name }}
+          path: /tmp/disk-release
+
+      - name: Install binary
+        run: |
+          chmod +x /tmp/disk-release/${{ env.BINARY_NAME }}
+          if [[ -f /usr/local/bin/${{ env.BINARY_NAME }} ]]; then
+            cp /usr/local/bin/${{ env.BINARY_NAME }} /usr/local/bin/${{ env.BINARY_NAME }}.prev
+          fi
+          cp /tmp/disk-release/${{ env.BINARY_NAME }} /usr/local/bin/${{ env.BINARY_NAME }}
+          chmod 755 /usr/local/bin/${{ env.BINARY_NAME }}
+
+      - name: Restart service
+        run: systemctl restart disk-arcana-server
+
+      - name: Health check (prod via Tailscale)
+        run: |
+          echo "Waiting for server to start..."
+          for i in $(seq 1 12); do
+            if curl -sf "http://127.0.0.1:9446/health" > /tmp/health_resp.json 2>&1; then
+              cat /tmp/health_resp.json
+              echo
+              STATUS=$(jq -r '.status' /tmp/health_resp.json)
+              if [[ "$STATUS" == "ok" ]]; then
+                echo "Health check passed."
+                exit 0
+              fi
+            fi
+            echo "Attempt $i/12 failed, waiting 5s..."
+            sleep 5
+          done
+          echo "Health check failed after 60s — rolling back"
+          if [[ -f /usr/local/bin/${{ env.BINARY_NAME }}.prev ]]; then
+            cp /usr/local/bin/${{ env.BINARY_NAME }}.prev /usr/local/bin/${{ env.BINARY_NAME }}
+            systemctl restart disk-arcana-server
+          fi
+          exit 1

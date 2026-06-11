@@ -1,0 +1,17 @@
+# /etc/disk-arcana/disk-acl.yaml — Disk Arcana ACL policy.
+# Sign with: gpg --homedir /etc/disk-arcana/gpg --batch --detach-sign --armor \
+#   --default-key <SIGNING_KEY_ID> -o /etc/disk-arcana/disk-acl.yaml.asc \
+#   /etc/disk-arcana/disk-acl.yaml
+# See runbook: documentation/runbooks/disk-arcana/DISK-RB-007-acl-signing.md
+version: 1
+
+nodes:
+  # Format: { cert_fingerprint: "<sha256hex>", shares: { <share>: <role> } }
+  # Roles: bidirectional | receive_only | send_only | publisher
+  #
+  # Example — operator Mac node:
+  # - cert_fingerprint: "aabbcc..."
+  #   shares:
+  #     kb-push-share: send_only
+  #     sync-to-dev-share: send_only
+  #     hermes-artefacts: receive_only
