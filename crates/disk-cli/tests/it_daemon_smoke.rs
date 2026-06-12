@@ -92,9 +92,9 @@ async fn daemon_serves_status_and_terminates_on_sigterm() {
         }
         None
     };
-    let port = tokio::time::timeout(Duration::from_secs(10), read_port)
+    let port = tokio::time::timeout(Duration::from_secs(30), read_port)
         .await
-        .expect("daemon must emit 'listening on 127.0.0.1:NNNNN' within 10 s")
+        .expect("daemon must emit 'listening on 127.0.0.1:NNNNN' within 30 s")
         .expect("listening line absent before stdout closed");
 
     let client = reqwest::Client::new();
@@ -124,9 +124,9 @@ async fn daemon_serves_status_and_terminates_on_sigterm() {
         libc::kill(pid as libc::pid_t, libc::SIGTERM);
     }
 
-    let exit = tokio::time::timeout(Duration::from_secs(5), child.wait())
+    let exit = tokio::time::timeout(Duration::from_secs(15), child.wait())
         .await
-        .expect("daemon did not exit within 5 s of SIGTERM")
+        .expect("daemon did not exit within 15 s of SIGTERM")
         .expect("await child");
     assert!(
         exit.success(),

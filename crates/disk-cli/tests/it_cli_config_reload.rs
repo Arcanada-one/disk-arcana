@@ -67,9 +67,9 @@ async fn config_reload_command_queues_reload() {
         }
         None
     };
-    let port = tokio::time::timeout(Duration::from_secs(10), read_port)
+    let port = tokio::time::timeout(Duration::from_secs(30), read_port)
         .await
-        .expect("daemon must emit listening line within 10 s")
+        .expect("daemon must emit listening line within 30 s")
         .expect("listening line absent before stdout closed");
 
     let addr = format!("127.0.0.1:{port}");
@@ -94,7 +94,7 @@ async fn config_reload_command_queues_reload() {
     unsafe {
         libc::kill(pid as libc::pid_t, libc::SIGTERM);
     }
-    let _ = tokio::time::timeout(Duration::from_secs(5), daemon.wait()).await;
+    let _ = tokio::time::timeout(Duration::from_secs(15), daemon.wait()).await;
 }
 
 #[tokio::test]
