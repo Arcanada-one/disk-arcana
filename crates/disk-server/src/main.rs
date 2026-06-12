@@ -26,9 +26,9 @@ use disk_server::{
     NoopVerifier, ServerConfig, SyncServiceImpl,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+use tokio::sync::watch;
 use tonic::service::interceptor::InterceptedService;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
-use tokio::sync::watch;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -190,6 +190,18 @@ async fn main() -> anyhow::Result<()> {
         let _ = shutdown_tx.send(true);
     });
 
+    // Bind both listeners BEFORE logging "listening" so the log reflects a real
+    // socket, not just the configured address. tonic's `serve_with_shutdown`
+    // logs the configured addr before it actually binds, which makes a bind
+    // failure (e.g. port already taken) invisible to anything watching the log
+    // — a test that keys off the "listening" line then races a half-bound
+    // server. `TcpIncoming::bind` fails synchronously here if the port is taken.
+    use tonic::transport::server::TcpIncoming;
+    let incoming_mtls = TcpIncoming::bind(cfg.bind_addr)
+        .with_context(|| format!("bind mTLS listener on {}", cfg.bind_addr))?;
+    let incoming_public = TcpIncoming::bind(cfg.enrollment_bind_addr)
+        .with_context(|| format!("bind enrollment listener on {}", cfg.enrollment_bind_addr))?;
+
     tracing::info!(addr = %cfg.bind_addr, "disk-arcana-server listening");
     tracing::info!(
         addr = %cfg.enrollment_bind_addr,
@@ -206,7 +218,7 @@ async fn main() -> anyhow::Result<()> {
         .add_service(InterceptedService::new(auth_svc, propagate_peer_cert))
         .add_service(InterceptedService::new(sync_svc, propagate_peer_cert))
         .add_service(InterceptedService::new(enroll_svc, propagate_peer_cert))
-        .serve_with_shutdown(cfg.bind_addr, async move {
+        .serve_with_incoming_shutdown(incoming_mtls, async move {
             let _ = rx_mtls.changed().await;
         });
 
@@ -217,7 +229,7 @@ async fn main() -> anyhow::Result<()> {
         .tls_config(tls_public)
         .context("apply ServerTlsConfig (public)")?
         .add_service(enroll_svc_public)
-        .serve_with_shutdown(cfg.enrollment_bind_addr, async move {
+        .serve_with_incoming_shutdown(incoming_public, async move {
             let _ = rx_public.changed().await;
         });
 
@@ -230,8 +242,13 @@ async fn main() -> anyhow::Result<()> {
 /// Choose the ACL signature verifier based on config and start the reload loop.
 ///
 /// - `DISK_ACL_SIG_PATH` set → GpgVerifier (production path).
-/// - `DISK_ACL_SIG_PATH` absent + `DISK_USE_STUB_CA=1` → NoopVerifier (dev only).
-/// - `DISK_ACL_SIG_PATH` absent + `DISK_USE_STUB_CA` unset → **panic** (fail-closed).
+/// - `DISK_ACL_SIG_PATH` absent + (`DISK_ACL_ALLOW_UNSIGNED=1` or
+///   `DISK_USE_STUB_CA=1`) → NoopVerifier (dev/test only).
+/// - `DISK_ACL_SIG_PATH` absent + neither flag set → **panic** (fail-closed).
+///
+/// The allow-unsigned escape hatch is orthogonal to the CA client choice so a
+/// real-`HttpCaClient` integration test can skip ACL signing without forcing
+/// the stub CA. Production MUST leave both flags unset and provide a signature.
 fn build_reload_handle(
     cfg: &ServerConfig,
     enforcer: AclEnforcer,
@@ -250,10 +267,11 @@ fn build_reload_handle(
             start_reload_loop(cfg.acl_yaml_path.clone(), enforcer, audit, Arc::new(v))
         }
         None => {
-            if !cfg.use_stub_ca {
+            if !cfg.acl_allow_unsigned {
                 panic!(
-                    "DISK_ACL_SIG_PATH must be set in production. \
-                     Set DISK_USE_STUB_CA=1 only for local development."
+                    "DISK_ACL_SIG_PATH must be set in production. Set \
+                     DISK_ACL_ALLOW_UNSIGNED=1 (or DISK_USE_STUB_CA=1) only \
+                     for local development or tests."
                 );
             }
             tracing::warn!(

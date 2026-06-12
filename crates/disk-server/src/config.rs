@@ -19,8 +19,9 @@
 //! |---|---|
 //! | `OPS_BOT_URL` / `OPS_BOT_KEY` | Forwarder destination. Without `OPS_BOT_KEY` forwarder runs no-op. |
 //! | `DISK_ADMIN_TOKEN` | Override for the admin metadata token (enrollment helpers). |
-//! | `DISK_USE_STUB_CA=1` | Force `StubCaClient` instead of `HttpCaClient::from_env`. |
-//! | `DISK_ACL_SIG_PATH` | Path to the detached `.asc` GPG signature for the ACL YAML (production). When absent and `DISK_USE_STUB_CA` is not `1`, the binary panics (fail-closed). |
+//! | `DISK_USE_STUB_CA=1` | Force `StubCaClient` instead of `HttpCaClient::from_env`. Also implies `DISK_ACL_ALLOW_UNSIGNED`. |
+//! | `DISK_ACL_ALLOW_UNSIGNED=1` | Dev/test-only: start with an unsigned ACL (NoopVerifier) when no `DISK_ACL_SIG_PATH` is set, WITHOUT forcing the stub CA. Production MUST leave unset. |
+//! | `DISK_ACL_SIG_PATH` | Path to the detached `.asc` GPG signature for the ACL YAML (production). When absent and neither `DISK_ACL_ALLOW_UNSIGNED` nor `DISK_USE_STUB_CA` is `1`, the binary panics (fail-closed). |
 //! | `DISK_ACL_GNUPGHOME` | Override `GNUPGHOME` for the GPG verifier. |
 //! | `DISK_HEALTH_BIND_ADDR` | HTTP health listener bind address. Default `0.0.0.0:9446`. |
 //!
@@ -61,6 +62,13 @@ pub struct ServerConfig {
     pub ops_bot_url: Option<String>,
     pub admin_token: Option<String>,
     pub use_stub_ca: bool,
+    /// Allow the server to start with an unsigned ACL (NoopVerifier) when no
+    /// `DISK_ACL_SIG_PATH` is set. Dev/test-only escape hatch, orthogonal to
+    /// the CA client choice: `DISK_ACL_ALLOW_UNSIGNED=1` lets a test exercise
+    /// the real `HttpCaClient` path while still skipping ACL signature
+    /// verification. Implied by `use_stub_ca` for backward compatibility.
+    /// Production MUST leave this unset and provide `DISK_ACL_SIG_PATH`.
+    pub acl_allow_unsigned: bool,
 }
 
 impl ServerConfig {
@@ -85,11 +93,12 @@ impl ServerConfig {
 
         let enrollment_bind_addr_raw = std::env::var("DISK_ENROLLMENT_BIND_ADDR")
             .unwrap_or_else(|_| "0.0.0.0:9445".to_string());
-        let enrollment_bind_addr: SocketAddr = enrollment_bind_addr_raw
-            .parse()
-            .map_err(|e: std::net::AddrParseError| {
-                ConfigError::InvalidValue("DISK_ENROLLMENT_BIND_ADDR", e.to_string())
-            })?;
+        let enrollment_bind_addr: SocketAddr =
+            enrollment_bind_addr_raw
+                .parse()
+                .map_err(|e: std::net::AddrParseError| {
+                    ConfigError::InvalidValue("DISK_ENROLLMENT_BIND_ADDR", e.to_string())
+                })?;
 
         Ok(Self {
             bind_addr,
@@ -108,6 +117,12 @@ impl ServerConfig {
                 .ok()
                 .filter(|s| !s.is_empty()),
             use_stub_ca: std::env::var("DISK_USE_STUB_CA").ok().as_deref() == Some("1"),
+            // `use_stub_ca` implies allow-unsigned for backward compatibility
+            // (existing dev harnesses set only DISK_USE_STUB_CA); the dedicated
+            // DISK_ACL_ALLOW_UNSIGNED flag lets a real-CA test skip ACL signing
+            // without forcing the stub CA client.
+            acl_allow_unsigned: std::env::var("DISK_USE_STUB_CA").ok().as_deref() == Some("1")
+                || std::env::var("DISK_ACL_ALLOW_UNSIGNED").ok().as_deref() == Some("1"),
         })
     }
 }
@@ -154,6 +169,7 @@ mod tests {
             "DISK_HEALTH_BIND_ADDR",
             "DISK_ADMIN_TOKEN",
             "DISK_USE_STUB_CA",
+            "DISK_ACL_ALLOW_UNSIGNED",
             "OPS_BOT_URL",
         ] {
             std::env::remove_var(v);
@@ -208,10 +224,45 @@ mod tests {
         assert!(cfg.ops_bot_url.is_none());
         assert!(cfg.admin_token.is_none());
         assert!(!cfg.use_stub_ca);
+        // Fail-closed default: neither stub CA nor allow-unsigned without flags.
+        assert!(!cfg.acl_allow_unsigned);
         assert!(cfg.acl_sig_path.is_none());
         assert!(cfg.acl_gnupghome.is_none());
         // Default health bind addr
         assert_eq!(cfg.health_bind_addr.to_string(), "0.0.0.0:9446");
+    }
+
+    #[test]
+    fn acl_allow_unsigned_explicit_flag() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_env();
+        set_required();
+        std::env::set_var("DISK_ACL_ALLOW_UNSIGNED", "1");
+        let cfg = ServerConfig::from_env().unwrap();
+        // The dedicated flag allows unsigned ACL WITHOUT forcing the stub CA.
+        assert!(cfg.acl_allow_unsigned);
+        assert!(!cfg.use_stub_ca);
+    }
+
+    #[test]
+    fn acl_allow_unsigned_implied_by_stub_ca() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_env();
+        set_required();
+        std::env::set_var("DISK_USE_STUB_CA", "1");
+        let cfg = ServerConfig::from_env().unwrap();
+        // Backward compatibility: stub CA implies allow-unsigned.
+        assert!(cfg.use_stub_ca);
+        assert!(cfg.acl_allow_unsigned);
+    }
+
+    #[test]
+    fn acl_allow_unsigned_off_by_default() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_env();
+        set_required();
+        let cfg = ServerConfig::from_env().unwrap();
+        assert!(!cfg.acl_allow_unsigned);
     }
 
     #[test]

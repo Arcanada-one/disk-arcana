@@ -69,8 +69,7 @@ impl Respond for CaSigner {
         let csr_pem = body["csr_pem"]
             .as_str()
             .expect("CA POST body must carry csr_pem");
-        let csr_params =
-            CertificateSigningRequestParams::from_pem(csr_pem).expect("parse CSR PEM");
+        let csr_params = CertificateSigningRequestParams::from_pem(csr_pem).expect("parse CSR PEM");
         let signed = csr_params
             .signed_by(&self.ca_cert, &self.ca_key)
             .expect("sign CSR with test CA");
@@ -88,9 +87,10 @@ fn make_test_ca() -> (Certificate, KeyPair, String) {
         .distinguished_name
         .push(DnType::CommonName, "DISK-0037 Test CA");
     ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-    ca_params
-        .key_usages
-        .extend_from_slice(&[KeyUsagePurpose::DigitalSignature, KeyUsagePurpose::KeyCertSign]);
+    ca_params.key_usages.extend_from_slice(&[
+        KeyUsagePurpose::DigitalSignature,
+        KeyUsagePurpose::KeyCertSign,
+    ]);
     let ca_cert = ca_params.self_signed(&ca_key).expect("self-sign CA");
     let ca_pem = ca_cert.pem();
     (ca_cert, ca_key, ca_pem)
@@ -123,13 +123,8 @@ fn make_node_csr(node_id: &str) -> (String, String) {
     let node_key = KeyPair::generate().expect("node keypair");
     let mut params = CertificateParams::new(Vec::<String>::new()).expect("csr params");
     params.distinguished_name.push(DnType::CommonName, node_id);
-    let csr = params
-        .serialize_request(&node_key)
-        .expect("serialize CSR");
-    (
-        csr.pem().expect("CSR PEM"),
-        node_key.serialize_pem(),
-    )
+    let csr = params.serialize_request(&node_key).expect("serialize CSR");
+    (csr.pem().expect("CSR PEM"), node_key.serialize_pem())
 }
 
 // ---------------------------------------------------------------------------
@@ -200,74 +195,111 @@ async fn spawn_server() -> ServerHandle {
         .await;
     let ca_url = format!("{}/v1/internal-ca/issue", mock.uri());
 
-    let mtls_port = reserve_port();
-    let public_port = reserve_port();
-    assert_ne!(mtls_port, public_port);
-
+    // Retry the whole port-reserve → spawn → both-listening handshake: under a
+    // parallel `cargo test` run, the ephemeral ports returned by `reserve_port`
+    // are released (TOCTOU) before the child binds them, so another process may
+    // grab one in the window. On a failed handshake we re-reserve fresh ports
+    // and re-spawn rather than fail the test. Same race class as DISK-0041.
+    const SPAWN_ATTEMPTS: u32 = 5;
     let bin = env!("CARGO_BIN_EXE_disk-arcana-server");
-    let mut cmd = Command::new(bin);
-    cmd.env_clear()
-        .env("PATH", std::env::var("PATH").unwrap_or_default())
-        .env("RUST_LOG", "info")
-        .env("DISK_BIND_ADDR", format!("127.0.0.1:{mtls_port}"))
-        .env(
-            "DISK_ENROLLMENT_BIND_ADDR",
-            format!("127.0.0.1:{public_port}"),
-        )
-        .env("DISK_DB_PATH", root.join("server.db"))
-        .env("DISK_SYNC_ROOT", &sync_root)
-        .env("DISK_TLS_CERT_PATH", &tls_cert)
-        .env("DISK_TLS_KEY_PATH", &tls_key)
-        .env("DISK_TLS_CA_PATH", &tls_ca)
-        .env("DISK_ACL_YAML_PATH", &acl_yaml)
-        .env("DISK_ADMIN_TOKEN", ADMIN_TOKEN)
-        // Production code path: HttpCaClient against our wiremock.
-        .env("AUTH_ARCANA_CA_TOKEN", CA_BEARER)
-        .env("AUTH_ARCANA_CA_URL", &ca_url)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
 
-    let mut child = cmd.spawn().expect("spawn disk-arcana-server");
-    let stderr = child.stderr.take().expect("stderr piped");
-    let mut reader = BufReader::new(stderr).lines();
+    let mut last_log = String::new();
+    let mut attempt = 0;
+    let (child, mtls_port, public_port) = loop {
+        attempt += 1;
 
-    let mut saw_mtls = false;
-    let mut saw_public = false;
-    let mut collected = String::new();
+        let mtls_port = reserve_port();
+        let public_port = reserve_port();
+        // The health listener defaults to the FIXED 0.0.0.0:9446; left at the
+        // default, parallel test servers collide on it (Address already in use)
+        // → the health server errors → the whole process shuts down. Bind it to
+        // a unique loopback port per server so the three tests don't fight.
+        let health_port = reserve_port();
+        assert_ne!(mtls_port, public_port);
+        assert_ne!(mtls_port, health_port);
+        assert_ne!(public_port, health_port);
 
-    let scan = async {
-        while let Ok(Some(line)) = reader.next_line().await {
-            collected.push_str(&line);
-            collected.push('\n');
-            if line.contains("disk-arcana-server listening") {
-                saw_mtls = true;
+        let mut cmd = Command::new(bin);
+        cmd.env_clear()
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
+            .env("RUST_LOG", "info")
+            .env("DISK_BIND_ADDR", format!("127.0.0.1:{mtls_port}"))
+            .env(
+                "DISK_ENROLLMENT_BIND_ADDR",
+                format!("127.0.0.1:{public_port}"),
+            )
+            .env("DISK_HEALTH_BIND_ADDR", format!("127.0.0.1:{health_port}"))
+            .env("DISK_DB_PATH", root.join("server.db"))
+            .env("DISK_SYNC_ROOT", &sync_root)
+            .env("DISK_TLS_CERT_PATH", &tls_cert)
+            .env("DISK_TLS_KEY_PATH", &tls_key)
+            .env("DISK_TLS_CA_PATH", &tls_ca)
+            .env("DISK_ACL_YAML_PATH", &acl_yaml)
+            .env("DISK_ADMIN_TOKEN", ADMIN_TOKEN)
+            // Skip ACL signature verification (no GPG infra in this test) WITHOUT
+            // forcing the stub CA — DISK_ACL_ALLOW_UNSIGNED is orthogonal to the
+            // CA client, so the real HttpCaClient path below still runs against
+            // the wiremock. Production must instead provide DISK_ACL_SIG_PATH.
+            .env("DISK_ACL_ALLOW_UNSIGNED", "1")
+            // Production code path: HttpCaClient against our wiremock.
+            .env("AUTH_ARCANA_CA_TOKEN", CA_BEARER)
+            .env("AUTH_ARCANA_CA_URL", &ca_url)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+
+        let mut child = cmd.spawn().expect("spawn disk-arcana-server");
+        let stderr = child.stderr.take().expect("stderr piped");
+        let mut reader = BufReader::new(stderr).lines();
+
+        let mut saw_mtls = false;
+        let mut saw_public = false;
+        let mut collected = String::new();
+
+        let scan = async {
+            while let Ok(Some(line)) = reader.next_line().await {
+                collected.push_str(&line);
+                collected.push('\n');
+                if line.contains("disk-arcana-server listening") {
+                    saw_mtls = true;
+                }
+                if line.contains("enrollment public listener listening") {
+                    saw_public = true;
+                }
+                if saw_mtls && saw_public {
+                    break;
+                }
             }
-            if line.contains("enrollment public listener listening") {
-                saw_public = true;
-            }
-            if saw_mtls && saw_public {
-                break;
-            }
+        };
+
+        let result = timeout(STARTUP_TIMEOUT, scan).await;
+        if result.is_ok() && saw_mtls && saw_public {
+            // Re-attach the reader so the post-spawn drain below keeps working.
+            let drain_reader = reader;
+            tokio::spawn(async move {
+                let mut reader = drain_reader;
+                while let Ok(Some(_)) = reader.next_line().await {
+                    // discard to avoid pipe back-pressure
+                }
+            });
+            break (child, mtls_port, public_port);
         }
+
+        last_log = collected;
+        // Child failed to reach listening state — kill it and retry with fresh
+        // ports (kill_on_drop handles the kill when `child` is dropped).
+        drop(child);
+        assert!(
+            attempt < SPAWN_ATTEMPTS,
+            "server did not reach both-listening state in {SPAWN_ATTEMPTS} attempts \
+             (last within {STARTUP_TIMEOUT:?}); log:\n{last_log}"
+        );
     };
-
-    let result = timeout(STARTUP_TIMEOUT, scan).await;
-    assert!(
-        result.is_ok() && saw_mtls && saw_public,
-        "server did not reach both-listening state within {STARTUP_TIMEOUT:?}; log:\n{collected}"
-    );
-
-    // Drain stderr in the background to avoid pipe back-pressure deadlocks.
-    tokio::spawn(async move {
-        while let Ok(Some(_)) = reader.next_line().await {
-            // discard
-        }
-    });
+    let _ = &last_log;
 
     // Tonic needs a brief moment after the listening log before accept() is
     // ready — the log line is emitted before serve_with_shutdown enters its
-    // select loop on the listener.
+    // select loop on the listener. (stderr drain already spawned on success.)
     tokio::time::sleep(Duration::from_millis(120)).await;
 
     ServerHandle {
@@ -281,6 +313,25 @@ async fn spawn_server() -> ServerHandle {
     }
 }
 
+/// Connect with a short retry-backoff. The server logs "listening" the instant
+/// its socket is bound, but tonic needs a few more milliseconds to enter the
+/// accept loop; under a parallel `cargo test` run that gap widens and a single
+/// `connect()` can race it (ConnectionRefused). Retry briefly instead of
+/// relying on one fixed sleep.
+async fn connect_with_retry(endpoint: Endpoint, what: &str) -> tonic::transport::Channel {
+    let mut last_err = None;
+    for _ in 0..50 {
+        match endpoint.connect().await {
+            Ok(ch) => return ch,
+            Err(e) => {
+                last_err = Some(e);
+                tokio::time::sleep(Duration::from_millis(40)).await;
+            }
+        }
+    }
+    panic!("connect {what} after retries: {:?}", last_err);
+}
+
 async fn connect_public(handle: &ServerHandle) -> tonic::transport::Channel {
     let endpoint = Endpoint::new(format!("https://127.0.0.1:{}", handle.public_port))
         .unwrap()
@@ -290,7 +341,7 @@ async fn connect_public(handle: &ServerHandle) -> tonic::transport::Channel {
                 .domain_name("localhost"),
         )
         .unwrap();
-    endpoint.connect().await.expect("connect public listener")
+    connect_with_retry(endpoint, "public listener").await
 }
 
 async fn connect_mtls(
@@ -308,7 +359,7 @@ async fn connect_mtls(
                 .domain_name("localhost"),
         )
         .unwrap();
-    endpoint.connect().await.expect("connect mTLS listener")
+    connect_with_retry(endpoint, "mTLS listener").await
 }
 
 fn admin_metadata() -> MetadataValue<tonic::metadata::Ascii> {
