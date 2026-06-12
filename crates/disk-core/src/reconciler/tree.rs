@@ -245,6 +245,39 @@ fn resolve_one(
         ));
     }
 
+    // Scenarios 36-39: residual triples where one side is live and the other is
+    // a tombstone with no matching i_present baseline (DISK-0048).
+    //
+    // (P,T,None) — C has live bytes, server tomb, no shared history.
+    // C's content is unknown to the server; preserve both sides as a conflict.
+    if l_present && r_tomb && indexed.is_none() {
+        return Ok(make_with_conflict(
+            ActionType::Upload,
+            ConflictKind::ModifiedDeleted,
+        ));
+    }
+    // (P,T,T) — C re-created the file after a prior delete; server hasn't seen the recreate.
+    // Treat C's recreate as authoritative and flag the divergence.
+    if l_present && r_tomb && i_tomb {
+        return Ok(make_with_conflict(
+            ActionType::Upload,
+            ConflictKind::ModifiedDeleted,
+        ));
+    }
+    // (T,P,None) — C tomb/none, server live, no shared history.
+    // Server's live file wins; preserve both sides in ConflictReport.
+    if l_tomb && r_present && indexed.is_none() {
+        return Ok(make_with_conflict(
+            ActionType::Download,
+            ConflictKind::ModifiedDeleted,
+        ));
+    }
+    // (T,P,T) — pure lagging recreate: C tomb, server live, baseline tomb.
+    // C holds no divergent live bytes; plain Download is safe, no spurious conflict.
+    if l_tomb && r_present && i_tomb {
+        return Ok(make(ActionType::Download));
+    }
+
     // Mixed tomb/None: one side has a tombstone, the other has nothing.
     if local.is_none() && r_tomb {
         // Remote propagated a delete; local lost track (e.g. directory move).

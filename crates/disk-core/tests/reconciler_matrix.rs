@@ -537,6 +537,130 @@ fn scenario_35b_three_client_recreate_triple_identical_skip() {
     );
 }
 
+// ---------- Scenarios 36-39: residual Inconsistent-reachable triples (DISK-0048) ----------
+
+/// V-AC-1 + V-AC-5: local=live (hash 0xCC), remote=tomb (hash 0x99), no baseline.
+/// C has bytes the server has deleted, with no shared history to compare.
+/// Resolve as Upload + ModifiedDeleted conflict; both hashes preserved (no silent data loss).
+#[test]
+fn scenario_36_lagging_live_vs_server_tomb_no_baseline_conflict() {
+    let actions = run(
+        vec![meta("p.md", 0xCC)], // local: C holds a live file
+        vec![tomb("p.md", 0x99)], // remote: server tomb (different hash)
+        vec![],                   // no baseline — None axis
+    );
+    let a = first_action(&actions);
+    assert_eq!(
+        a.action,
+        ActionType::Upload,
+        "(P,T,None): must resolve to Upload (C's live bytes win), not Inconsistent"
+    );
+    let c = a
+        .conflict
+        .as_ref()
+        .expect("(P,T,None): ConflictReport must be present (ModifiedDeleted)");
+    assert_eq!(
+        c.kind,
+        ConflictKind::ModifiedDeleted,
+        "(P,T,None): conflict kind must be ModifiedDeleted"
+    );
+    assert_eq!(
+        c.local_hash,
+        Some([0xCC; 32]),
+        "(P,T,None): local_hash must carry C's live bytes (0xCC) — no silent data loss"
+    );
+    assert_eq!(
+        c.remote_hash,
+        Some([0x99; 32]),
+        "(P,T,None): remote_hash must carry server's tomb hash (0x99) — no silent data loss"
+    );
+}
+
+/// V-AC-2: local=live (C recreated, hash 0xCC), remote=tomb (hash 0x99), baseline=tomb (hash 0x11).
+/// C re-created the file after a prior delete; server hasn't seen the recreate.
+/// Resolve as Upload + ModifiedDeleted conflict.
+#[test]
+fn scenario_37_local_recreate_vs_server_tomb_conflict() {
+    let actions = run(
+        vec![meta("p.md", 0xCC)], // local: C's recreated file
+        vec![tomb("p.md", 0x99)], // remote: server tomb
+        vec![tomb("p.md", 0x11)], // indexed: baseline tombstone from prior delete
+    );
+    let a = first_action(&actions);
+    assert_eq!(
+        a.action,
+        ActionType::Upload,
+        "(P,T,T): must resolve to Upload (C's recreate preserved), not Inconsistent"
+    );
+    assert_eq!(
+        a.conflict
+            .as_ref()
+            .expect("(P,T,T): ConflictReport must be present")
+            .kind,
+        ConflictKind::ModifiedDeleted,
+        "(P,T,T): conflict kind must be ModifiedDeleted"
+    );
+}
+
+/// V-AC-3 + V-AC-5: local=tomb (hash 0xCC), remote=live (hash 0x99), no baseline.
+/// Server has a live file; C has a tomb but no shared history.
+/// Resolve as Download + ModifiedDeleted conflict; both hashes preserved.
+#[test]
+fn scenario_38_local_tomb_vs_server_live_no_baseline_conflict() {
+    let actions = run(
+        vec![tomb("p.md", 0xCC)], // local: C's tomb
+        vec![meta("p.md", 0x99)], // remote: server has a live file
+        vec![],                   // no baseline — None axis
+    );
+    let a = first_action(&actions);
+    assert_eq!(
+        a.action,
+        ActionType::Download,
+        "(T,P,None): must resolve to Download (server live wins), not Inconsistent"
+    );
+    let c = a
+        .conflict
+        .as_ref()
+        .expect("(T,P,None): ConflictReport must be present (ModifiedDeleted)");
+    assert_eq!(
+        c.kind,
+        ConflictKind::ModifiedDeleted,
+        "(T,P,None): conflict kind must be ModifiedDeleted"
+    );
+    assert_eq!(
+        c.local_hash,
+        Some([0xCC; 32]),
+        "(T,P,None): local_hash must carry C's tomb hash (0xCC) — no silent data loss"
+    );
+    assert_eq!(
+        c.remote_hash,
+        Some([0x99; 32]),
+        "(T,P,None): remote_hash must carry server's live hash (0x99) — no silent data loss"
+    );
+}
+
+/// V-AC-4: local=tomb (hash 0xCC), remote=live (hash 0x99), baseline=tomb (hash 0x11).
+/// Pure lagging recreate: C has no divergent live bytes, so a plain Download is safe.
+/// No spurious conflict report expected.
+#[test]
+fn scenario_39_lagging_recreate_clean_download() {
+    let actions = run(
+        vec![tomb("p.md", 0xCC)], // local: C's tomb
+        vec![meta("p.md", 0x99)], // remote: server's recreated live file
+        vec![tomb("p.md", 0x11)], // indexed: baseline tombstone
+    );
+    let a = first_action(&actions);
+    assert_eq!(
+        a.action,
+        ActionType::Download,
+        "(T,P,T): must resolve to Download (server recreate wins), not Inconsistent"
+    );
+    assert!(
+        a.conflict.is_none(),
+        "lagging recreate (T,P,T): plain Download, no conflict report — C has no live bytes"
+    );
+}
+
 // ---------- Pure-function property test ----------
 
 #[test]
