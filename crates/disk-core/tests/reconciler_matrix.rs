@@ -458,6 +458,20 @@ fn scenario_31_server_tombstone_fans_out_to_second_client() {
     assert_eq!(first_action(&actions).action, ActionType::DeleteRemote);
 }
 
+// ---------- Scenario 32: post-ack stabilise — already-processed delete skips ----------
+
+#[test]
+fn scenario_32_post_ack_stabilise_tomb_absent_tomb_skip() {
+    // Triple: local=server tombstone, remote=absent (client already dropped the
+    // file), indexed=tombstone baseline (client processed the delete on a prior
+    // pass). All three states agree the file is gone — nothing left to do.
+    // tree.rs: (l_tomb, r_absent, i_tomb) → Skip.
+    let actions = engine()
+        .reconcile(&[tomb("a.md", 1)], &[], &[tomb("a.md", 1)])
+        .unwrap();
+    assert_eq!(first_action(&actions).action, ActionType::Skip);
+}
+
 // ---------- Pure-function property test ----------
 
 #[test]
