@@ -700,7 +700,7 @@ impl SyncService for SyncServiceImpl {
                     }
                 }
                 // Client should delete their local copy.
-                ActionType::DeleteLocal => {
+                ActionType::DeleteLocal | ActionType::DeleteRemote => {
                     let path_str = action.path.to_string_lossy().to_string();
                     to_delete.push(FileMetadata {
                         path: path_str,
@@ -720,6 +720,38 @@ impl SyncService for SyncServiceImpl {
                 let entry = server_clock.entry(node.clone()).or_insert(0);
                 if *tick > *entry {
                     *entry = *tick;
+                }
+            }
+        }
+
+        // Tombstone the server's authoritative files row for every DeleteLocal
+        // action so that other clients' next reconcile sees a tombstone rather
+        // than a live file (enabling cross-client delete fan-out).
+        //
+        // Invariants:
+        // - Only DeleteLocal triggers this: the reconciler determined that THIS
+        //   authenticated client holds delete authority for the path.
+        // - The existing row's vector_clock is preserved verbatim (no new tick);
+        //   the causal order established by the initiator is carried through.
+        // - Idempotent: re-tombstoning an already-deleted row is a no-op.
+        {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let now_secs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            for action in &actions {
+                if action.action == ActionType::DeleteLocal {
+                    if let Some(m) = server_files.iter().find(|m| m.path == action.path) {
+                        let tombstone = disk_core::types::FileMeta {
+                            deleted: true,
+                            deleted_at: Some(now_secs),
+                            ..m.clone()
+                        };
+                        db.upsert_file(&tombstone)
+                            .await
+                            .map_err(|e| Status::internal(format!("tombstone upsert: {e}")))?;
+                    }
                 }
             }
         }
@@ -799,9 +831,10 @@ fn build_post_sync_baseline(
                 // Client has a file the server lacks — baseline the client's version.
                 action.server_version.clone()
             }
-            ActionType::DeleteLocal => {
+            ActionType::DeleteLocal | ActionType::DeleteRemote => {
                 // Client was told to delete this path — record a tombstone in the
-                // baseline so the path is not re-emitted as to_download next pass.
+                // baseline so the path is not re-emitted as to_download or to_delete
+                // on the next pass (stabilisation / bounce-back prevention).
                 server_files
                     .iter()
                     .find(|m| m.path == action.path)
@@ -811,7 +844,7 @@ fn build_post_sync_baseline(
                         ..m.clone()
                     })
             }
-            // ConflictFork, RenameLocal, RenameRemote, DeleteRemote — omit.
+            // ConflictFork, RenameLocal, RenameRemote — omit.
             _ => None,
         })
         .collect()
@@ -1286,6 +1319,346 @@ mod tests {
                 .iter()
                 .all(|f| f.path != "wiki/seeded.md"),
             "with baseline: client-deleted file must NOT appear in to_download"
+        );
+    }
+
+    // ── DISK-0046: second-client delete fan-out ──────────────────────────────
+
+    /// V-AC-3: ActionType::DeleteRemote must push a path into to_delete.
+    ///
+    /// Triplet: server=tombstone, client=live file, baseline=live file
+    /// → reconciler emits DeleteRemote → server must include path in to_delete.
+    ///
+    /// RED pre-fix (DeleteRemote falls into _ => {} and to_delete stays empty).
+    #[tokio::test]
+    async fn delete_remote_action_maps_to_client_to_delete() {
+        let (svc, token, _root, _db_dir) = make_service_with_db("vac3-node").await;
+
+        // Server holds a tombstone for "doc/gone.md".
+        let server_tomb = disk_core::types::FileMeta {
+            path: std::path::PathBuf::from("doc/gone.md"),
+            content_hash: [0x33; 32],
+            size: 100,
+            mtime_ns: 1_700_000_000_000_000_000,
+            inode: None,
+            vector_clock: disk_core::VectorClock::new(),
+            deleted: true,
+            deleted_at: Some(1_700_000_001),
+            node_id: "server".into(),
+        };
+        let db = svc.meta_db.as_ref().unwrap();
+        db.upsert_file(&server_tomb).await.unwrap();
+
+        // Client's baseline records the file as live (it saw it on prior sync).
+        let baseline_live = disk_core::types::FileMeta {
+            deleted: false,
+            deleted_at: None,
+            ..server_tomb.clone()
+        };
+        db.upsert_node_baselines("vac3-node", "default", &[baseline_live])
+            .await
+            .unwrap();
+
+        // Client still reports the file as live.
+        let client_live = FileMetadata {
+            path: "doc/gone.md".into(),
+            content_hash: [0x33; 32].to_vec(),
+            size: 100,
+            mtime_ns: 1_700_000_000_000_000_000,
+            deleted: false,
+            ..Default::default()
+        };
+        let resp = svc
+            .exchange_state(auth_req(
+                SyncStateRequest {
+                    node_id: "vac3-node".into(),
+                    session_token: token.clone(),
+                    files: vec![client_live],
+                    node_clock: std::collections::HashMap::new(),
+                    ..Default::default()
+                },
+                &token,
+            ))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(
+            resp.to_delete.iter().any(|f| f.path == "doc/gone.md"),
+            "DeleteRemote: path must appear in to_delete"
+        );
+        assert!(
+            resp.to_download.iter().all(|f| f.path != "doc/gone.md"),
+            "DeleteRemote: path must NOT appear in to_download"
+        );
+    }
+
+    /// V-AC-2: after a DeleteLocal pass, the server's authoritative files row
+    /// must be tombstoned (deleted=true, deleted_at set).
+    ///
+    /// Flow: seed server file + client baseline → client sends empty list
+    /// (DeleteLocal emitted) → reload server files row → assert deleted=true.
+    ///
+    /// RED pre-fix (server row stays live; only per-client baseline is updated).
+    #[tokio::test]
+    async fn sync_state_delete_local_tombstones_server_files_row() {
+        let (svc, token, _root, _db_dir) = make_service_with_db("vac2-node").await;
+
+        let file_meta = disk_core::types::FileMeta {
+            path: std::path::PathBuf::from("vault/note.md"),
+            content_hash: [0x22; 32],
+            size: 200,
+            mtime_ns: 1_700_000_000_000_000_000,
+            inode: None,
+            vector_clock: disk_core::VectorClock::new(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "server".into(),
+        };
+        let db = svc.meta_db.as_ref().unwrap();
+        db.upsert_file(&file_meta).await.unwrap();
+        db.upsert_node_baselines("vac2-node", "default", &[file_meta])
+            .await
+            .unwrap();
+
+        // Client sends empty file list → DeleteLocal → tombstone should be written.
+        svc.exchange_state(auth_req(
+            SyncStateRequest {
+                node_id: "vac2-node".into(),
+                session_token: token.clone(),
+                files: vec![],
+                node_clock: std::collections::HashMap::new(),
+                ..Default::default()
+            },
+            &token,
+        ))
+        .await
+        .unwrap();
+
+        // Reload the server's authoritative files row.
+        let db = svc.meta_db.as_ref().unwrap();
+        let server_files = db.list_all_files().await.unwrap();
+        let row = server_files
+            .iter()
+            .find(|m| m.path.to_string_lossy() == "vault/note.md")
+            .expect("server row must still exist after delete");
+
+        assert!(
+            row.deleted,
+            "server files row must be tombstoned (deleted=true)"
+        );
+        assert!(
+            row.deleted_at.is_some(),
+            "server files row must have deleted_at set"
+        );
+    }
+
+    /// V-AC-1: two-client delete fan-out.
+    ///
+    /// Flow: register two nodes (A, B); A and B both sync a file;
+    /// A sends empty list (A deletes → server tombstones authoritative row);
+    /// B syncs → B must receive path in to_delete.
+    ///
+    /// RED pre-fix (server row not tombstoned; B gets to_download instead).
+    #[tokio::test]
+    async fn sync_state_second_client_receives_delete_fan_out() {
+        let root = tempfile::tempdir().unwrap();
+        let db_dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path()).unwrap();
+        let db = disk_core::MetaDb::open(&db_dir.path().join("meta.sqlite"))
+            .await
+            .unwrap();
+        let store = AuthStore::new();
+
+        // Register node A.
+        let key_a = store.register_node("fan-a", "N", "linux").unwrap();
+        let (tok_a, _) = store.authenticate("fan-a", key_a.as_str()).unwrap();
+        let tok_a = tok_a.as_str().to_string();
+
+        // Register node B on the SAME service (shared store + db).
+        let key_b = store.register_node("fan-b", "N", "linux").unwrap();
+        let (tok_b, _) = store.authenticate("fan-b", key_b.as_str()).unwrap();
+        let tok_b = tok_b.as_str().to_string();
+
+        let svc = SyncServiceImpl::new(store, root.path().to_path_buf()).with_meta_db(db, "server");
+
+        let shared_file = disk_core::types::FileMeta {
+            path: std::path::PathBuf::from("shared/page.md"),
+            content_hash: [0x55; 32],
+            size: 300,
+            mtime_ns: 1_700_000_000_000_000_000,
+            inode: None,
+            vector_clock: disk_core::VectorClock::new(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "server".into(),
+        };
+
+        let db_ref = svc.meta_db.as_ref().unwrap();
+        // Seed server authoritative row + baselines for both A and B.
+        db_ref.upsert_file(&shared_file).await.unwrap();
+        db_ref
+            .upsert_node_baselines("fan-a", "default", std::slice::from_ref(&shared_file))
+            .await
+            .unwrap();
+        db_ref
+            .upsert_node_baselines("fan-b", "default", std::slice::from_ref(&shared_file))
+            .await
+            .unwrap();
+
+        // A deletes: sends empty file list → server should tombstone authoritative row.
+        svc.exchange_state(auth_req(
+            SyncStateRequest {
+                node_id: "fan-a".into(),
+                session_token: tok_a.clone(),
+                files: vec![],
+                node_clock: std::collections::HashMap::new(),
+                ..Default::default()
+            },
+            &tok_a,
+        ))
+        .await
+        .unwrap();
+
+        // B syncs: still reports the file as live.
+        let b_live = FileMetadata {
+            path: "shared/page.md".into(),
+            content_hash: [0x55; 32].to_vec(),
+            size: 300,
+            mtime_ns: 1_700_000_000_000_000_000,
+            deleted: false,
+            ..Default::default()
+        };
+        let resp_b = svc
+            .exchange_state(auth_req(
+                SyncStateRequest {
+                    node_id: "fan-b".into(),
+                    session_token: tok_b.clone(),
+                    files: vec![b_live],
+                    node_clock: std::collections::HashMap::new(),
+                    ..Default::default()
+                },
+                &tok_b,
+            ))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(
+            resp_b.to_delete.iter().any(|f| f.path == "shared/page.md"),
+            "second client must receive the deleted file in to_delete"
+        );
+        assert!(
+            resp_b
+                .to_download
+                .iter()
+                .all(|f| f.path != "shared/page.md"),
+            "second client must NOT receive the file in to_download"
+        );
+    }
+
+    /// V-AC-5: after client B ACKs delete (sends empty state), a subsequent
+    /// sync from B must not resurrect the file (Skip, no to_download).
+    #[tokio::test]
+    async fn sync_state_deleted_file_not_resurrected_after_ack() {
+        let root = tempfile::tempdir().unwrap();
+        let db_dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path()).unwrap();
+        let db = disk_core::MetaDb::open(&db_dir.path().join("meta.sqlite"))
+            .await
+            .unwrap();
+        let store = AuthStore::new();
+
+        let key = store.register_node("ack-node", "N", "linux").unwrap();
+        let (tok, _) = store.authenticate("ack-node", key.as_str()).unwrap();
+        let tok = tok.as_str().to_string();
+
+        let svc = SyncServiceImpl::new(store, root.path().to_path_buf()).with_meta_db(db, "server");
+
+        let file_meta = disk_core::types::FileMeta {
+            path: std::path::PathBuf::from("notes/to-delete.md"),
+            content_hash: [0x77; 32],
+            size: 50,
+            mtime_ns: 1_700_000_000_000_000_000,
+            inode: None,
+            vector_clock: disk_core::VectorClock::new(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "server".into(),
+        };
+        let db_ref = svc.meta_db.as_ref().unwrap();
+        // Server tombstone already in place (simulates fan-out already applied).
+        let tomb = disk_core::types::FileMeta {
+            deleted: true,
+            deleted_at: Some(1_700_000_999),
+            ..file_meta.clone()
+        };
+        db_ref.upsert_file(&tomb).await.unwrap();
+        // B had a live baseline before receiving the delete instruction.
+        db_ref
+            .upsert_node_baselines("ack-node", "default", &[file_meta])
+            .await
+            .unwrap();
+
+        // First sync: B still has the file → receives DeleteRemote (to_delete).
+        let b_live = FileMetadata {
+            path: "notes/to-delete.md".into(),
+            content_hash: [0x77; 32].to_vec(),
+            size: 50,
+            mtime_ns: 1_700_000_000_000_000_000,
+            ..Default::default()
+        };
+        let resp1 = svc
+            .exchange_state(auth_req(
+                SyncStateRequest {
+                    node_id: "ack-node".into(),
+                    session_token: tok.clone(),
+                    files: vec![b_live],
+                    node_clock: std::collections::HashMap::new(),
+                    ..Default::default()
+                },
+                &tok,
+            ))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(
+            resp1
+                .to_delete
+                .iter()
+                .any(|f| f.path == "notes/to-delete.md"),
+            "first sync: file must appear in to_delete"
+        );
+
+        // ACK: B sends empty file list (it applied the delete).
+        let resp2 = svc
+            .exchange_state(auth_req(
+                SyncStateRequest {
+                    node_id: "ack-node".into(),
+                    session_token: tok.clone(),
+                    files: vec![],
+                    node_clock: std::collections::HashMap::new(),
+                    ..Default::default()
+                },
+                &tok,
+            ))
+            .await
+            .unwrap()
+            .into_inner();
+        // No resurrection: file must not appear in either to_download or to_delete.
+        assert!(
+            resp2
+                .to_download
+                .iter()
+                .all(|f| f.path != "notes/to-delete.md"),
+            "ack pass: file must NOT appear in to_download (no resurrection)"
+        );
+        assert!(
+            resp2
+                .to_delete
+                .iter()
+                .all(|f| f.path != "notes/to-delete.md"),
+            "ack pass: file must NOT appear in to_delete again"
         );
     }
 
