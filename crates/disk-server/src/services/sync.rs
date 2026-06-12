@@ -24,10 +24,15 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status, Streaming};
 
+use disk_core::meta_db::MetaDb;
 use disk_core::path_guard;
+use disk_core::reconciler::ReconciliationEngine;
+use disk_core::types::{ActionType, FileMeta};
+use disk_core::vector_clock::VectorClock;
 use disk_proto::disk::{
     sync_service_server::SyncService, AclMismatchDetails, DeltaChunk, DeltaDownloadRequest,
-    DeltaUploadRequest, DeltaUploadResponse, SyncStateAck, SyncStateRequest,
+    DeltaUploadRequest, DeltaUploadResponse, FileMetadata, SyncStateAck, SyncStateRequest,
+    SyncStateResponse,
 };
 
 use crate::acl::{AclEnforcer, AclError, CertFingerprint, EnforcedRole};
@@ -56,6 +61,13 @@ pub struct SyncServiceImpl {
     pub replay: Arc<ReplayGuard>,
     /// Filesystem root for this node (used by DeltaUpload path guard).
     pub root: std::path::PathBuf,
+    /// SQLite metadata index — authoritative server state (DISK-0043).
+    /// `None` in legacy/test mode constructed via `new()`; `Some` when
+    /// constructed via `with_acl()` or `with_meta_db()`.
+    pub meta_db: Option<MetaDb>,
+    /// Stable server node identifier used as the writer in MetaDb upserts
+    /// and as the `node_id` for `ReconciliationEngine`.
+    pub server_node_id: String,
     /// ACL enforcer — when `Some`, cert-based role checks are active.
     /// When `None`, only legacy session-token auth is applied.
     pub acl_enforcer: Option<AclEnforcer>,
@@ -74,6 +86,8 @@ impl SyncServiceImpl {
             store,
             replay: Arc::new(ReplayGuard::new()),
             root,
+            meta_db: None,
+            server_node_id: "server".into(),
             acl_enforcer: None,
             audit: None,
             #[cfg(feature = "publisher-verify")]
@@ -92,11 +106,26 @@ impl SyncServiceImpl {
             store,
             replay: Arc::new(ReplayGuard::new()),
             root,
+            meta_db: None,
+            server_node_id: "server".into(),
             acl_enforcer: Some(acl_enforcer),
             audit: Some(audit),
             #[cfg(feature = "publisher-verify")]
             publisher_verifier: None,
         }
+    }
+
+    /// Attach a `MetaDb` handle and optional server node id to an existing instance.
+    /// Called from `main.rs` after the database is opened.
+    pub fn with_meta_db(mut self, db: MetaDb, node_id: impl Into<String>) -> Self {
+        self.meta_db = Some(db);
+        self.server_node_id = node_id.into();
+        self
+    }
+
+    /// Return the server node id.
+    pub fn server_node_id(&self) -> &str {
+        &self.server_node_id
     }
 
     /// Attach a publisher verifier (only available with `publisher-verify` feature).
@@ -440,6 +469,97 @@ impl SyncService for SyncServiceImpl {
             }
         }
 
+        // ── Commit assembled bytes to sync_root (DISK-0043) ────────────────
+        //
+        // SRE write-order (binding): bytes DURABLE first, then MetaDb row.
+        // Crash between rename and upsert → next sync re-derives row from
+        // disk (convergent).
+        //
+        // Security precondition: path_guard::validate before any rename.
+        // Path was already checked on the first chunk arrival (above), but
+        // re-validate here with the canonical root for the write gate so the
+        // check is co-located with the write (defence-in-depth).
+        if let Some(file_path) = last_path.as_deref() {
+            let candidate = std::path::Path::new(file_path);
+
+            // Security: path_guard::validate BEFORE any write (V-AC-6 binding).
+            let target = path_guard::validate(candidate, &self.root)
+                .map_err(|e| Status::invalid_argument(format!("path guard: {e}")))?;
+
+            // Ensure parent directory exists.
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| Status::internal(format!("create parent dir: {e}")))?;
+            }
+
+            // 1. Write to a temp file inside sync_root (same device → atomic rename).
+            let tmp_name = format!(".tmp-{}", rand::random::<u64>());
+            let tmp_path = self.root.join(&tmp_name);
+            std::fs::write(&tmp_path, &assembled)
+                .map_err(|e| Status::internal(format!("write temp: {e}")))?;
+
+            // 2. fsync the temp file for durability.
+            {
+                let f = std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(&tmp_path)
+                    .map_err(|e| Status::internal(format!("open temp for fsync: {e}")))?;
+                f.sync_all()
+                    .map_err(|e| Status::internal(format!("fsync temp: {e}")))?;
+            }
+
+            // 3. Atomic rename (bytes durable before MetaDb row — SRE binding).
+            std::fs::rename(&tmp_path, &target)
+                .map_err(|e| Status::internal(format!("rename temp to target: {e}")))?;
+
+            // 4. MetaDb upsert (after bytes are durable on disk).
+            if let Some(ref db) = self.meta_db {
+                let mtime_ns = target
+                    .metadata()
+                    .ok()
+                    .and_then(|m| {
+                        use std::time::UNIX_EPOCH;
+                        m.modified().ok()?.duration_since(UNIX_EPOCH).ok()
+                    })
+                    .map(|d| d.as_nanos() as i64)
+                    .unwrap_or(0);
+
+                let file_size = assembled.len() as u64;
+
+                // Advance the server's vector clock for this write.
+                let mut vc = VectorClock::new();
+                vc.advance(&self.server_node_id);
+
+                // `target` is canonical (path_guard resolved it); strip the
+                // canonical root so the stored path is always relative even
+                // when the runtime root path contains symlinks (e.g. macOS
+                // /var → /private/var tempdir paths).
+                let canonical_root = self
+                    .root
+                    .canonicalize()
+                    .unwrap_or_else(|_| self.root.clone());
+                let relative_path = target
+                    .strip_prefix(&canonical_root)
+                    .unwrap_or(&target)
+                    .to_path_buf();
+
+                let meta = FileMeta {
+                    path: relative_path,
+                    content_hash: resulting_hash,
+                    size: file_size,
+                    mtime_ns,
+                    inode: None,
+                    vector_clock: vc,
+                    deleted: false,
+                    deleted_at: None,
+                    node_id: self.server_node_id.clone(),
+                };
+                // Upsert failure is non-fatal: bytes are durable; next sync
+                // rebuilds the row from disk (convergent recovery).
+                let _ = db.upsert_file(&meta).await;
+            }
+        }
+
         Ok(Response::new(DeltaUploadResponse {
             accepted: true,
             resulting_hash: resulting_hash.to_vec(),
@@ -492,11 +612,12 @@ impl SyncService for SyncServiceImpl {
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 
-    // Legacy RPCs from Phase 1/2 — not used in Phase 3 but must satisfy the trait.
+    // DISK-0043: real reconcile over unary ExchangeState.
     async fn exchange_state(
         &self,
         request: Request<SyncStateRequest>,
-    ) -> Result<Response<disk_proto::disk::SyncStateResponse>, Status> {
+    ) -> Result<Response<SyncStateResponse>, Status> {
+        let _node_id = self.require_auth(request.metadata())?;
         let share = Self::extract_share(request.metadata());
         let cert_id = CertIdentity::from_request(&request);
         self.check_acl_by_cert(
@@ -511,7 +632,117 @@ impl SyncService for SyncServiceImpl {
             "bidirectional",
         )
         .await?;
-        Err(Status::unimplemented("use SyncState bidi streaming"))
+        let req = request.into_inner();
+
+        // Build the server's current state.
+        //
+        // D2 perspective mapping (DISK-0043 reconcile wiring):
+        //
+        // `ReconciliationEngine::reconcile(local, remote, indexed)` is written
+        // from the LOCAL node's viewpoint.  When called server-side:
+        //
+        //   local   = server's own MetaDb rows  (the server is the engine's node)
+        //   remote  = client-submitted files    (the other peer)
+        //   indexed = server's own MetaDb rows  (= local, since the server's DB
+        //             IS the authoritative baseline after each commit)
+        //
+        // Action semantics from the server's perspective:
+        //   Upload       → server has a file the client lacks   → client should Download
+        //   Download     → client has a file the server lacks   → client should Upload
+        //   DeleteLocal  → server should delete its local copy
+        //   DeleteRemote → server instructs client to delete
+        //
+        // The SyncStateResponse is consumed by the CLIENT, so we invert:
+        //   Upload actions   → go into `to_download` (client must fetch from server)
+        //   Download actions → go into `to_upload`   (client must push to server)
+        //   DeleteRemote actions → go into `to_delete` (client deletes locally)
+        let (server_files, client_files) = if let Some(ref db) = self.meta_db {
+            let server = db
+                .list_all_files()
+                .await
+                .map_err(|e| Status::internal(format!("meta_db list_all_files: {e}")))?;
+            let client: Vec<FileMeta> = req.files.iter().map(proto_to_file_meta).collect();
+            (server, client)
+        } else {
+            // No MetaDb wired — return empty response (legacy / test mode
+            // without a database; clients see no required actions).
+            return Ok(Response::new(SyncStateResponse::default()));
+        };
+
+        let engine = ReconciliationEngine::new(self.server_node_id.clone());
+        // D2 perspective mapping (DISK-0043):
+        //
+        //   local   = server's own MetaDb rows
+        //   remote  = client-submitted files
+        //   indexed = [] (empty baseline)
+        //
+        // Rationale: the server does not track per-client baseline snapshots in
+        // this phase.  Using server_files as the baseline (indexed) conflates
+        // "client never synced this file" with "client deleted the file", which
+        // produces DeleteLocal actions instead of Upload (see resolve_one
+        // scenarios 27/l_present+remote.is_none+i_present).  An empty indexed
+        // cleanly maps every file that exists on one side but not the other to
+        // Upload/Download (scenarios 1–2), which is the correct first-sync
+        // behaviour. Clients that carry a vector clock will still get causal
+        // disambiguation via the clock fields in FileMeta.
+        let actions = engine
+            .reconcile(&server_files, &client_files, &[])
+            .map_err(|e| Status::internal(format!("reconcile: {e}")))?;
+
+        let mut to_upload: Vec<FileMetadata> = Vec::new();
+        let mut to_download: Vec<FileMetadata> = Vec::new();
+        let mut to_delete: Vec<FileMetadata> = Vec::new();
+
+        for action in &actions {
+            match action.action {
+                // Server has file; client should download it.
+                ActionType::Upload => {
+                    if let Some(ref m) = action.server_version {
+                        to_download.push(file_meta_to_proto(m));
+                    } else if let Some(m) = server_files.iter().find(|m| m.path == action.path) {
+                        to_download.push(file_meta_to_proto(m));
+                    }
+                }
+                // Client has file; client should upload it.
+                ActionType::Download => {
+                    if let Some(ref m) = action.server_version {
+                        to_upload.push(file_meta_to_proto(m));
+                    } else if let Some(m) = client_files.iter().find(|m| m.path == action.path) {
+                        to_upload.push(file_meta_to_proto(m));
+                    }
+                }
+                // Client should delete their local copy.
+                ActionType::DeleteLocal => {
+                    let path_str = action.path.to_string_lossy().to_string();
+                    to_delete.push(FileMetadata {
+                        path: path_str,
+                        ..Default::default()
+                    });
+                }
+                // Skip, ConflictFork, etc. — not surfaced in this response.
+                _ => {}
+            }
+        }
+
+        // Build server_clock from the server's MetaDb rows.
+        let mut server_clock: std::collections::HashMap<String, u64> =
+            std::collections::HashMap::new();
+        for m in &server_files {
+            for (node, tick) in &m.vector_clock.0 {
+                let entry = server_clock.entry(node.clone()).or_insert(0);
+                if *tick > *entry {
+                    *entry = *tick;
+                }
+            }
+        }
+
+        Ok(Response::new(SyncStateResponse {
+            to_upload,
+            to_download,
+            to_delete,
+            conflicts: Vec::new(),
+            server_clock,
+        }))
     }
 
     async fn upload_delta(
@@ -523,6 +754,55 @@ impl SyncService for SyncServiceImpl {
         self.check_acl_by_cert(cert_id.as_ref(), &share, WRITE_ROLES, "send_only")
             .await?;
         Err(Status::unimplemented("use DeltaUpload streaming"))
+    }
+}
+
+// ── Proto ↔ domain conversion helpers (DISK-0043) ──────────────────────────
+
+/// Convert a proto `FileMetadata` into a domain `FileMeta`.
+fn proto_to_file_meta(m: &FileMetadata) -> FileMeta {
+    let content_hash: [u8; 32] = m.content_hash.as_slice().try_into().unwrap_or([0u8; 32]);
+
+    let mut vc = VectorClock::new();
+    for (node, tick) in &m.vector_clock {
+        vc.0.insert(node.clone(), *tick);
+    }
+
+    FileMeta {
+        path: std::path::PathBuf::from(&m.path),
+        content_hash,
+        size: m.size,
+        mtime_ns: m.mtime_ns,
+        inode: if m.inode == 0 { None } else { Some(m.inode) },
+        vector_clock: vc,
+        deleted: m.deleted,
+        deleted_at: if m.deleted_at == 0 {
+            None
+        } else {
+            Some(m.deleted_at)
+        },
+        node_id: m.node_id.clone(),
+    }
+}
+
+/// Convert a domain `FileMeta` into a proto `FileMetadata`.
+fn file_meta_to_proto(m: &FileMeta) -> FileMetadata {
+    FileMetadata {
+        path: m.path.to_string_lossy().to_string(),
+        content_hash: m.content_hash.to_vec(),
+        size: m.size,
+        mtime_ns: m.mtime_ns,
+        inode: m.inode.unwrap_or(0),
+        vector_clock: m
+            .vector_clock
+            .0
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect(),
+        deleted: m.deleted,
+        deleted_at: m.deleted_at.unwrap_or(0),
+        node_id: m.node_id.clone(),
+        ..Default::default()
     }
 }
 
@@ -624,5 +904,128 @@ mod tests {
             reassembled.extend_from_slice(&chunk.unwrap().data);
         }
         assert_eq!(reassembled, content);
+    }
+
+    // ── DISK-0043 Step 1: SyncServiceImpl constructs with a MetaDb ──────
+
+    #[tokio::test]
+    async fn sync_service_constructs_with_meta_db() {
+        let root = tempdir().unwrap();
+        let db_dir = tempdir().unwrap();
+        let db = disk_core::MetaDb::open(&db_dir.path().join("meta.sqlite"))
+            .await
+            .unwrap();
+        let svc = SyncServiceImpl::new(AuthStore::new(), root.path().to_path_buf())
+            .with_meta_db(db, "server-test");
+        assert_eq!(svc.server_node_id(), "server-test");
+        assert!(svc.meta_db.is_some());
+    }
+
+    // ── DISK-0043 Step 2 & 3: delta_upload commits bytes to sync_root + MetaDb ──
+    // Unit tests for delta_upload use a real gRPC server (same pattern as
+    // two_node_round_trip.rs) because the handler requires Streaming<T>.
+    // See crates/disk-server/tests/delta_upload_commit.rs for those tests.
+
+    // ── DISK-0043 Step 4: exchange_state returns real reconcile ─────────
+
+    /// Server has a file; client sends empty state → to_download contains the file.
+    #[tokio::test]
+    async fn exchange_state_server_file_appears_in_to_download() {
+        let root = tempdir().unwrap();
+        std::fs::create_dir_all(root.path()).unwrap();
+        let db_dir = tempdir().unwrap();
+        let db = disk_core::MetaDb::open(&db_dir.path().join("meta.sqlite"))
+            .await
+            .unwrap();
+
+        // Seed a file into MetaDb.
+        let meta = disk_core::types::FileMeta {
+            path: std::path::PathBuf::from("wiki/page.md"),
+            content_hash: [0xAB; 32],
+            size: 100,
+            mtime_ns: 1_700_000_000_000_000_000,
+            inode: None,
+            vector_clock: disk_core::VectorClock::new(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "server".into(),
+        };
+        db.upsert_file(&meta).await.unwrap();
+
+        let store = AuthStore::new();
+        let key = store.register_node("es-node", "N", "linux").unwrap();
+        let (token, _) = store.authenticate("es-node", key.as_str()).unwrap();
+
+        let svc = SyncServiceImpl::new(store, root.path().to_path_buf()).with_meta_db(db, "server");
+
+        // Client sends empty file list.
+        let mut req = Request::new(SyncStateRequest {
+            node_id: "es-node".into(),
+            session_token: token.as_str().to_string(),
+            files: vec![],
+            node_clock: std::collections::HashMap::new(),
+            ..Default::default()
+        });
+        req.metadata_mut().insert(
+            "authorization",
+            format!("Bearer {}", token.as_str()).parse().unwrap(),
+        );
+
+        let resp = svc.exchange_state(req).await.unwrap().into_inner();
+
+        // Server has wiki/page.md; client has nothing → to_download = [wiki/page.md]
+        assert_eq!(
+            resp.to_download.len(),
+            1,
+            "client should be told to download server's file"
+        );
+        assert_eq!(resp.to_download[0].path, "wiki/page.md");
+    }
+
+    /// Client has a file; server has empty state → to_upload contains the file.
+    #[tokio::test]
+    async fn exchange_state_client_file_appears_in_to_upload() {
+        let root = tempdir().unwrap();
+        std::fs::create_dir_all(root.path()).unwrap();
+        let db_dir = tempdir().unwrap();
+        let db = disk_core::MetaDb::open(&db_dir.path().join("meta.sqlite"))
+            .await
+            .unwrap();
+
+        let store = AuthStore::new();
+        let key = store.register_node("eu-node", "N", "linux").unwrap();
+        let (token, _) = store.authenticate("eu-node", key.as_str()).unwrap();
+
+        let svc = SyncServiceImpl::new(store, root.path().to_path_buf()).with_meta_db(db, "server");
+
+        // Client sends one file.
+        let client_file = FileMetadata {
+            path: "notes/hello.md".into(),
+            content_hash: [0xCC; 32].to_vec(),
+            size: 42,
+            mtime_ns: 1_700_000_000_000_000_000,
+            ..Default::default()
+        };
+        let mut req = Request::new(SyncStateRequest {
+            node_id: "eu-node".into(),
+            session_token: token.as_str().to_string(),
+            files: vec![client_file],
+            node_clock: std::collections::HashMap::new(),
+            ..Default::default()
+        });
+        req.metadata_mut().insert(
+            "authorization",
+            format!("Bearer {}", token.as_str()).parse().unwrap(),
+        );
+
+        let resp = svc.exchange_state(req).await.unwrap().into_inner();
+
+        // Server has nothing; client has notes/hello.md → to_upload = [notes/hello.md]
+        assert_eq!(
+            resp.to_upload.len(),
+            1,
+            "client should be told to upload its file"
+        );
+        assert_eq!(resp.to_upload[0].path, "notes/hello.md");
     }
 }

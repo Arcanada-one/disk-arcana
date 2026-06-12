@@ -242,12 +242,11 @@ async fn apply_load<V>(
         }
         Err(AclLoadError::VersionRegress { stored, attempted }) => {
             // Refuse-and-keep: keep existing Loaded state, only log.
-            let ev = AuditEvent::new(AuditKind::AclVersionRegress).with_payload(
-                &serde_json::json!({
+            let ev =
+                AuditEvent::new(AuditKind::AclVersionRegress).with_payload(&serde_json::json!({
                     "stored": stored,
                     "attempted": attempted,
-                }),
-            );
+                }));
             let _ = audit.emit(ev).await;
         }
         Err(e) => {

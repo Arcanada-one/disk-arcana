@@ -187,6 +187,107 @@ impl DiskClient {
         Ok(resp)
     }
 
+    /// Upload `bytes` to the server for the given `share` and relative `path`.
+    ///
+    /// Mirrors `download_file` in structure (DISK-0043):
+    /// - Chunks bytes via `disk_core::delta::chunks`.
+    /// - Streams `DeltaUploadRequest` with auth headers + `x-disk-share`.
+    /// - Asserts `response.accepted && resulting_hash == blake3(bytes)`.
+    ///
+    /// Returns `Ok(())` on success or a `ClientError` on any failure.
+    pub async fn delta_upload(
+        &self,
+        share: &str,
+        path: &str,
+        bytes: &[u8],
+    ) -> Result<(), ClientError> {
+        let token = self.session_token().await?;
+        let mut client = SyncServiceClient::new(self.channel.clone());
+
+        let content_hash = disk_core::delta::blake3_hash(bytes);
+
+        // Build the stream of DeltaUploadRequest messages.
+        let bearer_val: MetadataValue<tonic::metadata::Ascii> =
+            format!("Bearer {token}").parse().map_err(
+                |e: tonic::metadata::errors::InvalidMetadataValue| {
+                    ClientError::MetadataError(e.to_string())
+                },
+            )?;
+        let share_val: MetadataValue<tonic::metadata::Ascii> =
+            share
+                .parse()
+                .map_err(|e: tonic::metadata::errors::InvalidMetadataValue| {
+                    ClientError::MetadataError(format!("x-disk-share: {e}"))
+                })?;
+
+        // Build messages: first message carries path + content_hash + first chunk;
+        // subsequent messages carry only chunk data (server accumulates them).
+        let mut msgs: Vec<disk_proto::disk::DeltaUploadRequest> = Vec::new();
+        let mut first = true;
+        for chunk_result in disk_core::delta::chunks(bytes) {
+            let chunk = chunk_result
+                .map_err(|e| ClientError::MetadataError(format!("chunking error: {e}")))?;
+            let proto_chunk = disk_proto::disk::DeltaChunk {
+                offset: chunk.offset,
+                weak_checksum: chunk.weak,
+                strong_hash: chunk.strong.to_vec(),
+                data: chunk.data,
+            };
+            if first {
+                msgs.push(disk_proto::disk::DeltaUploadRequest {
+                    path: path.to_owned(),
+                    content_hash: content_hash.to_vec(),
+                    chunks: vec![proto_chunk],
+                    ..Default::default()
+                });
+                first = false;
+            } else {
+                msgs.push(disk_proto::disk::DeltaUploadRequest {
+                    path: String::new(),
+                    content_hash: Vec::new(),
+                    chunks: vec![proto_chunk],
+                    ..Default::default()
+                });
+            }
+        }
+        // Edge case: empty content → send single message with no chunks.
+        if msgs.is_empty() {
+            msgs.push(disk_proto::disk::DeltaUploadRequest {
+                path: path.to_owned(),
+                content_hash: content_hash.to_vec(),
+                chunks: vec![],
+                ..Default::default()
+            });
+        }
+
+        let stream = tokio_stream::iter(msgs);
+        let mut req = Request::new(stream);
+        req.metadata_mut().insert("authorization", bearer_val);
+        req.metadata_mut().insert("x-disk-share", share_val);
+
+        let resp = client.delta_upload(req).await?.into_inner();
+
+        if !resp.accepted {
+            return Err(ClientError::MetadataError(
+                "server did not accept upload".into(),
+            ));
+        }
+        // Verify resulting hash matches what we sent.
+        let resp_hash: [u8; 32] = resp
+            .resulting_hash
+            .as_slice()
+            .try_into()
+            .map_err(|_| ClientError::MetadataError("invalid resulting_hash length".into()))?;
+        if resp_hash != content_hash {
+            return Err(ClientError::MetadataError(format!(
+                "resulting_hash mismatch: server={} local={}",
+                hex::encode(resp_hash),
+                hex::encode(content_hash),
+            )));
+        }
+        Ok(())
+    }
+
     /// Download a file as a stream of `DeltaChunk`s, returning reassembled bytes.
     pub async fn download_file(&self, path: &str) -> Result<Vec<u8>, ClientError> {
         let token = self.session_token().await?;
@@ -233,5 +334,29 @@ mod tests {
     fn client_error_display() {
         let e = ClientError::NotAuthenticated;
         assert!(e.to_string().contains("authenticate"));
+    }
+
+    // ── DISK-0043 Step 5: delta_upload builds correct chunk stream ───────
+
+    /// Verify that delta_upload produces the correct number of chunks for
+    /// content that spans multiple 4 KiB blocks.  The actual gRPC call is
+    /// tested in crates/disk-server/tests/delta_upload_commit.rs (round-trip).
+    #[test]
+    fn delta_upload_chunking_produces_correct_count() {
+        use disk_core::delta::chunks;
+
+        // 9 KiB content → 3 chunks (4K + 4K + 1K).
+        let content: Vec<u8> = (0u8..=255u8).cycle().take(9 * 1024).collect();
+        let chunk_count = chunks(content.as_slice()).count();
+        assert_eq!(chunk_count, 3, "9 KiB must produce 3 chunks");
+
+        // Verify blake3 of reassembled content matches original.
+        let expected_hash = disk_core::delta::blake3_hash(&content);
+        let mut reassembled = Vec::new();
+        for c in chunks(content.as_slice()) {
+            reassembled.extend_from_slice(&c.unwrap().data);
+        }
+        let actual_hash = disk_core::delta::blake3_hash(&reassembled);
+        assert_eq!(expected_hash, actual_hash, "reassembled hash must match");
     }
 }

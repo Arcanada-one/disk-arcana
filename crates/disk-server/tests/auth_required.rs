@@ -30,12 +30,14 @@ async fn delta_download_without_auth_unauthenticated() {
     assert_eq!(err.code(), tonic::Code::Unauthenticated);
 }
 
+/// ExchangeState now requires auth (DISK-0043: replaced the unimplemented stub
+/// with real reconcile). Without a bearer token → Unauthenticated.
 #[tokio::test]
-async fn exchange_state_returns_unimplemented() {
+async fn exchange_state_without_auth_unauthenticated() {
     let svc = make_sync_svc();
     let req = Request::new(SyncStateRequest::default());
     let err = svc.exchange_state(req).await.unwrap_err();
-    assert_eq!(err.code(), tonic::Code::Unimplemented);
+    assert_eq!(err.code(), tonic::Code::Unauthenticated);
 }
 
 #[tokio::test]

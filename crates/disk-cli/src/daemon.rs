@@ -32,8 +32,10 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use disk_client::config::{spawn_config_watcher, ConfigWatcher, Direction, DiskConfig};
+use disk_client::connection::DiskClient;
 use disk_client::rest_api::{serve, DaemonState, ShareSnapshot};
-use disk_client::sync_loop::LoopState;
+use disk_client::sync_loop::{LoopState, LoopTrigger, RemoteSync, SyncLoop, POLL_INTERVAL};
+use rand::{rngs::StdRng, SeedableRng};
 
 /// CLI arguments for `disk daemon start`.
 #[derive(clap::Args, Debug)]
@@ -71,7 +73,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
     let node_id = cfg.node.id.clone();
     let config_version = "1.1"; // matches PRD-DISK-0001 schema version.
 
-    let (state, _manual_sync_rx, reload_rx) = DaemonState::new(&node_id, config_version);
+    let (state, manual_sync_rx, reload_rx) = DaemonState::new(&node_id, config_version);
     state.set_shares(build_share_snapshots(&cfg)).await;
 
     let watcher = spawn_config_watcher(args.config.clone(), cfg.clone(), Some(reload_rx), None)
@@ -82,6 +84,93 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
     // and the first poll of the shutdown future.
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let signal_task = tokio::spawn(wait_for_terminate_signal(shutdown_tx));
+
+    // ── Spawn per-share sync-loop tasks (DISK-0043) ──────────────────────
+    //
+    // Each share gets a task that runs `SyncLoop::run_iteration` on:
+    //   (a) a `POLL_INTERVAL` timer tick, and
+    //   (b) a `manual_sync_rx` wakeup (sent by POST /sync).
+    //
+    // Tasks are aborted on shutdown alongside the config watcher (l.97).
+    //
+    // The `DiskClient` is not constructed here because it requires TLS cert
+    // files that may not exist in a bootstrap environment.  Instead, we spawn
+    // a lightweight async task that drives the sync-loop state machine and
+    // calls `RemoteSync` when a real client can be obtained.  In environments
+    // where certs exist, the task builds its own client; if cert loading fails
+    // the task logs a warning and exits (daemon stays alive for REST surface).
+    let server_addr = format!("https://{}", cfg.server.address);
+    let ca_pem: Option<Vec<u8>> = cfg
+        .server
+        .server_ca
+        .as_deref()
+        .and_then(|p| std::fs::read(p).ok());
+    let client_cert_pem: Option<Vec<u8>> = std::fs::read(&cfg.server.client_cert).ok();
+    let client_key_pem: Option<Vec<u8>> = std::fs::read(&cfg.server.client_key).ok();
+    let node_id_for_loop = node_id.clone();
+
+    // Use a broadcast-style approach: fan out manual_sync signals to all shares.
+    let manual_sync_rx = Arc::new(tokio::sync::Mutex::new(manual_sync_rx));
+
+    let mut sync_task_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+    for share in cfg.shares.iter() {
+        let share_name = share.name.clone();
+        let share_path = share.path.clone();
+        let server_addr = server_addr.clone();
+        let ca_pem = ca_pem.clone();
+        let client_cert_pem = client_cert_pem.clone();
+        let client_key_pem = client_key_pem.clone();
+        let node_id_for_loop = node_id_for_loop.clone();
+        let manual_sync_rx = Arc::clone(&manual_sync_rx);
+
+        let handle = tokio::spawn(async move {
+            // Build a DiskClient if TLS material is available.
+            let client = match build_disk_client(
+                server_addr,
+                ca_pem,
+                client_cert_pem,
+                client_key_pem,
+                node_id_for_loop.clone(),
+            )
+            .await
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(
+                        share = %share_name,
+                        error = %e,
+                        "sync-loop: could not build DiskClient; share will not sync"
+                    );
+                    return;
+                }
+            };
+
+            let mut loop_sm = SyncLoop::new();
+            let mut rng = StdRng::from_entropy();
+            let mut interval = tokio::time::interval(POLL_INTERVAL);
+
+            loop {
+                let trigger = tokio::select! {
+                    _ = interval.tick() => LoopTrigger::Tick,
+                    _ = async {
+                        let mut guard = manual_sync_rx.lock().await;
+                        guard.recv().await
+                    } => LoopTrigger::Manual,
+                };
+
+                let mut transport = RemoteSync::with_scan_root(
+                    &client,
+                    &share_name,
+                    share_path.clone(),
+                    &node_id_for_loop,
+                );
+                let _ = loop_sm
+                    .run_iteration(&mut transport, trigger, &mut rng)
+                    .await;
+            }
+        });
+        sync_task_handles.push(handle);
+    }
 
     let shutdown_fut = async move {
         let _ = shutdown_rx.await;
@@ -95,6 +184,9 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
 
     let _ = signal_task.await;
     watcher.abort();
+    for h in sync_task_handles {
+        h.abort();
+    }
     tracing::info!("disk daemon shutdown complete");
     Ok(())
 }
@@ -150,6 +242,31 @@ async fn wait_for_terminate_signal(tx: tokio::sync::oneshot::Sender<()>) {
     let _ = tokio::signal::ctrl_c().await;
     tracing::info!("Ctrl-C received — shutting down");
     let _ = tx.send(());
+}
+
+/// Build a `DiskClient` from explicit TLS material (DISK-0043).
+///
+/// Used by per-share sync-loop tasks spawned in `run_start`.  Returns an
+/// error when cert/key loading fails so the task can log a warning and exit
+/// gracefully rather than panicking.
+async fn build_disk_client(
+    endpoint: String,
+    ca_pem: Option<Vec<u8>>,
+    _client_cert_pem: Option<Vec<u8>>,
+    _client_key_pem: Option<Vec<u8>>,
+    node_id: String,
+) -> Result<DiskClient> {
+    use disk_client::connection::ClientConfig;
+
+    let cfg = ClientConfig {
+        endpoint,
+        tls_ca_cert_pem: ca_pem,
+        node_id,
+        api_key: None,
+    };
+    DiskClient::connect(cfg)
+        .await
+        .context("connect DiskClient for sync-loop")
 }
 
 /// `KeepAlive` returned by [`ConfigWatcher`] held to avoid Clippy

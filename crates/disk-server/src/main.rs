@@ -121,14 +121,23 @@ async fn main() -> anyhow::Result<()> {
         enrollment_impl = enrollment_impl.with_admin_token(tok);
     }
 
+    // MetaDb for the sync service (DISK-0043): commit uploaded bytes + vector-clock
+    // upsert. Opens a second WAL-mode connection against the same SQLite file — safe.
+    let meta_db = disk_core::meta_db::MetaDb::open(&cfg.db_path)
+        .await
+        .with_context(|| format!("open MetaDb for sync service at {}", cfg.db_path.display()))?;
+
     // gRPC service wrappers.
     let auth_svc = AuthServiceServer::new(AuthServiceImpl::new(auth_store.clone()));
-    let sync_svc = SyncServiceServer::new(SyncServiceImpl::with_acl(
-        auth_store.clone(),
-        cfg.sync_root.clone(),
-        acl_enforcer.clone(),
-        audit_emitter.clone(),
-    ));
+    let sync_svc = SyncServiceServer::new(
+        SyncServiceImpl::with_acl(
+            auth_store.clone(),
+            cfg.sync_root.clone(),
+            acl_enforcer.clone(),
+            audit_emitter.clone(),
+        )
+        .with_meta_db(meta_db, "server"),
+    );
     let enroll_svc = EnrollmentServiceServer::new(enrollment_impl);
 
     // mTLS: tonic-native identity + client CA root. The `tls13_mtls_server_config`

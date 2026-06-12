@@ -48,16 +48,34 @@ pub fn validate(candidate: &Path, root: &Path) -> Result<PathBuf, PathGuardError
     let canonical = match absolute.canonicalize() {
         Ok(p) => p,
         Err(_) => {
-            // Path may not exist yet (e.g. about-to-be-created file). Resolve
-            // its parent and re-attach the filename.
-            let parent = absolute.parent().ok_or(PathGuardError::OutsideRoot)?;
-            let canon_parent = parent
-                .canonicalize()
-                .map_err(|_| PathGuardError::OutsideRoot)?;
-            match absolute.file_name() {
-                Some(name) => canon_parent.join(name),
-                None => canon_parent,
-            }
+            // Path may not exist yet (e.g. about-to-be-created file with
+            // one or more missing parent directories). Walk up the ancestor
+            // chain until we find an existing directory, then re-attach the
+            // remaining suffix.
+            //
+            // This handles both `root/notes/hello.md` (notes/ doesn't exist)
+            // and `root/a/b/c/file.md` (a/ through c/ are all new).
+            let mut ancestor = absolute.as_path();
+            let mut suffix: Vec<_> = Vec::new();
+            let canon_ancestor = loop {
+                match ancestor.canonicalize() {
+                    Ok(p) => break p,
+                    Err(_) => {
+                        // Push the last component onto the suffix stack and
+                        // move up.  If we reach the filesystem root without
+                        // finding an existing ancestor, treat it as OutsideRoot.
+                        let name = ancestor.file_name().ok_or(PathGuardError::OutsideRoot)?;
+                        suffix.push(name.to_os_string());
+                        ancestor = ancestor.parent().ok_or(PathGuardError::OutsideRoot)?;
+                        if ancestor.as_os_str().is_empty() {
+                            return Err(PathGuardError::OutsideRoot);
+                        }
+                    }
+                }
+            };
+            // Re-attach the suffix (reversed — we pushed most-specific last).
+            suffix.reverse();
+            suffix.iter().fold(canon_ancestor, |acc, seg| acc.join(seg))
         }
     };
 
