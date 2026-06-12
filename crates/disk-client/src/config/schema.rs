@@ -60,7 +60,7 @@ pub struct NodeDefault {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ServerSection {
-    /// gRPC endpoint in `host:port` form (e.g. `disk.arcanada.one:9443`).
+    /// gRPC endpoint in `host:port` form (e.g. `disk.arcanada.ai:9443`).
     pub address: String,
     /// TLS handling mode (`"auto"` for system trust store, otherwise rely on
     /// `server_ca` PEM). String at the schema layer; loader-level enum lives

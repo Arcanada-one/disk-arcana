@@ -175,7 +175,7 @@ pub fn redact_token(token_hex: &str) -> String {
 /// Bootstrap TOML schema for `--from-bootstrap-file <PATH>`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct BootstrapFile {
-    /// gRPC endpoint URI (e.g. `https://disk.arcanada.one:9445`).
+    /// gRPC endpoint URI (e.g. `https://disk.arcanada.ai:9445`).
     pub server: String,
     /// Hex-encoded opaque token from `disk admin pending-token`.
     pub token: String,
@@ -279,11 +279,11 @@ mod tests {
     #[test]
     fn bootstrap_file_parses_minimal() {
         let toml_str = r#"
-server = "https://disk.arcanada.one:9445"
+server = "https://disk.arcanada.ai:9445"
 token = "deadbeef"
 "#;
         let bf = parse_bootstrap_file(toml_str).unwrap();
-        assert_eq!(bf.server, "https://disk.arcanada.one:9445");
+        assert_eq!(bf.server, "https://disk.arcanada.ai:9445");
         assert_eq!(bf.token, "deadbeef");
         assert!(bf.node_id_hint.is_none());
         assert!(bf.ca_cert_pem.is_none());
@@ -292,7 +292,7 @@ token = "deadbeef"
     #[test]
     fn bootstrap_file_parses_full() {
         let toml_str = r#"
-server = "https://disk.arcanada.one:9445"
+server = "https://disk.arcanada.ai:9445"
 token = "0123456789abcdef"
 node_id_hint = "macos-laptop-1"
 ca_cert_pem = "-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----\n"

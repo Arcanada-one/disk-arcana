@@ -5,6 +5,6 @@ id = "dev-server"
 intended_direction = "receive_only"
 
 [server]
-address = "disk.arcanada.one:9443"
+address = "disk.arcanada.ai:9443"
 client_cert = "/etc/disk-arcana/client.crt"
 client_key  = "/etc/disk-arcana/client.key"

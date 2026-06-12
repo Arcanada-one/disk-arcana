@@ -131,8 +131,8 @@ pub struct ImportStateArgs {
 /// Arguments for the `sync` subcommand.
 #[derive(clap::Args, Debug)]
 pub struct SyncArgs {
-    /// Server address in host:port format (e.g. disk.arcanada.one:9443).
-    #[arg(long, default_value = "disk.arcanada.one:9443")]
+    /// Server address in host:port format (e.g. disk.arcanada.ai:9443).
+    #[arg(long, default_value = "disk.arcanada.ai:9443")]
     pub server: String,
 
     /// Allow self-signed certificates (localhost testing only).
@@ -152,7 +152,7 @@ pub struct SyncArgs {
 /// `disk enroll` — exchange an opaque enrollment token for a signed cert.
 #[derive(clap::Args, Debug)]
 pub struct EnrollArgs {
-    /// EnrollmentService gRPC endpoint (e.g. `https://disk.arcanada.one:9445`).
+    /// EnrollmentService gRPC endpoint (e.g. `https://disk.arcanada.ai:9445`).
     #[arg(long)]
     pub server: Option<String>,
 
@@ -202,7 +202,7 @@ pub enum AdminCommand {
 #[derive(clap::Args, Debug)]
 pub struct PendingTokenArgs {
     /// EnrollmentService gRPC endpoint.
-    #[arg(long, default_value = "https://disk.arcanada.one:9445")]
+    #[arg(long, default_value = "https://disk.arcanada.ai:9445")]
     pub server: String,
 
     /// Target hostname / node_id_hint to bind the token to.
@@ -534,7 +534,7 @@ mod tests {
         let cli = Cli::try_parse_from(["disk", "sync"]).unwrap();
         match cli.command {
             Some(Command::Sync(args)) => {
-                assert_eq!(args.server, "disk.arcanada.one:9443");
+                assert_eq!(args.server, "disk.arcanada.ai:9443");
             }
             _ => panic!("expected sync subcommand"),
         }

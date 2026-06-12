@@ -22,7 +22,7 @@ use tonic::{
 /// Configuration for connecting to a `disk-arcana-server`.
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
-    /// gRPC endpoint URI (e.g. `https://disk.arcanada.one:9443`).
+    /// gRPC endpoint URI (e.g. `https://disk.arcanada.ai:9443`).
     pub endpoint: String,
     /// PEM-encoded CA certificate for TLS verification.
     /// If `None`, the system trust store is used.
