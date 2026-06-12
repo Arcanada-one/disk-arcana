@@ -9,6 +9,7 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use disk_client::config::DiskConfig;
@@ -19,16 +20,79 @@ fn default_addr() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], DEFAULT_PORT))
 }
 
+/// Maximum number of connect-retry attempts before giving up.
+///
+/// 40 attempts × 50 ms ≈ 2 s total.  This covers the brief window between the
+/// daemon logging its "listening on …" line and the tokio accept loop
+/// processing its first connection.  The total budget is acceptable for the
+/// absent-daemon error path too: it will exhaust all attempts and still exit
+/// non-zero as required.
+const CONNECT_MAX_ATTEMPTS: u32 = 40;
+
+/// Delay between successive connect-retry attempts.
+const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(50);
+
+/// GET `url` with bounded connect-retry.
+///
+/// Retries only on connection errors (`e.is_connect()` — ECONNREFUSED,
+/// connection-reset, etc.).  Any other error kind (DNS, TLS, decode) is
+/// propagated immediately without retrying; successful HTTP responses
+/// (including 4xx/5xx) are returned as-is.
+async fn get_with_retry(
+    client: &reqwest::Client,
+    url: &str,
+    addr: SocketAddr,
+) -> Result<reqwest::Response> {
+    let mut last_err: Option<reqwest::Error> = None;
+    for _ in 0..CONNECT_MAX_ATTEMPTS {
+        match client.get(url).send().await {
+            Ok(resp) => return Ok(resp),
+            Err(e) if e.is_connect() => {
+                last_err = Some(e);
+                tokio::time::sleep(CONNECT_RETRY_DELAY).await;
+            }
+            Err(e) => {
+                return Err(e).with_context(|| {
+                    format!("connect to daemon at {addr} (is `disk daemon` running?)")
+                });
+            }
+        }
+    }
+    Err(last_err.expect("loop ran at least once"))
+        .with_context(|| format!("connect to daemon at {addr} (is `disk daemon` running?)"))
+}
+
+/// POST `url` (no body) with bounded connect-retry.  Mirrors [`get_with_retry`].
+async fn post_with_retry(
+    client: &reqwest::Client,
+    url: &str,
+    addr: SocketAddr,
+) -> Result<reqwest::Response> {
+    let mut last_err: Option<reqwest::Error> = None;
+    for _ in 0..CONNECT_MAX_ATTEMPTS {
+        match client.post(url).send().await {
+            Ok(resp) => return Ok(resp),
+            Err(e) if e.is_connect() => {
+                last_err = Some(e);
+                tokio::time::sleep(CONNECT_RETRY_DELAY).await;
+            }
+            Err(e) => {
+                return Err(e).with_context(|| {
+                    format!("connect to daemon at {addr} (is `disk daemon` running?)")
+                });
+            }
+        }
+    }
+    Err(last_err.expect("loop ran at least once"))
+        .with_context(|| format!("connect to daemon at {addr} (is `disk daemon` running?)"))
+}
+
 /// `disk status [--addr <ip:port>]` — GET `/status` and pretty-print.
 pub async fn run_status(addr: Option<SocketAddr>) -> Result<()> {
     let addr = addr.unwrap_or_else(default_addr);
     let url = format!("http://{addr}/status");
     let client = reqwest::Client::new();
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .with_context(|| format!("connect to daemon at {addr} (is `disk daemon` running?)"))?;
+    let resp = get_with_retry(&client, &url, addr).await?;
     let status = resp.status();
     if !status.is_success() {
         anyhow::bail!("GET /status returned HTTP {status}");
@@ -90,11 +154,7 @@ pub async fn run_config_reload(addr: Option<SocketAddr>) -> Result<()> {
     let addr = addr.unwrap_or_else(default_addr);
     let url = format!("http://{addr}/config/reload");
     let client = reqwest::Client::new();
-    let resp = client
-        .post(&url)
-        .send()
-        .await
-        .with_context(|| format!("connect to daemon at {addr} (is `disk daemon` running?)"))?;
+    let resp = post_with_retry(&client, &url, addr).await?;
     let status = resp.status();
     let body: AcceptedResponse = resp.json().await.context("decode /config/reload JSON")?;
     if body.queued {
