@@ -612,12 +612,12 @@ impl SyncService for SyncServiceImpl {
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 
-    // DISK-0043: real reconcile over unary ExchangeState.
+    // Real reconcile over unary ExchangeState with per-client baseline tracking.
     async fn exchange_state(
         &self,
         request: Request<SyncStateRequest>,
     ) -> Result<Response<SyncStateResponse>, Status> {
-        let _node_id = self.require_auth(request.metadata())?;
+        let node_id = self.require_auth(request.metadata())?;
         let share = Self::extract_share(request.metadata());
         let cert_id = CertIdentity::from_request(&request);
         self.check_acl_by_cert(
@@ -636,60 +636,45 @@ impl SyncService for SyncServiceImpl {
 
         // Build the server's current state.
         //
-        // D2 perspective mapping (DISK-0043 reconcile wiring):
-        //
-        // `ReconciliationEngine::reconcile(local, remote, indexed)` is written
-        // from the LOCAL node's viewpoint.  When called server-side:
+        // ReconciliationEngine::reconcile(local, remote, indexed) perspective:
         //
         //   local   = server's own MetaDb rows  (the server is the engine's node)
         //   remote  = client-submitted files    (the other peer)
-        //   indexed = [] (empty baseline — no per-client baseline is tracked here)
+        //   indexed = per-client baseline       (last-synced snapshot for this node)
         //
-        // Action semantics from the server's perspective:
-        //   Upload       → server has a file the client lacks   → client should Download
-        //   Download     → client has a file the server lacks   → client should Upload
-        //   DeleteLocal  → server should delete its local copy
-        //   DeleteRemote → server instructs client to delete
+        // Action semantics from the server's perspective, inverted for the client:
+        //   Upload      → server has a file the client lacks  → to_download
+        //   Download    → client has a file the server lacks  → to_upload
+        //   DeleteLocal → file was in baseline but client no longer reports it
+        //                 and server still holds it — client should delete locally
+        //                 → to_delete
         //
-        // The SyncStateResponse is consumed by the CLIENT, so we invert:
-        //   Upload actions   → go into `to_download` (client must fetch from server)
-        //   Download actions → go into `to_upload`   (client must push to server)
-        //   DeleteRemote actions → go into `to_delete` (client deletes locally)
-        //
-        // LIMITATION: with an empty baseline this is first-sync/push-pull-of-new-files
-        // only — delete propagation (a file deleted on one side) is NOT handled; that
-        // requires per-client baseline tracking, tracked as a follow-up.
-        let (server_files, client_files) = if let Some(ref db) = self.meta_db {
+        // Per-client baseline tracking enables delete propagation: a file deleted
+        // on the client (present in indexed, absent from remote) is now reachable
+        // via the DeleteLocal branch of resolve_one.
+        let (server_files, client_files, db) = if let Some(ref db) = self.meta_db {
             let server = db
                 .list_all_files()
                 .await
                 .map_err(|e| Status::internal(format!("meta_db list_all_files: {e}")))?;
             let client: Vec<FileMeta> = req.files.iter().map(proto_to_file_meta).collect();
-            (server, client)
+            (server, client, db)
         } else {
             // No MetaDb wired — return empty response (legacy / test mode
             // without a database; clients see no required actions).
             return Ok(Response::new(SyncStateResponse::default()));
         };
 
+        // Load the persistent per-client baseline for this node.
+        let vault_id = "default";
+        let baseline = db
+            .load_node_baseline(&node_id, vault_id)
+            .await
+            .map_err(|e| Status::internal(format!("baseline load: {e}")))?;
+
         let engine = ReconciliationEngine::new(self.server_node_id.clone());
-        // D2 perspective mapping (DISK-0043):
-        //
-        //   local   = server's own MetaDb rows
-        //   remote  = client-submitted files
-        //   indexed = [] (empty baseline)
-        //
-        // Rationale: the server does not track per-client baseline snapshots in
-        // this phase.  Using server_files as the baseline (indexed) conflates
-        // "client never synced this file" with "client deleted the file", which
-        // produces DeleteLocal actions instead of Upload (see resolve_one
-        // scenarios 27/l_present+remote.is_none+i_present).  An empty indexed
-        // cleanly maps every file that exists on one side but not the other to
-        // Upload/Download (scenarios 1–2), which is the correct first-sync
-        // behaviour. Clients that carry a vector clock will still get causal
-        // disambiguation via the clock fields in FileMeta.
         let actions = engine
-            .reconcile(&server_files, &client_files, &[])
+            .reconcile(&server_files, &client_files, &baseline)
             .map_err(|e| Status::internal(format!("reconcile: {e}")))?;
 
         let mut to_upload: Vec<FileMetadata> = Vec::new();
@@ -739,6 +724,18 @@ impl SyncService for SyncServiceImpl {
             }
         }
 
+        // Write back the updated baseline for this client.
+        //
+        // The new baseline represents what the client should hold after applying
+        // the actions emitted above. This is internally transactional inside
+        // upsert_node_baselines (single tx). A failure here returns an error to
+        // the client; no silent fallback to an empty baseline (which would
+        // re-introduce the original empty-indexed bug on the next sync pass).
+        let new_baseline = build_post_sync_baseline(&server_files, &actions);
+        db.upsert_node_baselines(&node_id, vault_id, &new_baseline)
+            .await
+            .map_err(|e| Status::internal(format!("baseline writeback: {e}")))?;
+
         Ok(Response::new(SyncStateResponse {
             to_upload,
             to_download,
@@ -760,7 +757,67 @@ impl SyncService for SyncServiceImpl {
     }
 }
 
-// ── Proto ↔ domain conversion helpers (DISK-0043) ──────────────────────────
+// ── Post-sync baseline builder ─────────────────────────────────────────────
+
+/// Build the baseline snapshot the client should hold after applying `actions`.
+///
+/// For each path:
+/// - `Upload` (client should download) → keep the server's current FileMeta;
+///   the client will hold this file after the download.
+/// - `Download` (client should upload) → keep the client's version (not in
+///   server_files yet); tracked via server_version in the action.
+/// - `DeleteLocal` → emit a tombstone entry so the next sync knows the path
+///   was previously baseline and was instructed to delete; prevents the path
+///   from being re-emitted as to_download on the subsequent pass.
+/// - `Skip` → keep the server's version unchanged.
+/// - Other variants (ConflictFork, Rename, …) → omit from baseline; the next
+///   sync will re-derive from server state.
+///
+/// Only paths that appear in `actions` are included; paths not mentioned have
+/// no action (they are already consistent) and are carried forward from the
+/// caller's existing baseline via upsert idempotency.
+fn build_post_sync_baseline(
+    server_files: &[FileMeta],
+    actions: &[disk_core::types::SyncAction],
+) -> Vec<FileMeta> {
+    use disk_core::types::ActionType;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    actions
+        .iter()
+        .filter_map(|action| match action.action {
+            ActionType::Upload | ActionType::Skip => {
+                // Find the server's version for this path.
+                server_files.iter().find(|m| m.path == action.path).cloned()
+            }
+            ActionType::Download => {
+                // Client has a file the server lacks — baseline the client's version.
+                action.server_version.clone()
+            }
+            ActionType::DeleteLocal => {
+                // Client was told to delete this path — record a tombstone in the
+                // baseline so the path is not re-emitted as to_download next pass.
+                server_files
+                    .iter()
+                    .find(|m| m.path == action.path)
+                    .map(|m| FileMeta {
+                        deleted: true,
+                        deleted_at: Some(now_secs),
+                        ..m.clone()
+                    })
+            }
+            // ConflictFork, RenameLocal, RenameRemote, DeleteRemote — omit.
+            _ => None,
+        })
+        .collect()
+}
+
+// ── Proto ↔ domain conversion helpers ──────────────────────────────────────
 
 /// Convert a proto `FileMetadata` into a domain `FileMeta`.
 fn proto_to_file_meta(m: &FileMetadata) -> FileMeta {
@@ -1030,5 +1087,257 @@ mod tests {
             "client should be told to upload its file"
         );
         assert_eq!(resp.to_upload[0].path, "notes/hello.md");
+    }
+
+    // ── Delete propagation + per-client baseline (V-AC-1, V-AC-2, V-AC-4) ──
+
+    /// Helper: build a fully wired service with MetaDb, register one node, and
+    /// return the service + bearer token for that node.
+    async fn make_service_with_db(
+        node_label: &str,
+    ) -> (
+        SyncServiceImpl,
+        String,
+        tempfile::TempDir,
+        tempfile::TempDir,
+    ) {
+        let root = tempdir().unwrap();
+        let db_dir = tempdir().unwrap();
+        std::fs::create_dir_all(root.path()).unwrap();
+        let db = disk_core::MetaDb::open(&db_dir.path().join("meta.sqlite"))
+            .await
+            .unwrap();
+        let store = AuthStore::new();
+        let key = store.register_node(node_label, "N", "linux").unwrap();
+        let (token, _) = store.authenticate(node_label, key.as_str()).unwrap();
+        let svc = SyncServiceImpl::new(store, root.path().to_path_buf()).with_meta_db(db, "server");
+        (svc, token.as_str().to_string(), root, db_dir)
+    }
+
+    fn auth_req<T>(inner: T, token: &str) -> Request<T> {
+        let mut req = Request::new(inner);
+        req.metadata_mut()
+            .insert("authorization", format!("Bearer {token}").parse().unwrap());
+        req
+    }
+
+    /// V-AC-2: FileMeta with deleted=true round-trips through proto conversion
+    /// and through node_baselines persistence.
+    #[tokio::test]
+    async fn proto_filemeta_tombstone_round_trip() {
+        let deleted_at_ts: i64 = 1_700_000_777;
+
+        // Proto → FileMeta → proto round-trip.
+        let proto_in = FileMetadata {
+            path: "vault/gone.md".into(),
+            content_hash: [0xDD; 32].to_vec(),
+            size: 0,
+            mtime_ns: 1_700_000_000_000_000_000,
+            deleted: true,
+            deleted_at: deleted_at_ts,
+            node_id: "client-x".into(),
+            ..Default::default()
+        };
+        let domain = proto_to_file_meta(&proto_in);
+        assert!(domain.deleted, "proto→domain: deleted must be true");
+        assert_eq!(
+            domain.deleted_at,
+            Some(deleted_at_ts),
+            "proto→domain: deleted_at must survive conversion"
+        );
+
+        let proto_out = file_meta_to_proto(&domain);
+        assert!(proto_out.deleted, "domain→proto: deleted must be true");
+        assert_eq!(
+            proto_out.deleted_at, deleted_at_ts,
+            "domain→proto: deleted_at must survive conversion"
+        );
+
+        // Persist through node_baselines and reload.
+        let db_dir = tempdir().unwrap();
+        let db = disk_core::MetaDb::open(&db_dir.path().join("meta.sqlite"))
+            .await
+            .unwrap();
+        db.upsert_node_baselines("node-rt", "default", std::slice::from_ref(&domain))
+            .await
+            .unwrap();
+        let loaded = db.load_node_baseline("node-rt", "default").await.unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert!(
+            loaded[0].deleted,
+            "loaded baseline: deleted flag must be preserved"
+        );
+        assert_eq!(
+            loaded[0].deleted_at,
+            Some(deleted_at_ts),
+            "loaded baseline: deleted_at must be preserved"
+        );
+    }
+
+    /// V-AC-4: exchange_state uses a persistent node baseline as `indexed`
+    /// instead of always passing `&[]`.
+    ///
+    /// Control: server has "wiki/seeded.md", NO baseline for client → server
+    /// routes the file to `to_download` (first-sync behaviour, indexed=&[]).
+    ///
+    /// Assert: after seeding a baseline that includes "wiki/seeded.md" for the
+    /// same client, exchange_state (with empty client files) routes "wiki/seeded.md"
+    /// to `to_delete` rather than `to_download` — proving the baseline is loaded
+    /// and fed to the reconciler.
+    #[tokio::test]
+    async fn sync_state_uses_persistent_node_baseline() {
+        let (svc, token, _root, _db_dir) = make_service_with_db("vac4-node").await;
+
+        // Seed "wiki/seeded.md" in the server's MetaDb.
+        let server_meta = disk_core::types::FileMeta {
+            path: std::path::PathBuf::from("wiki/seeded.md"),
+            content_hash: [0xAA; 32],
+            size: 512,
+            mtime_ns: 1_700_000_000_000_000_000,
+            inode: None,
+            vector_clock: disk_core::VectorClock::new(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "server".into(),
+        };
+        svc.meta_db
+            .as_ref()
+            .unwrap()
+            .upsert_file(&server_meta)
+            .await
+            .unwrap();
+
+        // Control pass: no baseline → file must appear in to_download.
+        let resp_no_baseline = svc
+            .exchange_state(auth_req(
+                SyncStateRequest {
+                    node_id: "vac4-node".into(),
+                    session_token: token.clone(),
+                    files: vec![],
+                    node_clock: std::collections::HashMap::new(),
+                    ..Default::default()
+                },
+                &token,
+            ))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(
+            resp_no_baseline
+                .to_download
+                .iter()
+                .any(|f| f.path == "wiki/seeded.md"),
+            "control: without baseline, server file must appear in to_download"
+        );
+        assert!(
+            resp_no_baseline
+                .to_delete
+                .iter()
+                .all(|f| f.path != "wiki/seeded.md"),
+            "control: without baseline, server file must NOT appear in to_delete"
+        );
+
+        // Seed the node's baseline with "wiki/seeded.md" — simulates a prior sync pass.
+        let baseline_entry = disk_core::types::FileMeta {
+            path: std::path::PathBuf::from("wiki/seeded.md"),
+            content_hash: [0xAA; 32],
+            size: 512,
+            mtime_ns: 1_700_000_000_000_000_000,
+            inode: None,
+            vector_clock: disk_core::VectorClock::new(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "server".into(),
+        };
+        // require_auth returns the node_label used at register_node time ("vac4-node").
+        svc.meta_db
+            .as_ref()
+            .unwrap()
+            .upsert_node_baselines("vac4-node", "default", &[baseline_entry])
+            .await
+            .unwrap();
+
+        // Now client sends empty file list (simulating the file was deleted on client).
+        // With baseline loaded, reconciler emits DeleteLocal → to_delete.
+        let resp_with_baseline = svc
+            .exchange_state(auth_req(
+                SyncStateRequest {
+                    node_id: "vac4-node".into(),
+                    session_token: token.clone(),
+                    files: vec![],
+                    node_clock: std::collections::HashMap::new(),
+                    ..Default::default()
+                },
+                &token,
+            ))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(
+            resp_with_baseline
+                .to_delete
+                .iter()
+                .any(|f| f.path == "wiki/seeded.md"),
+            "with baseline: client-deleted file must appear in to_delete"
+        );
+        assert!(
+            resp_with_baseline
+                .to_download
+                .iter()
+                .all(|f| f.path != "wiki/seeded.md"),
+            "with baseline: client-deleted file must NOT appear in to_download"
+        );
+    }
+
+    /// V-AC-1: a file synced client→server, then omitted from the next sync
+    /// request (simulating client deletion), must appear in to_delete and NOT
+    /// in to_download.
+    #[tokio::test]
+    async fn sync_state_deleted_client_file_marks_to_delete() {
+        let (svc, token, _root, _db_dir) = make_service_with_db("vac1-node").await;
+
+        // Simulate: file was previously synced — seed both server MetaDb and
+        // the client's baseline (as exchange_state writeback would have done).
+        let synced_meta = disk_core::types::FileMeta {
+            path: std::path::PathBuf::from("docs/synced.md"),
+            content_hash: [0x11; 32],
+            size: 256,
+            mtime_ns: 1_700_000_000_000_000_000,
+            inode: None,
+            vector_clock: disk_core::VectorClock::new(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "server".into(),
+        };
+        let db = svc.meta_db.as_ref().unwrap();
+        db.upsert_file(&synced_meta).await.unwrap();
+        db.upsert_node_baselines("vac1-node", "default", &[synced_meta])
+            .await
+            .unwrap();
+
+        // Second sync: client sends empty file list (file was deleted on client).
+        let resp = svc
+            .exchange_state(auth_req(
+                SyncStateRequest {
+                    node_id: "vac1-node".into(),
+                    session_token: token.clone(),
+                    files: vec![],
+                    node_clock: std::collections::HashMap::new(),
+                    ..Default::default()
+                },
+                &token,
+            ))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(
+            resp.to_delete.iter().any(|f| f.path == "docs/synced.md"),
+            "client-deleted synced file must appear in to_delete"
+        );
+        assert!(
+            resp.to_download.iter().all(|f| f.path != "docs/synced.md"),
+            "client-deleted synced file must NOT appear in to_download"
+        );
     }
 }
