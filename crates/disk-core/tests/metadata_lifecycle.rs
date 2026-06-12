@@ -132,6 +132,169 @@ async fn create_and_list_conflicts() {
     assert!(!listed[0].resolved);
 }
 
+// ── Phase 3 (V-AC-5): node_baseline CRUD ────────────────────────────────────
+
+#[tokio::test]
+async fn node_baseline_upsert_and_load_round_trip() {
+    let db = fresh_db().await;
+    let node_id = "client-baseline-test";
+    let vault_id = "default";
+
+    // Mix of live files and one tombstone.
+    let live = FileMeta {
+        path: PathBuf::from("wiki/page.md"),
+        content_hash: [0xAA; 32],
+        size: 1024,
+        mtime_ns: 1_700_000_000_000_000_000,
+        inode: None,
+        vector_clock: VectorClock::new(),
+        deleted: false,
+        deleted_at: None,
+        node_id: "server".into(),
+    };
+    let deleted_at_ts: i64 = 1_700_000_200;
+    let tombstone = FileMeta {
+        path: PathBuf::from("trash/removed.md"),
+        content_hash: [0xBB; 32],
+        size: 0,
+        mtime_ns: 1_700_000_100_000_000_000,
+        inode: None,
+        vector_clock: VectorClock::new(),
+        deleted: true,
+        deleted_at: Some(deleted_at_ts),
+        node_id: "client-baseline-test".into(),
+    };
+
+    let baselines = vec![live.clone(), tombstone.clone()];
+    db.upsert_node_baselines(node_id, vault_id, &baselines)
+        .await
+        .unwrap();
+
+    let loaded = db.load_node_baseline(node_id, vault_id).await.unwrap();
+    assert_eq!(loaded.len(), 2, "must load exactly 2 baseline entries");
+
+    // Find each by path.
+    let got_live = loaded
+        .iter()
+        .find(|f| f.path.to_str() == Some("wiki/page.md"))
+        .expect("live entry missing");
+    assert!(!got_live.deleted, "live entry: deleted must be false");
+    assert_eq!(
+        got_live.deleted_at, None,
+        "live entry: deleted_at must be None"
+    );
+    assert_eq!(got_live.content_hash, [0xAA; 32]);
+    assert_eq!(got_live.size, 1024);
+
+    let got_tombstone = loaded
+        .iter()
+        .find(|f| f.path.to_str() == Some("trash/removed.md"))
+        .expect("tombstone entry missing");
+    assert!(
+        got_tombstone.deleted,
+        "tombstone entry: deleted must be true"
+    );
+    assert_eq!(
+        got_tombstone.deleted_at,
+        Some(deleted_at_ts),
+        "tombstone entry: deleted_at must match"
+    );
+
+    // Upsert again (idempotent) — should not duplicate rows.
+    db.upsert_node_baselines(node_id, vault_id, &baselines)
+        .await
+        .unwrap();
+    let reloaded = db.load_node_baseline(node_id, vault_id).await.unwrap();
+    assert_eq!(
+        reloaded.len(),
+        2,
+        "upsert must be idempotent — no duplicate rows"
+    );
+
+    // delete_node_baseline removes a single row.
+    db.delete_node_baseline(node_id, vault_id, "trash/removed.md")
+        .await
+        .unwrap();
+    let after_delete = db.load_node_baseline(node_id, vault_id).await.unwrap();
+    assert_eq!(
+        after_delete.len(),
+        1,
+        "after delete_node_baseline, only 1 row must remain"
+    );
+    assert_eq!(after_delete[0].path, PathBuf::from("wiki/page.md"));
+}
+
+// ── Phase 2 (V-AC-8): files.rs deleted/deleted_at readback ──────────────────
+
+#[tokio::test]
+async fn files_rs_reads_back_deleted_flag() {
+    let db = fresh_db().await;
+
+    // Build a deleted file entry.
+    let deleted_at_ts: i64 = 1_700_000_100;
+    let m = FileMeta {
+        path: PathBuf::from("trash/gone.md"),
+        content_hash: [0xDE; 32],
+        size: 77,
+        mtime_ns: 1_700_000_000_000_000_000,
+        inode: None,
+        vector_clock: VectorClock::new(),
+        deleted: true,
+        deleted_at: Some(deleted_at_ts),
+        node_id: "client-A".into(),
+    };
+
+    db.upsert_file(&m).await.unwrap();
+
+    // get_file must return deleted=true with the correct deleted_at.
+    let got = db.get_file("trash/gone.md").await.unwrap().unwrap();
+    assert!(
+        got.deleted,
+        "get_file: deleted flag must be true after upsert"
+    );
+    assert_eq!(
+        got.deleted_at,
+        Some(deleted_at_ts),
+        "get_file: deleted_at must match upserted value"
+    );
+
+    // list_all_files must also return the same row with deleted=true.
+    let all = db.list_all_files().await.unwrap();
+    let found = all
+        .iter()
+        .find(|f| f.path.to_str() == Some("trash/gone.md"))
+        .expect("file not in list");
+    assert!(found.deleted, "list_all_files: deleted flag must be true");
+    assert_eq!(
+        found.deleted_at,
+        Some(deleted_at_ts),
+        "list_all_files: deleted_at must match upserted value"
+    );
+
+    // Re-upsert the same path as not-deleted (simulate un-deletion) and verify round-trip.
+    let un_deleted = FileMeta {
+        path: PathBuf::from("trash/gone.md"),
+        content_hash: [0xDE; 32],
+        size: 77,
+        mtime_ns: 1_700_000_000_000_000_000,
+        inode: None,
+        vector_clock: VectorClock::new(),
+        deleted: false,
+        deleted_at: None,
+        node_id: "client-A".into(),
+    };
+    db.upsert_file(&un_deleted).await.unwrap();
+    let re_got = db.get_file("trash/gone.md").await.unwrap().unwrap();
+    assert!(
+        !re_got.deleted,
+        "get_file after un-delete upsert: deleted must be false"
+    );
+    assert_eq!(
+        re_got.deleted_at, None,
+        "get_file after un-delete upsert: deleted_at must be None"
+    );
+}
+
 #[tokio::test]
 async fn vector_clock_round_trips_through_db() {
     let db = fresh_db().await;

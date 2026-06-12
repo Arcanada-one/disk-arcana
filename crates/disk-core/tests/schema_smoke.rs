@@ -2,6 +2,70 @@ use disk_core::MetaDb;
 use sqlx::Row;
 use tempfile::tempdir;
 
+// ── Migration 005 schema checks ─────────────────────────────────────────────
+
+#[tokio::test]
+async fn migration_005_files_has_deleted_columns() {
+    let dir = tempdir().expect("tempdir");
+    let db = MetaDb::open(&dir.path().join("meta.sqlite"))
+        .await
+        .expect("open");
+
+    let rows = sqlx::query("PRAGMA table_info(files)")
+        .fetch_all(db.pool())
+        .await
+        .expect("table_info files");
+    let columns: Vec<String> = rows.iter().map(|r| r.get::<String, _>("name")).collect();
+
+    assert!(
+        columns.iter().any(|c| c == "deleted"),
+        "files table must have `deleted` column after migration 005; got {columns:?}"
+    );
+    assert!(
+        columns.iter().any(|c| c == "deleted_at"),
+        "files table must have `deleted_at` column after migration 005; got {columns:?}"
+    );
+}
+
+#[tokio::test]
+async fn migration_005_node_baselines_table_exists() {
+    let dir = tempdir().expect("tempdir");
+    let db = MetaDb::open(&dir.path().join("meta.sqlite"))
+        .await
+        .expect("open");
+
+    let tables: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .fetch_all(db.pool())
+            .await
+            .expect("sqlite_master");
+
+    assert!(
+        tables.iter().any(|t| t == "node_baselines"),
+        "node_baselines table must exist after migration 005; got {tables:?}"
+    );
+
+    let rows = sqlx::query("PRAGMA table_info(node_baselines)")
+        .fetch_all(db.pool())
+        .await
+        .expect("table_info node_baselines");
+    let columns: Vec<String> = rows.iter().map(|r| r.get::<String, _>("name")).collect();
+
+    for required in [
+        "node_id",
+        "vault_id",
+        "path",
+        "content_hash",
+        "deleted",
+        "deleted_at",
+    ] {
+        assert!(
+            columns.iter().any(|c| c == required),
+            "node_baselines missing column `{required}`; got {columns:?}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn migrations_apply_and_files_table_has_forward_compat_columns() {
     let dir = tempdir().expect("tempdir");

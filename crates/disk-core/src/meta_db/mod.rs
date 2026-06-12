@@ -6,6 +6,7 @@
 
 mod conflicts;
 mod files;
+mod node_baseline;
 mod tombstones;
 
 use std::path::Path;

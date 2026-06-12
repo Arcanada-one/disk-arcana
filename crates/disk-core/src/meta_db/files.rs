@@ -23,6 +23,8 @@ impl MetaDb {
         // the (NULL, vault, path) tuple from a fresh row never collides with a
         // previously-inserted (NULL, vault, path) row. Emulate the UPSERT
         // ourselves: try UPDATE first, then INSERT only when nothing matched.
+        let deleted_int = if meta.deleted { 1i64 } else { 0i64 };
+
         let updated = sqlx::query(
             r#"
             UPDATE files SET
@@ -31,7 +33,9 @@ impl MetaDb {
                 mtime_ns     = ?5,
                 inode        = ?6,
                 vector_clock = ?7,
-                updated_at   = ?8
+                updated_at   = ?8,
+                deleted      = ?9,
+                deleted_at   = ?10
             WHERE vault_id = ?1 AND path = ?2 AND tenant_id IS NULL
             "#,
         )
@@ -43,6 +47,8 @@ impl MetaDb {
         .bind(inode)
         .bind(vc_json.clone())
         .bind(now)
+        .bind(deleted_int)
+        .bind(meta.deleted_at)
         .execute(&self.pool)
         .await?;
 
@@ -54,8 +60,9 @@ impl MetaDb {
             r#"
             INSERT INTO files (
                 tenant_id, vault_id, path, content_hash, size, mtime_ns, inode,
-                vector_clock, sync_state, last_synced, created_at, updated_at
-            ) VALUES (NULL, ?1, ?2, ?3, ?4, ?5, ?6, ?7, 'clean', NULL, ?8, ?8)
+                vector_clock, sync_state, last_synced, deleted, deleted_at,
+                created_at, updated_at
+            ) VALUES (NULL, ?1, ?2, ?3, ?4, ?5, ?6, ?7, 'clean', NULL, ?8, ?9, ?10, ?10)
             "#,
         )
         .bind(VAULT_DEFAULT)
@@ -65,6 +72,8 @@ impl MetaDb {
         .bind(meta.mtime_ns)
         .bind(inode)
         .bind(vc_json)
+        .bind(deleted_int)
+        .bind(meta.deleted_at)
         .bind(now)
         .execute(&self.pool)
         .await?;
@@ -75,7 +84,7 @@ impl MetaDb {
     pub async fn get_file(&self, path: &str) -> Result<Option<FileMeta>, MetaDbError> {
         let row = sqlx::query(
             r#"
-            SELECT path, content_hash, size, mtime_ns, inode, vector_clock
+            SELECT path, content_hash, size, mtime_ns, inode, vector_clock, deleted, deleted_at
             FROM files
             WHERE vault_id = ?1 AND path = ?2
             "#,
@@ -103,7 +112,7 @@ impl MetaDb {
     pub async fn list_all_files(&self) -> Result<Vec<FileMeta>, MetaDbError> {
         let rows = sqlx::query(
             r#"
-            SELECT path, content_hash, size, mtime_ns, inode, vector_clock
+            SELECT path, content_hash, size, mtime_ns, inode, vector_clock, deleted, deleted_at
             FROM files
             WHERE vault_id = ?1
             ORDER BY path ASC
@@ -124,6 +133,8 @@ fn row_to_meta(row: sqlx::sqlite::SqliteRow) -> Result<FileMeta, MetaDbError> {
     let mtime_ns: i64 = row.try_get("mtime_ns")?;
     let inode: Option<i64> = row.try_get("inode")?;
     let vector_clock_json: String = row.try_get("vector_clock")?;
+    let deleted_int: i64 = row.try_get("deleted")?;
+    let deleted_at: Option<i64> = row.try_get("deleted_at")?;
 
     if content_hash_blob.len() != 32 {
         return Err(MetaDbError::Invalid(format!(
@@ -143,8 +154,8 @@ fn row_to_meta(row: sqlx::sqlite::SqliteRow) -> Result<FileMeta, MetaDbError> {
         mtime_ns,
         inode: inode.map(|v| v as u64),
         vector_clock,
-        deleted: false,
-        deleted_at: None,
+        deleted: deleted_int != 0,
+        deleted_at,
         node_id: String::new(),
     })
 }
