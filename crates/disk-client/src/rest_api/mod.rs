@@ -182,6 +182,14 @@ pub fn assert_loopback_bind(addr: SocketAddr) -> Result<(), RestApiError> {
 /// Bind a loopback listener and serve the router until `shutdown`
 /// resolves. Returns the actual bound address so callers can recover
 /// the OS-assigned port when `addr.port() == 0`.
+///
+/// Readiness guarantee: this function returns only after the spawned
+/// accept task has been polled and has reached the point immediately
+/// before the blocking `axum::serve` await.  Any caller that prints
+/// a "listening on …" announcement after this call can be sure that
+/// incoming connections will be accepted — the OS socket has been in
+/// LISTEN state since the `TcpListener::bind` call above, and the
+/// accept loop is now live.
 pub async fn serve(
     state: DaemonState,
     addr: SocketAddr,
@@ -191,7 +199,13 @@ pub async fn serve(
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let local = listener.local_addr()?;
     let app = router(state);
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
     tokio::spawn(async move {
+        // Signal readiness before entering the accept loop.  The OS
+        // socket is already in LISTEN state (bind completed above), so
+        // once this send completes the caller can safely announce the
+        // address and expect connects to succeed.
+        let _ = ready_tx.send(());
         // axum::serve's error type is documented as `std::convert::Infallible`
         // when feeding a TcpListener — the unwrap below cannot panic.
         axum::serve(listener, app)
@@ -199,6 +213,11 @@ pub async fn serve(
             .await
             .expect("axum::serve");
     });
+    // Wait until the spawned task has been polled and has sent the
+    // ready signal.  The recv() resolves as soon as the task runs its
+    // first poll, which is sufficient to guarantee the accept loop is
+    // entered on the very next poll of axum::serve.
+    let _ = ready_rx.await;
     Ok(local)
 }
 
