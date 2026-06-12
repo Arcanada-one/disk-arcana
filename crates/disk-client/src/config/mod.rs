@@ -63,7 +63,7 @@ id = "dev-server"
 intended_direction = "receive_only"
 
 [server]
-address = "disk.arcanada.one:9443"
+address = "disk.arcanada.ai:9443"
 client_cert = "/etc/disk-arcana/client.crt"
 client_key  = "/etc/disk-arcana/client.key"
 "#;
@@ -76,7 +76,7 @@ display_name = "Arcana AI server"
 intended_direction = "bidirectional"
 
 [server]
-address = "disk.arcanada.one:9443"
+address = "disk.arcanada.ai:9443"
 tls = "auto"
 client_cert = "/etc/disk-arcana/client.crt"
 client_key  = "/etc/disk-arcana/client.key"
@@ -111,7 +111,7 @@ extensions = ["md", "txt", "json"]
             cfg.node.default.intended_direction,
             Some(Direction::ReceiveOnly)
         );
-        assert_eq!(cfg.server.address, "disk.arcanada.one:9443");
+        assert_eq!(cfg.server.address, "disk.arcanada.ai:9443");
         assert_eq!(cfg.server.tls, "auto"); // default applied
         assert!(cfg.shares.is_empty());
     }

@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn server_address_valid() {
-        assert!(validate_server_address("disk.arcanada.one:9443").is_ok());
+        assert!(validate_server_address("disk.arcanada.ai:9443").is_ok());
         assert!(validate_server_address("127.0.0.1:9443").is_ok());
         assert!(validate_server_address("localhost:9443").is_ok());
     }

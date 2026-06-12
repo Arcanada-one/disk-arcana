@@ -6,7 +6,7 @@ display_name = "Arcana AI server"
 intended_direction = "bidirectional"
 
 [server]
-address = "disk.arcanada.one:9443"
+address = "disk.arcanada.ai:9443"
 tls = "auto"
 client_cert = "/etc/disk-arcana/client.crt"
 client_key  = "/etc/disk-arcana/client.key"
