@@ -443,6 +443,21 @@ fn scenario_30b_dominant_vector_clock_wins() {
     assert_eq!(first_action(&actions).action, ActionType::Upload);
 }
 
+// ---------- Scenario 31: server tombstone fans out to second client ----------
+
+#[test]
+fn scenario_31_server_tombstone_fans_out_to_second_client() {
+    // local=server tombstone, remote=second client still has the file,
+    // indexed=second client's baseline (it saw the file on prior sync).
+    // Expected: reconciler emits DeleteRemote so the second client drops its copy.
+    let actions = run(
+        vec![tomb("a.md", 1)],
+        vec![meta("a.md", 1)],
+        vec![meta("a.md", 1)],
+    );
+    assert_eq!(first_action(&actions).action, ActionType::DeleteRemote);
+}
+
 // ---------- Pure-function property test ----------
 
 #[test]

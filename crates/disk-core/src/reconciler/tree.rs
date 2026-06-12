@@ -239,6 +239,11 @@ fn resolve_one(
         // index entry should be cleared at the next save.
         return Ok(make(ActionType::DeleteLocal));
     }
+    if l_tomb && remote.is_none() && i_tomb {
+        // Both sides agree the file is gone (server=tomb, client=absent, indexed=tomb).
+        // The client already processed this delete on a prior sync pass — stabilise.
+        return Ok(make(ActionType::Skip));
+    }
     if l_tomb && remote.is_none() {
         // Local deleted; remote never saw the file. Propagate the tombstone
         // upstream so the server can record it.
