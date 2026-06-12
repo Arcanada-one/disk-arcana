@@ -231,6 +231,19 @@ fn resolve_one(
     if local.is_none() && r_present && i_tomb {
         return Ok(make(ActionType::Download));
     }
+    // Scenario 35: three-client recreate-after-delete.
+    // C's baseline is a tombstone (i_tomb), local is C's pre-delete live copy,
+    // remote is the server's recreated live file.
+    // Server recreate wins; if hashes differ, preserve C's bytes in ConflictReport.
+    if l_present && r_present && i_tomb {
+        if hashes_eq(local, remote) {
+            return Ok(make(ActionType::Skip)); // byte-identical → lossless no-op
+        }
+        return Ok(make_with_conflict(
+            ActionType::Download,
+            ConflictKind::ModifiedDeleted, // server recreate wins; C's divergent local preserved
+        ));
+    }
 
     // Mixed tomb/None: one side has a tombstone, the other has nothing.
     if local.is_none() && r_tomb {

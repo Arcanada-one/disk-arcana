@@ -472,6 +472,71 @@ fn scenario_32_post_ack_stabilise_tomb_absent_tomb_skip() {
     assert_eq!(first_action(&actions).action, ActionType::Skip);
 }
 
+// ---------- Scenario 35: three-client recreate-after-delete (P,P,T) triple ----------
+
+/// V-AC-1 + V-AC-3: local=live (C's pre-delete copy), remote=live (server recreate),
+/// indexed=tombstone (C's baseline after A deleted the file).
+/// Divergent hashes → Download with ConflictKind::ModifiedDeleted.
+/// ConflictReport must record C's hash as local_hash and the recreated hash as
+/// remote_hash — proving no silent data loss.
+#[test]
+fn scenario_35_three_client_recreate_triple_divergent_conflict() {
+    // C's pre-delete local copy: hash 0xCC.
+    // Server recreated copy: hash 0xRR (0x99).
+    // C's baseline (tomb after A's delete): hash 0xCC (same as original).
+    let actions = run(
+        vec![meta("p.md", 0xCC)], // local: C still holds the pre-delete file
+        vec![meta("p.md", 0x99)], // remote: server has the recreated file (different)
+        vec![tomb("p.md", 0xCC)], // indexed: C's baseline = tombstone from A's delete
+    );
+    let a = first_action(&actions);
+    assert_eq!(
+        a.action,
+        ActionType::Download,
+        "divergent (P,P,T): must resolve to Download (server recreate wins), not Inconsistent"
+    );
+    let conflict = a
+        .conflict
+        .as_ref()
+        .expect("divergent (P,P,T): ConflictReport must be present");
+    assert_eq!(
+        conflict.kind,
+        ConflictKind::ModifiedDeleted,
+        "divergent (P,P,T): conflict kind must be ModifiedDeleted"
+    );
+    assert_eq!(
+        conflict.local_hash,
+        Some([0xCC; 32]),
+        "divergent (P,P,T): local_hash must be C's copy (0xCC) — no silent data loss"
+    );
+    assert_eq!(
+        conflict.remote_hash,
+        Some([0x99; 32]),
+        "divergent (P,P,T): remote_hash must be server's recreated copy (0x99)"
+    );
+}
+
+/// V-AC-2: local=live (C's copy, hash 0xAA), remote=live (server recreate, same hash 0xAA),
+/// indexed=tombstone. Identical hashes → Skip, no conflict noise.
+#[test]
+fn scenario_35b_three_client_recreate_triple_identical_skip() {
+    let actions = run(
+        vec![meta("p.md", 0xAA)], // local: C's copy — hash matches recreate
+        vec![meta("p.md", 0xAA)], // remote: server recreate — same hash
+        vec![tomb("p.md", 0xAA)], // indexed: tombstone baseline
+    );
+    let a = first_action(&actions);
+    assert_eq!(
+        a.action,
+        ActionType::Skip,
+        "identical (P,P,T): byte-identical recreate must resolve to Skip"
+    );
+    assert!(
+        a.conflict.is_none(),
+        "identical (P,P,T): no conflict report expected for Skip"
+    );
+}
+
 // ---------- Pure-function property test ----------
 
 #[test]

@@ -1713,4 +1713,253 @@ mod tests {
             "client-deleted synced file must NOT appear in to_download"
         );
     }
+
+    // ── DISK-0047: three-client recreate-after-delete ────────────────────────
+
+    /// V-AC-5: full delete→recreate→lagging-C path returns Ok (no Inconsistent/500).
+    ///
+    /// Setup:
+    /// - Server has "data/page.md" (recreated, hash 0x99).
+    /// - C's baseline is a tombstone for "data/page.md" (A deleted it earlier,
+    ///   fan-out wrote a tomb baseline for C).
+    /// - C still reports "data/page.md" as live (its pre-delete copy, hash 0xCC).
+    ///
+    /// Reconciler triple: (l=present/server-recreate, r=present/C-old, i=tomb).
+    /// Expected: exchange_state returns Ok, file appears in to_upload (Download arm
+    /// → client delivers its conflicting copy), NOT as an Inconsistent/500 error.
+    #[tokio::test]
+    async fn sync_state_three_client_recreate_with_lagging_baseline() {
+        let root = tempfile::tempdir().unwrap();
+        let db_dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path()).unwrap();
+        let db = disk_core::MetaDb::open(&db_dir.path().join("meta.sqlite"))
+            .await
+            .unwrap();
+        let store = AuthStore::new();
+
+        let key_c = store.register_node("rec-c", "N", "linux").unwrap();
+        let (tok_c, _) = store.authenticate("rec-c", key_c.as_str()).unwrap();
+        let tok_c = tok_c.as_str().to_string();
+
+        let svc = SyncServiceImpl::new(store, root.path().to_path_buf()).with_meta_db(db, "server");
+        let db_ref = svc.meta_db.as_ref().unwrap();
+
+        // Server holds the recreated file (hash 0x99).
+        let server_recreated = disk_core::types::FileMeta {
+            path: std::path::PathBuf::from("data/page.md"),
+            content_hash: [0x99; 32],
+            size: 400,
+            mtime_ns: 1_700_000_002_000_000_000,
+            inode: None,
+            vector_clock: disk_core::VectorClock::new(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "server".into(),
+        };
+        db_ref.upsert_file(&server_recreated).await.unwrap();
+
+        // C's baseline is a tombstone — fan-out from A's delete wrote this.
+        let c_baseline_tomb = disk_core::types::FileMeta {
+            path: std::path::PathBuf::from("data/page.md"),
+            content_hash: [0xCC; 32],
+            size: 300,
+            mtime_ns: 1_700_000_000_000_000_000,
+            inode: None,
+            vector_clock: disk_core::VectorClock::new(),
+            deleted: true,
+            deleted_at: Some(1_700_000_001),
+            node_id: "server".into(),
+        };
+        db_ref
+            .upsert_node_baselines("rec-c", "default", &[c_baseline_tomb])
+            .await
+            .unwrap();
+
+        // C reports "data/page.md" as live (its pre-delete copy, hash 0xCC).
+        let c_live = FileMetadata {
+            path: "data/page.md".into(),
+            content_hash: [0xCC; 32].to_vec(),
+            size: 300,
+            mtime_ns: 1_700_000_000_000_000_000,
+            deleted: false,
+            ..Default::default()
+        };
+
+        // The call must NOT return an error (was previously Inconsistent → HTTP 500).
+        let resp = svc
+            .exchange_state(auth_req(
+                SyncStateRequest {
+                    node_id: "rec-c".into(),
+                    session_token: tok_c.clone(),
+                    files: vec![c_live],
+                    node_clock: std::collections::HashMap::new(),
+                    ..Default::default()
+                },
+                &tok_c,
+            ))
+            .await
+            .expect("exchange_state must return Ok for (P,P,T) triple — not Inconsistent/500")
+            .into_inner();
+
+        // Download action → to_upload (client delivers conflicting copy); not to_download.
+        assert!(
+            resp.to_upload.iter().any(|f| f.path == "data/page.md"),
+            "three-client recreate: lagging C's copy must appear in to_upload (conflict resolution)"
+        );
+        assert!(
+            resp.to_download.iter().all(|f| f.path != "data/page.md"),
+            "three-client recreate: path must NOT appear in to_download"
+        );
+    }
+
+    /// V-AC-6: divergent three-client recreate preserves C's bytes (no silent data loss).
+    ///
+    /// In the divergent case (C's pre-delete hash != server's recreated hash), the
+    /// reconciler emits Download + ConflictKind::ModifiedDeleted with local_hash = C's
+    /// original bytes. This test verifies that C's content is delivered to the server
+    /// (to_upload) rather than silently discarded, satisfying the no-silent-data-loss
+    /// requirement. The ConflictReport in the SyncAction confirms which bytes were
+    /// preserved at the reconciler level (verified via a direct reconciler call).
+    #[tokio::test]
+    async fn sync_state_three_client_recreate_no_silent_data_loss() {
+        let root = tempfile::tempdir().unwrap();
+        let db_dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path()).unwrap();
+        let db = disk_core::MetaDb::open(&db_dir.path().join("meta.sqlite"))
+            .await
+            .unwrap();
+        let store = AuthStore::new();
+
+        let key_c = store.register_node("loss-c", "N", "linux").unwrap();
+        let (tok_c, _) = store.authenticate("loss-c", key_c.as_str()).unwrap();
+        let tok_c = tok_c.as_str().to_string();
+
+        let svc = SyncServiceImpl::new(store, root.path().to_path_buf()).with_meta_db(db, "server");
+        let db_ref = svc.meta_db.as_ref().unwrap();
+
+        // Server: recreated file with hash 0xBB (different from C's 0xDD).
+        let server_recreated = disk_core::types::FileMeta {
+            path: std::path::PathBuf::from("vault/note.md"),
+            content_hash: [0xBB; 32],
+            size: 512,
+            mtime_ns: 1_700_000_002_000_000_000,
+            inode: None,
+            vector_clock: disk_core::VectorClock::new(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "server".into(),
+        };
+        db_ref.upsert_file(&server_recreated).await.unwrap();
+
+        // C's baseline: tombstone (from A's delete fan-out).
+        let c_tomb_baseline = disk_core::types::FileMeta {
+            path: std::path::PathBuf::from("vault/note.md"),
+            content_hash: [0xDD; 32],
+            size: 200,
+            mtime_ns: 1_700_000_000_000_000_000,
+            inode: None,
+            vector_clock: disk_core::VectorClock::new(),
+            deleted: true,
+            deleted_at: Some(1_700_000_001),
+            node_id: "server".into(),
+        };
+        db_ref
+            .upsert_node_baselines("loss-c", "default", &[c_tomb_baseline])
+            .await
+            .unwrap();
+
+        // C reports "vault/note.md" as live with hash 0xDD (its pre-delete copy).
+        let c_live = FileMetadata {
+            path: "vault/note.md".into(),
+            content_hash: [0xDD; 32].to_vec(),
+            size: 200,
+            mtime_ns: 1_700_000_000_000_000_000,
+            deleted: false,
+            ..Default::default()
+        };
+
+        // exchange_state must return Ok and route C's copy to to_upload (not discard it).
+        let resp = svc
+            .exchange_state(auth_req(
+                SyncStateRequest {
+                    node_id: "loss-c".into(),
+                    session_token: tok_c.clone(),
+                    files: vec![c_live],
+                    node_clock: std::collections::HashMap::new(),
+                    ..Default::default()
+                },
+                &tok_c,
+            ))
+            .await
+            .expect("exchange_state must return Ok — no silent Inconsistent error")
+            .into_inner();
+
+        // C's copy must be preserved (routed to to_upload for server to store/conflict-resolve),
+        // not silently discarded. to_download must not contain the path (server recreate
+        // is not blindly pushed back to C without acknowledging the conflict).
+        assert!(
+            resp.to_upload.iter().any(|f| f.path == "vault/note.md"),
+            "no-silent-data-loss: C's divergent copy must be routed to to_upload, not discarded"
+        );
+        assert!(
+            resp.to_download.iter().all(|f| f.path != "vault/note.md"),
+            "no-silent-data-loss: server must not blindly push recreated file to C \
+             without acknowledging the conflict"
+        );
+
+        // Verify at the reconciler level that ConflictReport captured C's bytes.
+        // This is the definitive proof that no silent data loss occurred.
+        let engine = disk_core::reconciler::ReconciliationEngine::new("server".into());
+        let local_server = vec![disk_core::types::FileMeta {
+            path: std::path::PathBuf::from("vault/note.md"),
+            content_hash: [0xBB; 32],
+            size: 512,
+            mtime_ns: 1_700_000_002_000_000_000,
+            inode: None,
+            vector_clock: disk_core::VectorClock::new(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "server".into(),
+        }];
+        let remote_client = vec![disk_core::types::FileMeta {
+            path: std::path::PathBuf::from("vault/note.md"),
+            content_hash: [0xDD; 32],
+            size: 200,
+            mtime_ns: 1_700_000_000_000_000_000,
+            inode: None,
+            vector_clock: disk_core::VectorClock::new(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "loss-c".into(),
+        }];
+        let indexed_tomb = vec![disk_core::types::FileMeta {
+            path: std::path::PathBuf::from("vault/note.md"),
+            content_hash: [0xDD; 32],
+            size: 200,
+            mtime_ns: 1_700_000_000_000_000_000,
+            inode: None,
+            vector_clock: disk_core::VectorClock::new(),
+            deleted: true,
+            deleted_at: Some(1_700_000_001),
+            node_id: "server".into(),
+        }];
+        let actions = engine
+            .reconcile(&local_server, &remote_client, &indexed_tomb)
+            .unwrap();
+        let action = actions.first().unwrap();
+        let conflict = action
+            .conflict
+            .as_ref()
+            .expect("divergent (P,P,T): ConflictReport must be present to prove no data loss");
+        assert_eq!(
+            conflict.local_hash,
+            Some([0xBB; 32]),
+            "ConflictReport.local_hash must be server's recreated copy (0xBB)"
+        );
+        assert_eq!(
+            conflict.remote_hash,
+            Some([0xDD; 32]),
+            "ConflictReport.remote_hash must be C's pre-delete copy (0xDD) — bytes preserved"
+        );
+    }
 }
