@@ -643,8 +643,7 @@ impl SyncService for SyncServiceImpl {
         //
         //   local   = server's own MetaDb rows  (the server is the engine's node)
         //   remote  = client-submitted files    (the other peer)
-        //   indexed = server's own MetaDb rows  (= local, since the server's DB
-        //             IS the authoritative baseline after each commit)
+        //   indexed = [] (empty baseline — no per-client baseline is tracked here)
         //
         // Action semantics from the server's perspective:
         //   Upload       → server has a file the client lacks   → client should Download
@@ -656,6 +655,10 @@ impl SyncService for SyncServiceImpl {
         //   Upload actions   → go into `to_download` (client must fetch from server)
         //   Download actions → go into `to_upload`   (client must push to server)
         //   DeleteRemote actions → go into `to_delete` (client deletes locally)
+        //
+        // LIMITATION: with an empty baseline this is first-sync/push-pull-of-new-files
+        // only — delete propagation (a file deleted on one side) is NOT handled; that
+        // requires per-client baseline tracking, tracked as a follow-up.
         let (server_files, client_files) = if let Some(ref db) = self.meta_db {
             let server = db
                 .list_all_files()

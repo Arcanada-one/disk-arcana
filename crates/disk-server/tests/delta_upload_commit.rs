@@ -2,6 +2,7 @@
 //!
 //! V-AC-3: Uploaded bytes persist to sync_root AND a MetaDb row is created.
 //! V-AC-4: Round-trip — upload then download returns identical bytes.
+//! V-AC-5: Pull — server file → exchange_state marks to_download → DiskClient downloads + blake3 matches.
 //! V-AC-6: Upload with path `../escape` is rejected with InvalidArgument.
 //!
 //! The server is started on port 0 (OS-assigned) to avoid DISK-0041 flaky class.
@@ -9,7 +10,10 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use disk_client::{ClientConfig, DiskClient};
 use disk_core::meta_db::MetaDb;
+use disk_core::types::FileMeta;
+use disk_core::VectorClock;
 use disk_proto::disk::{
     auth_service_client::AuthServiceClient, auth_service_server::AuthServiceServer,
     sync_service_client::SyncServiceClient, sync_service_server::SyncServiceServer, DeltaChunk,
@@ -271,5 +275,106 @@ async fn v_ac_6_upload_path_traversal_rejected() {
     assert!(
         !escaped_path.exists(),
         "attacker file must not exist outside sync_root"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// V-AC-5: Pull — server file → exchange_state marks to_download → DiskClient
+//          downloads via download_file + blake3 matches server file
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn v_ac_5_pull_server_file_to_client() {
+    // ── 1. Spin up server with MetaDb ────────────────────────────────────────
+    let root = tempdir().unwrap();
+    let db_path = root.path().join("meta.db");
+    let meta_db = MetaDb::open(&db_path).await.unwrap();
+    let sync_root = root.path().to_path_buf();
+
+    let (port, _store, cert_pem) =
+        spawn_server_with_meta_db(sync_root.clone(), meta_db.clone()).await;
+
+    // ── 2. Seed a file into server's sync_root + MetaDb ─────────────────────
+    let file_content: Vec<u8> = (0u8..=255u8).cycle().take(8_192).collect();
+    let server_hash = disk_core::delta::blake3_hash(&file_content);
+
+    let relative_path = "wiki/server-only.md";
+    let abs_path = sync_root.join(relative_path);
+    std::fs::create_dir_all(abs_path.parent().unwrap()).unwrap();
+    std::fs::write(&abs_path, &file_content).unwrap();
+
+    let mut vc = VectorClock::new();
+    vc.advance("server-test");
+    let file_meta = FileMeta {
+        path: std::path::PathBuf::from(relative_path),
+        content_hash: server_hash,
+        size: file_content.len() as u64,
+        mtime_ns: 1_700_000_000_000_000_000,
+        inode: None,
+        vector_clock: vc,
+        deleted: false,
+        deleted_at: None,
+        node_id: "server-test".into(),
+    };
+    meta_db.upsert_file(&file_meta).await.unwrap();
+
+    // ── 3. Connect a DiskClient and authenticate ─────────────────────────────
+    let ca_pem_bytes = cert_pem.as_bytes().to_vec();
+    let client = DiskClient::connect(ClientConfig {
+        endpoint: format!("https://localhost:{port}"),
+        tls_ca_cert_pem: Some(ca_pem_bytes),
+        node_id: "pull-client".into(),
+        api_key: None,
+    })
+    .await
+    .expect("DiskClient::connect");
+
+    // Register node then authenticate to obtain a session token.
+    let api_key = client
+        .register_node("Pull Client", "test")
+        .await
+        .expect("register_node");
+    let client = DiskClient::connect(ClientConfig {
+        endpoint: format!("https://localhost:{port}"),
+        tls_ca_cert_pem: Some(cert_pem.as_bytes().to_vec()),
+        node_id: "pull-client".into(),
+        api_key: Some(api_key),
+    })
+    .await
+    .expect("DiskClient::connect (with api_key)");
+    client.authenticate().await.expect("authenticate");
+
+    // ── 4. Call exchange_state with empty client state ────────────────────────
+    let resp = client
+        .exchange_state("default", vec![], std::collections::HashMap::new())
+        .await
+        .expect("exchange_state");
+
+    assert_eq!(
+        resp.to_download.len(),
+        1,
+        "server file must appear in to_download (got {:?})",
+        resp.to_download.iter().map(|f| &f.path).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        resp.to_download[0].path, relative_path,
+        "to_download[0] must be the seeded server file"
+    );
+
+    // ── 5. Download the file via DiskClient::download_file ───────────────────
+    let downloaded = client
+        .download_file(relative_path)
+        .await
+        .expect("download_file");
+
+    let downloaded_hash = disk_core::delta::blake3_hash(&downloaded);
+
+    assert_eq!(
+        downloaded_hash, server_hash,
+        "downloaded bytes' blake3 must match the server file's blake3"
+    );
+    assert_eq!(
+        downloaded, file_content,
+        "downloaded bytes must be byte-identical to the server file"
     );
 }

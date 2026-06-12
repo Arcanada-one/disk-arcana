@@ -685,6 +685,7 @@ dependencies = [
  "base64",
  "blake3",
  "dashmap",
+ "disk-client",
  "disk-core",
  "disk-proto",
  "ed25519-dalek",
