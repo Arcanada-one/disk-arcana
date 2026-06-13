@@ -32,45 +32,20 @@ const CONNECT_MAX_ATTEMPTS: u32 = 40;
 /// Delay between successive connect-retry attempts.
 const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(50);
 
-/// GET `url` with bounded connect-retry.
+/// Send a request built by `make_request` with bounded connect-retry.
 ///
 /// Retries only on connection errors (`e.is_connect()` — ECONNREFUSED,
 /// connection-reset, etc.).  Any other error kind (DNS, TLS, decode) is
 /// propagated immediately without retrying; successful HTTP responses
-/// (including 4xx/5xx) are returned as-is.
-async fn get_with_retry(
-    client: &reqwest::Client,
-    url: &str,
+/// (including 4xx/5xx) are returned as-is.  `make_request` is re-invoked for
+/// every attempt because a `RequestBuilder` is consumed by `send()`.
+async fn send_with_retry(
     addr: SocketAddr,
+    mut make_request: impl FnMut() -> reqwest::RequestBuilder,
 ) -> Result<reqwest::Response> {
     let mut last_err: Option<reqwest::Error> = None;
     for _ in 0..CONNECT_MAX_ATTEMPTS {
-        match client.get(url).send().await {
-            Ok(resp) => return Ok(resp),
-            Err(e) if e.is_connect() => {
-                last_err = Some(e);
-                tokio::time::sleep(CONNECT_RETRY_DELAY).await;
-            }
-            Err(e) => {
-                return Err(e).with_context(|| {
-                    format!("connect to daemon at {addr} (is `disk daemon` running?)")
-                });
-            }
-        }
-    }
-    Err(last_err.expect("loop ran at least once"))
-        .with_context(|| format!("connect to daemon at {addr} (is `disk daemon` running?)"))
-}
-
-/// POST `url` (no body) with bounded connect-retry.  Mirrors [`get_with_retry`].
-async fn post_with_retry(
-    client: &reqwest::Client,
-    url: &str,
-    addr: SocketAddr,
-) -> Result<reqwest::Response> {
-    let mut last_err: Option<reqwest::Error> = None;
-    for _ in 0..CONNECT_MAX_ATTEMPTS {
-        match client.post(url).send().await {
+        match make_request().send().await {
             Ok(resp) => return Ok(resp),
             Err(e) if e.is_connect() => {
                 last_err = Some(e);
@@ -92,7 +67,7 @@ pub async fn run_status(addr: Option<SocketAddr>) -> Result<()> {
     let addr = addr.unwrap_or_else(default_addr);
     let url = format!("http://{addr}/status");
     let client = reqwest::Client::new();
-    let resp = get_with_retry(&client, &url, addr).await?;
+    let resp = send_with_retry(addr, || client.get(&url)).await?;
     let status = resp.status();
     if !status.is_success() {
         anyhow::bail!("GET /status returned HTTP {status}");
@@ -154,7 +129,7 @@ pub async fn run_config_reload(addr: Option<SocketAddr>) -> Result<()> {
     let addr = addr.unwrap_or_else(default_addr);
     let url = format!("http://{addr}/config/reload");
     let client = reqwest::Client::new();
-    let resp = post_with_retry(&client, &url, addr).await?;
+    let resp = send_with_retry(addr, || client.post(&url)).await?;
     let status = resp.status();
     let body: AcceptedResponse = resp.json().await.context("decode /config/reload JSON")?;
     if body.queued {
@@ -162,5 +137,96 @@ pub async fn run_config_reload(addr: Option<SocketAddr>) -> Result<()> {
         Ok(())
     } else {
         anyhow::bail!("daemon did not queue the reload (HTTP {status}, queued=false)")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::TcpListener as StdTcpListener;
+    use std::time::Instant;
+
+    /// Reserve an OS-assigned loopback port, then release it so a connect to it
+    /// initially refuses (nothing is listening) until the delayed server below
+    /// claims it. This is exactly the cold-start window `send_with_retry` exists
+    /// to bridge.
+    fn reserve_port() -> SocketAddr {
+        let l = StdTcpListener::bind("127.0.0.1:0").expect("bind ephemeral");
+        let addr = l.local_addr().expect("local_addr");
+        drop(l);
+        addr
+    }
+
+    /// `send_with_retry` must keep retrying across an initial `ECONNREFUSED`
+    /// and succeed once a server starts listening, rather than failing on the
+    /// first cold connect. Regression guard for the daemon cold-start race.
+    #[tokio::test]
+    async fn send_with_retry_bridges_initial_connection_refused() {
+        let addr = reserve_port();
+        let url = format!("http://{addr}/ping");
+
+        // Confirm the port refuses right now (no listener yet).
+        assert!(
+            tokio::net::TcpStream::connect(addr).await.is_err(),
+            "precondition: reserved port must initially refuse connections"
+        );
+
+        // Start an HTTP listener after a delay long enough to force ≥1 retry
+        // (several CONNECT_RETRY_DELAY cycles) but well within the total budget.
+        let server = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            let listener = tokio::net::TcpListener::bind(addr)
+                .await
+                .expect("bind delayed server");
+            let (mut sock, _) = listener.accept().await.expect("accept");
+            // Minimal HTTP/1.1 200 so reqwest gets a real response.
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut buf = [0u8; 1024];
+            let _ = sock.read(&mut buf).await;
+            let _ = sock
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                .await;
+            let _ = sock.flush().await;
+        });
+
+        let client = reqwest::Client::new();
+        let started = Instant::now();
+        let resp = send_with_retry(addr, || client.get(&url))
+            .await
+            .expect("send_with_retry must succeed once the server comes up");
+
+        assert!(
+            resp.status().is_success(),
+            "expected 200 from delayed server"
+        );
+        // It must have actually waited for the server (i.e. retried), not
+        // succeeded instantly — proves the retry path engaged.
+        assert!(
+            started.elapsed() >= Duration::from_millis(200),
+            "expected at least one retry cycle before success (retry path engaged)"
+        );
+
+        server.await.expect("server task");
+    }
+
+    /// A non-connect failure path: a fully-absent daemon (port that nothing will
+    /// ever claim) must still exhaust the bounded retries and return an error
+    /// rather than hanging — the absent-daemon contract.
+    #[tokio::test]
+    async fn send_with_retry_gives_up_on_permanently_absent_daemon() {
+        let addr = reserve_port(); // released, nothing will re-bind it
+        let url = format!("http://{addr}/status");
+        let client = reqwest::Client::new();
+
+        let started = Instant::now();
+        let result = send_with_retry(addr, || client.get(&url)).await;
+
+        assert!(result.is_err(), "absent daemon must yield an error");
+        // Bounded: must give up near the configured budget, not hang forever.
+        let budget = CONNECT_RETRY_DELAY * CONNECT_MAX_ATTEMPTS;
+        assert!(
+            started.elapsed() < budget * 4,
+            "retry must be bounded (gave up within a small multiple of the budget)"
+        );
     }
 }
