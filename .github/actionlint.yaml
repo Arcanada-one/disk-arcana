@@ -1,0 +1,8 @@
+self-hosted-runner:
+  # Custom labels for the org-level self-hosted runners used by deploy jobs.
+  # Declared here so actionlint does not flag them as unknown runner labels.
+  labels:
+    - Linux
+    - X64
+    - arcana-dev
+    - arcana-prod
