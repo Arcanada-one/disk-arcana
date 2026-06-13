@@ -78,15 +78,16 @@ jobs:
           fail_on_unmatched_files: true
 
   # ──────────────────────────────────────────────────────────────────────────
-  # 2. Deploy to arcana-dev (dev target — always runs for workflow_dispatch
-  #    target=dev; also serves as staging for tag pushes).
+  # 2. Deploy to arcana-dev — explicit workflow_dispatch target=dev ONLY.
+  #    A tag push builds + attaches the release artifact but does NOT auto-deploy
+  #    anywhere: deploys (dev or prod) are always an explicit operator action so
+  #    a tag never lands code on a host on its own. (Auto-deploy on tag was also
+  #    unreachable — no self-hosted runner carries the `arcana-dev` label.)
   # ──────────────────────────────────────────────────────────────────────────
   deploy-dev:
     name: Deploy (arcana-dev)
     needs: build
-    if: |
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'dev') ||
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'dev'
     runs-on: [self-hosted, Linux, X64, arcana-dev]
     environment: dev
     steps:
