@@ -66,15 +66,16 @@ jobs:
           path: target/${{ env.BUILD_TARGET }}/release/${{ env.BINARY_NAME }}
           retention-days: 7
 
-      # Upload to GitHub Release if triggered by a tag push.
+      # Attach the built binary to the GitHub Release on a tag push.
+      # Uses softprops/action-gh-release (does not depend on the `gh` CLI being
+      # installed on the self-hosted runner — `gh release upload` previously
+      # failed with `gh: command not found`).
       - name: Attach to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload "${GITHUB_REF_NAME}" \
-            "target/${{ env.BUILD_TARGET }}/release/${{ env.BINARY_NAME }}" \
-            --clobber
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/${{ env.BUILD_TARGET }}/release/${{ env.BINARY_NAME }}
+          fail_on_unmatched_files: true
 
   # ──────────────────────────────────────────────────────────────────────────
   # 2. Deploy to arcana-dev (dev target — always runs for workflow_dispatch
