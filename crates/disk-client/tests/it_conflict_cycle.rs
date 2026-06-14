@@ -345,15 +345,15 @@ async fn cycle_forks_when_overlap_despite_baseline() {
 }
 
 // ---------------------------------------------------------------------------
-// TAIL-2: conflict row is persisted to client MetaDb during APPLY
+// conflict row is persisted to client MetaDb during APPLY
 // ---------------------------------------------------------------------------
 
-/// Daemon-faithful test for TAIL-2: drive `RemoteSync::execute()` against the
+/// Daemon-faithful test: drive `RemoteSync::execute()` against the
 /// gRPC stub with a MetaDb handle attached; assert that a `ConflictRecord` row
 /// appears in the client DB after the APPLY phase completes.
 ///
 /// This test does NOT hand-seed the DB.  The row must be created by the APPLY
-/// path itself (the fix for TAIL-2).
+/// path itself.
 #[tokio::test]
 #[cfg(unix)]
 async fn conflict_apply_persists_row_to_client_meta_db() {
@@ -378,7 +378,7 @@ async fn conflict_apply_persists_row_to_client_meta_db() {
         .expect("open MetaDb");
     let db = Arc::new(db);
 
-    // Build transport with MetaDb attached (this is the TAIL-2 fix path).
+    // Build transport with MetaDb attached (the client-side persist path).
     let mut transport =
         RemoteSync::with_scan_root(&client, SHARE_NAME, vault_dir.path().to_path_buf(), NODE_ID)
             .with_blob_cache(blob_cache, HashMap::new())
@@ -418,7 +418,7 @@ async fn conflict_apply_persists_row_to_client_meta_db() {
 }
 
 // ---------------------------------------------------------------------------
-// TAIL-3: two-cycle test — no hand-seeding of baselines
+// two-cycle test — no hand-seeding of baselines
 // ---------------------------------------------------------------------------
 
 /// Two-phase stub server: serves a download in phase 1, a conflict in phase 2.
@@ -574,11 +574,11 @@ async fn spawn_two_cycle_stub(
     }
 }
 
-/// TRUE two-cycle test (TAIL-3): no hand-seeding of baselines or blob cache.
+/// TRUE two-cycle test: no hand-seeding of baselines or blob cache.
 ///
 /// Cycle 1: the daemon downloads the common-ancestor (base) file content from
 ///   the stub and writes it to disk AND persists a baseline row via
-///   `upsert_node_baselines` (the TAIL-3 fix).
+///   `upsert_node_baselines` (the client baseline-persist path).
 ///
 /// Cycle 2: the stub reports a conflict on the same path.  The APPLY path
 ///   loads the baseline from the DB (populated in cycle 1), retrieves the base
@@ -658,7 +658,7 @@ async fn two_cycle_no_hand_seed_auto_merges_non_overlap() {
     // Simulate the user editing line 1 after cycle 1 completes.
     std::fs::write(vault_dir.path().join(CONFLICT_PATH), local_after_download).unwrap();
 
-    // Assert: the baseline was persisted to the DB by cycle 1 (TAIL-3 fix).
+    // Assert: the baseline was persisted to the DB by cycle 1.
     let baseline_rows = db
         .load_node_baseline(NODE_ID, SHARE_NAME)
         .await
@@ -667,7 +667,7 @@ async fn two_cycle_no_hand_seed_auto_merges_non_overlap() {
         baseline_rows.len(),
         1,
         "cycle 1 must have persisted a baseline row to node_baselines; \
-         found {} rows — TAIL-3 fix may not be wired",
+         found {} rows — client baseline-persist may not be wired",
         baseline_rows.len()
     );
 
