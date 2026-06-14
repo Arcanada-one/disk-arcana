@@ -166,6 +166,20 @@ impl<'a> RemoteSync<'a> {
     pub fn share(&self) -> &str {
         &self.share
     }
+
+    /// Return `true` when a blob cache has been attached via
+    /// [`Self::with_blob_cache`].  Used by tests that drive the daemon's own
+    /// construction path to assert the cache is wired without needing a live
+    /// gRPC connection.
+    pub fn has_blob_cache(&self) -> bool {
+        self.blob_cache.is_some()
+    }
+
+    /// Return the number of baseline entries loaded into this transport.  Used
+    /// alongside [`Self::has_blob_cache`] in daemon-construction tests.
+    pub fn baseline_count(&self) -> usize {
+        self.baselines.len()
+    }
 }
 
 /// Convert a domain [`FileMeta`] into its proto [`FileMetadata`] equivalent.

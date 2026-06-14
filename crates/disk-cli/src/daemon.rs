@@ -26,8 +26,9 @@
 //! - Background mode (`disk daemon start` without `--foreground`) — owned
 //!   by launchd / systemd. R11 refuses background flag with a clear hint.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
@@ -35,6 +36,8 @@ use disk_client::config::{spawn_config_watcher, ConfigWatcher, Direction, DiskCo
 use disk_client::connection::DiskClient;
 use disk_client::rest_api::{serve, DaemonState, ShareSnapshot};
 use disk_client::sync_loop::{LoopState, LoopTrigger, RemoteSync, SyncLoop, POLL_INTERVAL};
+use disk_client::BlobCache;
+use disk_core::MetaDb;
 use rand::{rngs::StdRng, SeedableRng};
 
 /// CLI arguments for `disk daemon start`.
@@ -54,6 +57,12 @@ pub struct DaemonStartArgs {
     /// systemd manages the background lifecycle).
     #[arg(long, default_value_t = false)]
     pub foreground: bool,
+
+    /// Directory used for persistent client state: the shared SQLite
+    /// `MetaDb` (`meta.db`) and the content-addressed blob cache (`blob-cache/`)
+    /// used by the auto-3-way-merge path.  Must survive daemon restarts.
+    #[arg(long, default_value = "/var/lib/disk-arcana")]
+    pub state_dir: PathBuf,
 }
 
 /// Entry point invoked from `main.rs`. Hosts the daemon for the lifetime
@@ -85,13 +94,45 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let signal_task = tokio::spawn(wait_for_terminate_signal(shutdown_tx));
 
+    // ── Open the shared client MetaDb and BlobCache ───────────────────────
+    //
+    // A single MetaDb at `{state_dir}/meta.db` records `node_baselines` for
+    // ALL shares keyed by `(node_id, vault_id=share_name, path)`.  The blob
+    // cache at `{state_dir}/blob-cache/` is content-addressed and therefore
+    // also shared across shares — blobs from one share that happen to match
+    // another's hash cause no harm, only a slight space saving.
+    //
+    // Both are opened once here and held for the lifetime of the process.
+    // If the state dir cannot be created or the DB cannot be opened we log a
+    // warning and run WITHOUT blob-cache / baselines (falling back to
+    // fork-on-conflict, which was the pre-existing safe behaviour).
+    let (meta_db, blob_cache): (Option<Arc<MetaDb>>, Arc<BlobCache>) =
+        match open_client_state(&args.state_dir).await {
+            Ok((db, cache)) => (Some(Arc::new(db)), Arc::new(cache)),
+            Err(e) => {
+                tracing::warn!(
+                    state_dir = %args.state_dir.display(),
+                    error = %e,
+                    "daemon: could not open client state (MetaDb/BlobCache); \
+                     3-way merge will not fire — conflicts will fork instead"
+                );
+                // BlobCache::new never fails (lazy dir creation); supply a
+                // no-op cache so the Arc is always present and the sync loop
+                // can still attach it when a real DB is available later.
+                (
+                    None,
+                    Arc::new(BlobCache::new(args.state_dir.join("blob-cache"))),
+                )
+            }
+        };
+
     // ── Spawn per-share sync-loop tasks (DISK-0043) ──────────────────────
     //
     // Each share gets a task that runs `SyncLoop::run_iteration` on:
     //   (a) a `POLL_INTERVAL` timer tick, and
     //   (b) a `manual_sync_rx` wakeup (sent by POST /sync).
     //
-    // Tasks are aborted on shutdown alongside the config watcher (l.97).
+    // Tasks are aborted on shutdown alongside the config watcher.
     //
     // The `DiskClient` is not constructed here because it requires TLS cert
     // files that may not exist in a bootstrap environment.  Instead, we spawn
@@ -122,6 +163,8 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
         let client_key_pem = client_key_pem.clone();
         let node_id_for_loop = node_id_for_loop.clone();
         let manual_sync_rx = Arc::clone(&manual_sync_rx);
+        let meta_db = meta_db.clone();
+        let blob_cache = Arc::clone(&blob_cache);
 
         let handle = tokio::spawn(async move {
             // Build a DiskClient if TLS material is available.
@@ -158,11 +201,20 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
                     } => LoopTrigger::Manual,
                 };
 
-                let mut transport = RemoteSync::with_scan_root(
+                // Load per-share baselines from the MetaDb for this cycle.
+                // A fresh load each cycle picks up baselines written in the
+                // previous cycle without requiring inter-task communication.
+                let baselines =
+                    load_baselines_for_share(meta_db.as_deref(), &node_id_for_loop, &share_name)
+                        .await;
+
+                let mut transport = build_remote_sync_for_share(
                     &client,
                     &share_name,
                     share_path.clone(),
                     &node_id_for_loop,
+                    Arc::clone(&blob_cache),
+                    baselines,
                 );
                 let _ = loop_sm
                     .run_iteration(&mut transport, trigger, &mut rng)
@@ -189,6 +241,82 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
     }
     tracing::info!("disk daemon shutdown complete");
     Ok(())
+}
+
+/// Open the client MetaDb and create the BlobCache under `state_dir`.
+///
+/// `state_dir` is created if it does not exist.  Returns both handles on
+/// success; the caller degrades gracefully on error (log + fork fallback).
+pub(crate) async fn open_client_state(state_dir: &Path) -> Result<(MetaDb, BlobCache)> {
+    std::fs::create_dir_all(state_dir)
+        .with_context(|| format!("create state_dir {}", state_dir.display()))?;
+
+    let db_path = state_dir.join("meta.db");
+    let db = MetaDb::open(&db_path)
+        .await
+        .with_context(|| format!("open MetaDb at {}", db_path.display()))?;
+
+    let cache_dir = state_dir.join("blob-cache");
+    let cache = BlobCache::new(cache_dir);
+
+    Ok((db, cache))
+}
+
+/// Load `node_baselines` for `(node_id, share_name)` from the MetaDb and
+/// convert them to the `HashMap<path_string, content_hash>` form expected by
+/// [`RemoteSync::with_blob_cache`].
+///
+/// Returns an empty map when `meta_db` is `None` or when the DB query fails
+/// (non-fatal; the APPLY path falls back to forking).
+pub(crate) async fn load_baselines_for_share(
+    meta_db: Option<&MetaDb>,
+    node_id: &str,
+    share_name: &str,
+) -> HashMap<String, [u8; 32]> {
+    let db = match meta_db {
+        Some(db) => db,
+        None => return HashMap::new(),
+    };
+
+    match db.load_node_baseline(node_id, share_name).await {
+        Ok(entries) => entries
+            .into_iter()
+            .filter(|e| !e.deleted)
+            .map(|e| {
+                let path = e.path.to_string_lossy().into_owned();
+                (path, e.content_hash)
+            })
+            .collect(),
+        Err(e) => {
+            tracing::warn!(
+                node_id,
+                share = share_name,
+                error = %e,
+                "daemon: load_node_baseline failed; 3-way merge skipped for this cycle"
+            );
+            HashMap::new()
+        }
+    }
+}
+
+/// Construct a [`RemoteSync`] transport with the blob cache and baseline map
+/// attached so the auto-3-way-merge path is active.
+///
+/// This function is the single production call site that wires
+/// `with_blob_cache` onto the sync transport — keeping it extracted makes
+/// it testable without a live gRPC server (the `daemon_attaches_blob_cache`
+/// unit test calls this directly to assert the cache and baselines are
+/// present before any network I/O occurs).
+pub(crate) fn build_remote_sync_for_share<'a>(
+    client: &'a DiskClient,
+    share_name: &str,
+    share_path: PathBuf,
+    node_id: &str,
+    blob_cache: Arc<BlobCache>,
+    baselines: HashMap<String, [u8; 32]>,
+) -> RemoteSync<'a> {
+    RemoteSync::with_scan_root(client, share_name, share_path, node_id)
+        .with_blob_cache(blob_cache, baselines)
 }
 
 fn build_share_snapshots(cfg: &DiskConfig) -> Vec<ShareSnapshot> {
@@ -322,5 +450,98 @@ client_key  = "/b"
         let cfg = DiskConfig::from_str(cfg_str).unwrap();
         let snaps = build_share_snapshots(&cfg);
         assert!(snaps.is_empty());
+    }
+
+    /// Prove that the daemon's own sync-construction path — `open_client_state`
+    /// + `load_baselines_for_share` + `build_remote_sync_for_share` — wires
+    /// the blob cache and baselines onto the transport before any network I/O.
+    ///
+    /// This is a daemon-faithful test: it calls the exact same helper
+    /// functions the sync-loop task calls each iteration, asserting that
+    /// `has_blob_cache()` is true and `baseline_count()` reflects the rows
+    /// written to the MetaDb.  A fake DiskClient endpoint is used so no TLS
+    /// connection is required.
+    #[tokio::test]
+    async fn daemon_attaches_blob_cache() {
+        use disk_client::connection::ClientConfig;
+        use disk_core::types::FileMeta;
+        use disk_core::vector_clock::VectorClock;
+
+        let state_dir = tempfile::tempdir().unwrap();
+
+        // Open the client state exactly as the daemon does.
+        let (db, cache) = open_client_state(state_dir.path())
+            .await
+            .expect("open_client_state must succeed");
+        let db = Arc::new(db);
+        let cache = Arc::new(cache);
+
+        // Write a baseline row for share "wiki" to simulate a prior sync cycle
+        // having persisted the last-synced common-ancestor hash.
+        let baseline = FileMeta {
+            path: "notes/daily.md".into(),
+            content_hash: [0x42u8; 32],
+            size: 128,
+            mtime_ns: 1_700_000_000_000_000_000,
+            inode: None,
+            vector_clock: VectorClock::default(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "arcana-ai".to_string(),
+        };
+        db.upsert_node_baselines("arcana-ai", "wiki", std::slice::from_ref(&baseline))
+            .await
+            .expect("upsert_node_baselines must succeed");
+
+        // Load baselines through the daemon helper — this mirrors the
+        // per-iteration call in the sync-loop task.
+        let baselines = load_baselines_for_share(Some(db.as_ref()), "arcana-ai", "wiki").await;
+
+        assert_eq!(
+            baselines.len(),
+            1,
+            "load_baselines_for_share must return the upserted baseline row"
+        );
+        assert_eq!(
+            baselines.get("notes/daily.md").copied(),
+            Some([0x42u8; 32]),
+            "baseline content_hash must match what was written"
+        );
+
+        // Build a stub DiskClient using the lazy constructor so no TCP
+        // connection attempt is made.  Construction must succeed; actual
+        // RPCs would fail at runtime, but this test only inspects wiring.
+        let client = DiskClient::connect_lazy_for_test(ClientConfig {
+            endpoint: "https://localhost:9999".into(),
+            tls_ca_cert_pem: None,
+            node_id: "arcana-ai".into(),
+            api_key: None,
+        })
+        .expect("connect_lazy_for_test must succeed (no I/O at construction)");
+
+        // Construct RemoteSync through the daemon's own helper.
+        let transport = build_remote_sync_for_share(
+            &client,
+            "wiki",
+            PathBuf::from("/data/wiki"),
+            "arcana-ai",
+            Arc::clone(&cache),
+            baselines,
+        );
+
+        // Assert the blob cache is attached.
+        assert!(
+            transport.has_blob_cache(),
+            "build_remote_sync_for_share must attach the blob cache; \
+             has_blob_cache() returned false"
+        );
+
+        // Assert the baselines were threaded through.
+        assert_eq!(
+            transport.baseline_count(),
+            1,
+            "build_remote_sync_for_share must carry the loaded baselines; \
+             baseline_count() must equal 1 (one row was upserted)"
+        );
     }
 }

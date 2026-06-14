@@ -80,6 +80,37 @@ impl DiskClient {
         })
     }
 
+    /// Build a `DiskClient` without establishing a TCP connection.
+    ///
+    /// The underlying channel is created with `connect_lazy` — the actual
+    /// connection is deferred until the first RPC call.  This constructor is
+    /// intended for tests that exercise construction and wiring (e.g.
+    /// asserting that `RemoteSync` receives a blob cache) without requiring a
+    /// live server.  It MUST NOT be used in production paths where a connected
+    /// channel is expected before any sync work begins.
+    // `ClientError` contains `tonic::Status` (>= 176 bytes) which Clippy flags;
+    // this mirrors the `connect` async fn (same return type, same lint scope).
+    #[allow(clippy::result_large_err)]
+    pub fn connect_lazy_for_test(config: ClientConfig) -> Result<Self, ClientError> {
+        let mut endpoint = Endpoint::new(config.endpoint.clone())?;
+
+        let mut tls_config = ClientTlsConfig::new();
+        if let Some(ref ca_pem) = config.tls_ca_cert_pem {
+            let ca_cert = tonic::transport::Certificate::from_pem(ca_pem.clone());
+            tls_config = tls_config.ca_certificate(ca_cert);
+        }
+        endpoint = endpoint.tls_config(tls_config)?;
+
+        let channel = endpoint.connect_lazy();
+
+        Ok(Self {
+            channel,
+            node_id: config.node_id,
+            api_key: config.api_key,
+            session_token: Arc::new(tokio::sync::RwLock::new(None)),
+        })
+    }
+
     /// Register this node with the server.  Returns the raw API key.
     pub async fn register_node(
         &self,
