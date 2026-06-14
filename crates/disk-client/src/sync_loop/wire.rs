@@ -20,6 +20,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use disk_core::filter::{Filter, FilterRules};
 use disk_core::scanner::FileScanner;
@@ -29,6 +30,7 @@ use prost::Message;
 use tonic::{Code, Status};
 
 use super::LoopError;
+use crate::blob_cache::BlobCache;
 use crate::conflict_writer::apply_conflict;
 use crate::connection::{ClientError, DiskClient};
 
@@ -79,7 +81,24 @@ pub trait SyncTransport: Send {
 /// configured share.
 ///
 /// DISK-0043: sends real local scan (Scan → Hash → ExchangeState) and
-/// executes SyncStateResponse actions (Upload / Download).
+/// executes SyncStateResponse actions (Upload / Download / Conflict-apply).
+///
+/// # Auto-3-way-merge (conflict APPLY path)
+///
+/// When a [`BlobCache`] is attached (via [`RemoteSync::with_blob_cache`]) and
+/// a pre-loaded baseline map is supplied, the APPLY path can provide the
+/// common-ancestor bytes to `apply_conflict`.  The lifecycle is:
+///
+/// 1. **Previous cycle DOWNLOAD**: bytes written to disk are also stored in the
+///    blob cache keyed by their blake3 hash.  That hash becomes the baseline
+///    `content_hash` recorded in `node_baselines` after a successful sync.
+/// 2. **Current cycle APPLY**: for each `ConflictReport`, look up the path in
+///    `baselines` to find the baseline hash, then look up the blob cache to
+///    get the base bytes.  If both lookups succeed, `apply_conflict` receives
+///    `Some(base)` and can perform a 3-way merge instead of forking.
+///
+/// Without a blob cache or baseline map, `base = None` is passed and
+/// `apply_conflict` falls back to forking (zero-data-loss, as before).
 pub struct RemoteSync<'a> {
     client: &'a DiskClient,
     share: String,
@@ -87,6 +106,14 @@ pub struct RemoteSync<'a> {
     scan_root: PathBuf,
     /// Node id used as the writer in FileMeta rows.
     node_id: String,
+    /// Optional content-addressed blob cache.  When set, downloaded file bytes
+    /// are stored here keyed by their blake3 hash so that subsequent cycles can
+    /// recover the common-ancestor content for 3-way merges.
+    blob_cache: Option<Arc<BlobCache>>,
+    /// Last-synced baseline hashes per vault-relative path.  Populated from
+    /// `node_baselines` before a cycle begins (see `with_blob_cache`).
+    /// Maps `path_string → content_hash([u8;32])`.
+    baselines: HashMap<String, [u8; 32]>,
 }
 
 impl<'a> RemoteSync<'a> {
@@ -97,6 +124,8 @@ impl<'a> RemoteSync<'a> {
             share: share.into(),
             scan_root: PathBuf::new(),
             node_id: String::new(),
+            blob_cache: None,
+            baselines: HashMap::new(),
         }
     }
 
@@ -112,7 +141,26 @@ impl<'a> RemoteSync<'a> {
             share: share.into(),
             scan_root,
             node_id: node_id.into(),
+            blob_cache: None,
+            baselines: HashMap::new(),
         }
+    }
+
+    /// Attach a blob cache and pre-loaded baseline hashes to enable auto
+    /// 3-way-merge on the conflict APPLY path.
+    ///
+    /// `baselines` maps a vault-relative path string to the blake3
+    /// `content_hash` of the last successfully synced version of that file
+    /// (i.e. the common-ancestor bytes).  Callers typically build this from
+    /// `MetaDb::load_node_baseline()` before constructing `RemoteSync`.
+    pub fn with_blob_cache(
+        mut self,
+        cache: Arc<BlobCache>,
+        baselines: HashMap<String, [u8; 32]>,
+    ) -> Self {
+        self.blob_cache = Some(cache);
+        self.baselines = baselines;
+        self
     }
 
     pub fn share(&self) -> &str {
@@ -213,7 +261,21 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                     if let Some(parent) = dest.parent() {
                         let _ = std::fs::create_dir_all(parent);
                     }
-                    let _ = std::fs::write(&dest, bytes);
+                    let _ = std::fs::write(&dest, &bytes);
+
+                    // Cache bytes by their blake3 hash so that a future cycle
+                    // can retrieve the common-ancestor content for 3-way merge
+                    // without a round-trip to the server.
+                    if let Some(ref cache) = self.blob_cache {
+                        let hash: [u8; 32] = *blake3::hash(&bytes).as_bytes();
+                        if let Err(e) = cache.put(&hash, &bytes) {
+                            tracing::debug!(
+                                path = %to_download.path,
+                                error = %e,
+                                "blob cache put failed (non-fatal)"
+                            );
+                        }
+                    }
                 }
             }
 
@@ -223,9 +285,14 @@ impl<'a> SyncTransport for RemoteSync<'a> {
             // Strategy:
             //   1. Read the current local file bytes.
             //   2. Download the remote bytes from the server.
-            //   3. Attempt `apply_conflict` (3-way merge when base is available
-            //      and extension is merge-eligible; otherwise fork the remote
-            //      bytes and leave the local file untouched).
+            //   3. Resolve the common-ancestor (base) bytes from the blob cache
+            //      using the baseline content_hash for this path.  When a base
+            //      is available, `apply_conflict` attempts a 3-way merge for
+            //      eligible extensions (.md / .txt); on clean merge the merged
+            //      file replaces the live path with no fork.
+            //   4. When no base is available (cache miss or no blob_cache),
+            //      pass `None` — `apply_conflict` falls back to fork, preserving
+            //      both versions (zero-data-loss invariant unchanged).
             //
             // Non-fatal: a failure to resolve a single conflict is logged and
             // skipped so that the remainder of the sync iteration can proceed.
@@ -258,14 +325,23 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                     }
                 };
 
-                // Apply: merge when eligible and base is available; fork otherwise.
-                // Base is not carried in the proto ConflictReport, so we pass None —
-                // three_way_merge will refuse (NoBase) and apply_conflict falls back
-                // to fork, preserving both versions.
+                // Resolve the base (common-ancestor) bytes from the blob cache.
+                //
+                // The baseline map (populated from node_baselines before the
+                // cycle) records the content_hash of the last successfully
+                // synced version of each file.  That hash is the blob cache key
+                // for the common-ancestor content.  When both lookups succeed
+                // the merge path is enabled; otherwise we fall back to fork.
+                let base_bytes: Option<Vec<u8>> = self.blob_cache.as_ref().and_then(|cache| {
+                    let hash = self.baselines.get(&conflict.path)?;
+                    cache.get(hash)
+                });
+
+                // Apply: merge (Some(base)) or fork (None).
                 match apply_conflict(
                     &self.scan_root,
                     rel_path,
-                    None,
+                    base_bytes.as_deref(),
                     &local_bytes,
                     &remote_bytes,
                     &self.node_id,
@@ -274,6 +350,7 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                         tracing::info!(
                             path = %conflict.path,
                             outcome = ?outcome,
+                            had_base = base_bytes.is_some(),
                             "conflict apply: resolved"
                         );
                     }

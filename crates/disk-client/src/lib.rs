@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod blob_cache;
 pub mod config;
 pub mod conflict_writer;
 pub mod connection;
@@ -16,6 +17,7 @@ pub mod rest_api;
 pub mod sync_loop;
 pub mod watcher;
 
+pub use blob_cache::BlobCache;
 pub use config::{spawn_config_watcher, ConfigSnapshot, ConfigWatcher, ReloadStatus};
 pub use conflict_writer::{apply_conflict, write_fork, ConflictApplyOutcome, ForkWriteError};
 pub use connection::{ClientConfig, ClientError, DiskClient};
