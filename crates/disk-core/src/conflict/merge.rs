@@ -193,7 +193,7 @@ mod tests {
     fn three_way_nul_beyond_scan_window_not_refused() {
         let mut content = vec![b'a'; 1025];
         content[1024] = 0u8; // NUL at byte 1024 — outside scan window
-        let base = content.clone();
+        let _base = content.clone();
         // Make it valid UTF-8 up to 1024, NUL outside window won't trigger binary.
         // Build a content that is valid UTF-8 with NUL only outside scan window.
         // Actually NUL is valid in bytes but not UTF-8, so we'll build ASCII content.

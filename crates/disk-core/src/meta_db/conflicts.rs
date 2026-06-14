@@ -198,7 +198,7 @@ mod tests {
         let list = db.list_unresolved_conflicts().await.unwrap();
         assert_eq!(list.len(), 1, "one unresolved conflict expected");
         assert_eq!(list[0].path, "notes/todo.md");
-        assert_eq!(list[0].resolved, false);
+        assert!(!list[0].resolved);
     }
 
     /// resolve_conflict → row disappears from list_unresolved_conflicts.
