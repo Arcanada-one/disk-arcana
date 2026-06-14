@@ -59,6 +59,9 @@ enum Command {
 
     /// Inspect or manage the `disk.toml` configuration.
     Config(ConfigArgs),
+
+    /// Manage sync conflicts: list unresolved or resolve by action.
+    Conflicts(ConflictsArgs),
 }
 
 /// `disk daemon <subcmd>` — wrapper.
@@ -113,6 +116,81 @@ pub struct ConfigReloadArgs {
     /// Daemon REST address. Defaults to `127.0.0.1:9444`.
     #[arg(long)]
     pub addr: Option<SocketAddr>,
+}
+
+/// `disk conflicts <subcmd>` — wrapper for conflict management.
+#[derive(clap::Args, Debug)]
+pub struct ConflictsArgs {
+    #[command(subcommand)]
+    pub command: ConflictsCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ConflictsCommand {
+    /// List all unresolved sync conflicts.
+    List(ConflictsListArgs),
+    /// Resolve a specific conflict (or all conflicts) with the given action.
+    Resolve(ResolveArgs),
+}
+
+/// `disk conflicts list [--vault <name>] [--addr <ip:port>]`.
+#[derive(clap::Args, Debug)]
+pub struct ConflictsListArgs {
+    /// Filter by vault name (reserved for future use).
+    #[arg(long)]
+    pub vault: Option<String>,
+
+    /// Daemon REST address. Defaults to `127.0.0.1:9444`.
+    #[arg(long)]
+    pub addr: Option<std::net::SocketAddr>,
+}
+
+/// `disk conflicts resolve` — resolve one conflict or all at once.
+#[derive(clap::Args, Debug)]
+pub struct ResolveArgs {
+    /// Vault-relative path of the conflict to resolve. Mutually exclusive with `--all`.
+    #[arg(long, conflicts_with = "all")]
+    pub path: Option<String>,
+
+    /// Resolve all unresolved conflicts with the given action. Mutually exclusive with `--path`.
+    #[arg(long, conflicts_with = "path")]
+    pub all: bool,
+
+    /// Resolution action to apply.
+    #[arg(long, value_enum)]
+    pub action: ResolveAction,
+
+    /// Daemon REST address. Defaults to `127.0.0.1:9444`.
+    #[arg(long)]
+    pub addr: Option<std::net::SocketAddr>,
+}
+
+/// Valid resolution actions for `disk conflicts resolve`.
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolveAction {
+    /// Write a fork copy from the local version; keep remote as-is.
+    ForkLocal,
+    /// Write a fork copy from the remote version; keep local as-is.
+    ForkRemote,
+    /// Attempt a 3-way merge; falls back to fork on conflict.
+    Merge,
+    /// Keep the local version; discard the remote change.
+    KeepLocal,
+    /// Keep the remote version; discard the local change.
+    KeepRemote,
+}
+
+impl ResolveAction {
+    /// Convert to the REST API action string.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ResolveAction::ForkLocal => "fork-local",
+            ResolveAction::ForkRemote => "fork-remote",
+            ResolveAction::Merge => "merge",
+            ResolveAction::KeepLocal => "keep-local",
+            ResolveAction::KeepRemote => "keep-remote",
+        }
+    }
 }
 
 /// `disk share <subcmd>` — wrapper for share management subcommands.
@@ -316,6 +394,12 @@ async fn main() -> Result<()> {
         Some(Command::Config(args)) => match args.command {
             ConfigCommand::Validate(c) => commands::run_config_validate(c.file),
             ConfigCommand::Reload(c) => commands::run_config_reload(c.addr).await,
+        },
+        Some(Command::Conflicts(args)) => match args.command {
+            ConflictsCommand::List(l) => commands::run_conflicts_list(l.addr).await,
+            ConflictsCommand::Resolve(r) => {
+                commands::run_conflicts_resolve(r.addr, r.path, r.all, r.action.as_str()).await
+            }
         },
         None => {
             let version = env!("CARGO_PKG_VERSION");
@@ -726,5 +810,147 @@ node_id_hint = "from-bf"
         assert_eq!(r.server, "https://override:9999");
         assert_eq!(r.token_hex, "cafef00d"); // still from bf
         assert_eq!(r.node_id, "override-node");
+    }
+
+    // ── conflicts CLI parsing ────────────────────────────────────────────────
+
+    /// `disk conflicts list` parses into Command::Conflicts / ConflictsCommand::List.
+    #[test]
+    fn conflicts_resolve_roundtrip_list_parses() {
+        let cli = Cli::try_parse_from(["disk", "conflicts", "list"]).unwrap();
+        match cli.command {
+            Some(Command::Conflicts(ConflictsArgs {
+                command: ConflictsCommand::List(_),
+            })) => {}
+            other => panic!("expected conflicts list, got {other:?}"),
+        }
+    }
+
+    /// `disk conflicts resolve <path> --action merge` parses correctly.
+    #[test]
+    fn conflicts_resolve_roundtrip_resolve_path_parses() {
+        let cli = Cli::try_parse_from([
+            "disk",
+            "conflicts",
+            "resolve",
+            "--path",
+            "notes/todo.md",
+            "--action",
+            "merge",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Command::Conflicts(ConflictsArgs {
+                command: ConflictsCommand::Resolve(r),
+            })) => {
+                assert_eq!(r.path.as_deref(), Some("notes/todo.md"));
+                assert_eq!(r.action, ResolveAction::Merge);
+                assert!(!r.all);
+            }
+            other => panic!("expected conflicts resolve, got {other:?}"),
+        }
+    }
+
+    /// `disk conflicts resolve --all --action fork-local` parses correctly.
+    #[test]
+    fn conflicts_resolve_roundtrip_resolve_all_parses() {
+        let cli = Cli::try_parse_from([
+            "disk",
+            "conflicts",
+            "resolve",
+            "--all",
+            "--action",
+            "fork-local",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Command::Conflicts(ConflictsArgs {
+                command: ConflictsCommand::Resolve(r),
+            })) => {
+                assert!(r.all);
+                assert!(r.path.is_none());
+                assert_eq!(r.action, ResolveAction::ForkLocal);
+            }
+            other => panic!("expected conflicts resolve --all, got {other:?}"),
+        }
+    }
+
+    /// `disk conflicts resolve --path P --all` is rejected by clap (mutual exclusion).
+    #[test]
+    fn conflicts_resolve_roundtrip_path_and_all_conflict() {
+        let res = Cli::try_parse_from([
+            "disk",
+            "conflicts",
+            "resolve",
+            "--path",
+            "file.md",
+            "--all",
+            "--action",
+            "keep-local",
+        ]);
+        assert!(res.is_err(), "clap must reject --path and --all together");
+    }
+
+    /// Round-trip: list → resolve via live loopback REST (in-process mock daemon).
+    ///
+    /// This test spins up the REST router with a real MetaDb, seeds one conflict,
+    /// calls run_conflicts_list + run_conflicts_resolve, then verifies the conflict
+    /// is gone from list_unresolved_conflicts.
+    #[tokio::test]
+    async fn conflicts_resolve_roundtrip_live() {
+        use disk_core::types::ConflictRecord;
+        use std::net::SocketAddr;
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = disk_core::MetaDb::open(&dir.path().join("meta.db"))
+            .await
+            .unwrap();
+
+        // Seed a conflict.
+        let rec = ConflictRecord {
+            id: None,
+            vault_id: "default".into(),
+            path: "notes/roundtrip.md".into(),
+            conflict_type: "Concurrent".into(),
+            local_hash: None,
+            remote_hash: None,
+            base_hash: None,
+            resolution: None,
+            fork_path: Some("notes/roundtrip.sync-conflict-abc12345-20260101-120000.md".into()),
+            resolved: false,
+            created_at: 0,
+            resolved_at: None,
+        };
+        db.create_conflict(&rec).await.unwrap();
+        let db_ref = std::sync::Arc::new(db.clone());
+
+        // Start loopback REST server.
+        let (state, _, _) = disk_client::DaemonState::new("test-node", "v0");
+        let state = state.with_meta_db(db);
+        let bind: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let shutdown = futures::future::pending::<()>();
+        let local_addr = disk_client::serve(state, bind, shutdown).await.unwrap();
+
+        let addr = Some(local_addr);
+
+        // run_conflicts_list should succeed (no assertion on output, just no error).
+        commands::run_conflicts_list(addr).await.unwrap();
+
+        // run_conflicts_resolve for the specific path.
+        commands::run_conflicts_resolve(
+            addr,
+            Some("notes/roundtrip.md".into()),
+            false,
+            "keep-local",
+        )
+        .await
+        .unwrap();
+
+        // Verify via DB that conflict is resolved.
+        let remaining = db_ref.list_unresolved_conflicts().await.unwrap();
+        assert!(
+            remaining.is_empty(),
+            "conflict must be resolved after run_conflicts_resolve"
+        );
     }
 }
