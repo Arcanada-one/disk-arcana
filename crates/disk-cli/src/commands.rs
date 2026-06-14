@@ -207,6 +207,64 @@ pub async fn run_conflicts_resolve(
     Ok(())
 }
 
+/// `disk conflicts show --path <path> [--addr <ip:port>]` — side-by-side diff.
+///
+/// Calls `GET /conflicts/{path}/diff` on the running daemon to retrieve the
+/// local and fork (remote) file contents, then renders a side-by-side diff
+/// using `prettydiff`.
+pub async fn run_conflicts_show(addr: Option<SocketAddr>, path: &str) -> Result<()> {
+    let addr = addr.unwrap_or_else(default_addr);
+    let encoded_path = percent_encode(path);
+    let url = format!("http://{addr}/conflicts/{encoded_path}/diff");
+    let client = reqwest::Client::new();
+    let resp = send_with_retry(addr, || client.get(&url)).await?;
+    let status = resp.status();
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("GET /conflicts/{path}/diff returned HTTP {status}: {text}");
+    }
+    let body: serde_json::Value = resp.json().await.context("decode /conflicts diff JSON")?;
+
+    // Extract local and fork content from the JSON response.
+    let local_content = body
+        .get("local_content")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let fork_content = body
+        .get("fork_content")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let fork_path = body
+        .get("fork_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("<unknown>");
+    let local_error = body.get("local_error").and_then(|v| v.as_str());
+    let fork_error = body.get("fork_error").and_then(|v| v.as_str());
+
+    println!("conflict: {path}");
+    println!("fork:     {fork_path}");
+    println!("{}", "─".repeat(80));
+
+    if let Some(e) = local_error {
+        println!("LOCAL ERROR: {e}");
+    } else if let Some(e) = fork_error {
+        println!("FORK ERROR:  {e}");
+    } else {
+        // Render a side-by-side diff using prettydiff.
+        let local_lines: Vec<&str> = local_content.lines().collect();
+        let fork_lines: Vec<&str> = fork_content.lines().collect();
+        let diff = prettydiff::diff_lines(local_content, fork_content);
+        println!(
+            "─── local ({} lines) vs fork ({} lines) ───",
+            local_lines.len(),
+            fork_lines.len()
+        );
+        println!("{diff}");
+    }
+
+    Ok(())
+}
+
 /// POST `/conflicts/{path}` with the given action.
 async fn resolve_one(
     addr: SocketAddr,

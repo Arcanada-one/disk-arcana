@@ -131,6 +131,8 @@ pub enum ConflictsCommand {
     List(ConflictsListArgs),
     /// Resolve a specific conflict (or all conflicts) with the given action.
     Resolve(ResolveArgs),
+    /// Show a side-by-side diff of the local file versus its fork (remote version).
+    Show(ConflictsShowArgs),
 }
 
 /// `disk conflicts list [--vault <name>] [--addr <ip:port>]`.
@@ -139,6 +141,18 @@ pub struct ConflictsListArgs {
     /// Filter by vault name (reserved for future use).
     #[arg(long)]
     pub vault: Option<String>,
+
+    /// Daemon REST address. Defaults to `127.0.0.1:9444`.
+    #[arg(long)]
+    pub addr: Option<std::net::SocketAddr>,
+}
+
+/// `disk conflicts show <path> [--addr <ip:port>]` — side-by-side diff.
+#[derive(clap::Args, Debug)]
+pub struct ConflictsShowArgs {
+    /// Vault-relative path of the conflict to show.
+    #[arg(long)]
+    pub path: String,
 
     /// Daemon REST address. Defaults to `127.0.0.1:9444`.
     #[arg(long)]
@@ -400,6 +414,7 @@ async fn main() -> Result<()> {
             ConflictsCommand::Resolve(r) => {
                 commands::run_conflicts_resolve(r.addr, r.path, r.all, r.action.as_str()).await
             }
+            ConflictsCommand::Show(s) => commands::run_conflicts_show(s.addr, &s.path).await,
         },
         None => {
             let version = env!("CARGO_PKG_VERSION");
@@ -952,5 +967,71 @@ node_id_hint = "from-bf"
             remaining.is_empty(),
             "conflict must be resolved after run_conflicts_resolve"
         );
+    }
+
+    // ── TAIL-6: `disk conflicts show` subcommand parse ──────────────────────
+
+    /// TAIL-6: `disk conflicts show --path <file>` parses into
+    /// `ConflictsCommand::Show(ConflictsShowArgs { path, addr: None })`.
+    ///
+    /// This test proves the new subcommand is wired in the clap tree — it
+    /// catches regressions where the variant is defined but not registered
+    /// in the `Subcommand` derive, which would make the command silently
+    /// disappear from the CLI.
+    #[test]
+    fn cli_parses_conflicts_show_subcommand() {
+        let cli =
+            Cli::try_parse_from(["disk", "conflicts", "show", "--path", "docs/notes.md"]).unwrap();
+        match cli.command {
+            Some(Command::Conflicts(ConflictsArgs {
+                command: ConflictsCommand::Show(s),
+            })) => {
+                assert_eq!(
+                    s.path, "docs/notes.md",
+                    "show path must match the --path argument"
+                );
+                assert!(
+                    s.addr.is_none(),
+                    "addr must default to None when not provided"
+                );
+            }
+            other => panic!(
+                "expected conflicts show, got {other:?}; \
+                 the Show variant may not be registered in ConflictsCommand"
+            ),
+        }
+    }
+
+    /// TAIL-6: `disk conflicts show --path <file> --addr 127.0.0.1:9444` parses
+    /// the optional `--addr` override correctly.
+    #[test]
+    fn cli_parses_conflicts_show_with_addr_override() {
+        use std::net::{Ipv4Addr, SocketAddr};
+
+        let cli = Cli::try_parse_from([
+            "disk",
+            "conflicts",
+            "show",
+            "--path",
+            "notes/daily.md",
+            "--addr",
+            "127.0.0.1:9444",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Command::Conflicts(ConflictsArgs {
+                command: ConflictsCommand::Show(s),
+            })) => {
+                assert_eq!(s.path, "notes/daily.md");
+                assert_eq!(
+                    s.addr,
+                    Some(SocketAddr::new(
+                        std::net::IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                        9444
+                    ))
+                );
+            }
+            other => panic!("expected conflicts show --addr, got {other:?}"),
+        }
     }
 }
