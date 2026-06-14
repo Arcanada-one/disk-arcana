@@ -356,24 +356,21 @@ impl<'a> SyncTransport for RemoteSync<'a> {
             // Non-fatal: a baseline write failure must not abort the sync
             // iteration — the file operations already succeeded.
             if let (Some(db), true) = (&self.meta_db, !downloaded_baselines.is_empty()) {
-                let db_clone = Arc::clone(db);
-                let share_clone = self.share.clone();
-                let node_id_clone = self.node_id.clone();
-                let baselines_clone = downloaded_baselines.clone();
-                // Fire-and-forget: drop the JoinHandle so the spawned task runs
-                // independently.  A baseline write failure must not abort the sync.
-                drop(tokio::spawn(async move {
-                    if let Err(e) = db_clone
-                        .upsert_node_baselines(&node_id_clone, &share_clone, &baselines_clone)
-                        .await
-                    {
-                        tracing::warn!(
-                            share = %share_clone,
-                            error = %e,
-                            "sync: failed to persist post-cycle baselines (non-fatal)"
-                        );
-                    }
-                }));
+                // Persist synchronously before the iteration returns: the NEXT
+                // cycle's `load_baselines_for_share` must see these rows, so the
+                // write cannot race the next sync. A failure is logged but does
+                // not abort the sync iteration — the file operations already
+                // succeeded.
+                if let Err(e) = db
+                    .upsert_node_baselines(&self.node_id, &self.share, &downloaded_baselines)
+                    .await
+                {
+                    tracing::warn!(
+                        share = %self.share,
+                        error = %e,
+                        "sync: failed to persist post-cycle baselines (non-fatal)"
+                    );
+                }
             }
 
             // Conflicts: for each conflict reported by the server, apply the
@@ -499,18 +496,17 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                             created_at: 0,
                             resolved_at: None,
                         };
-                        let db_clone = Arc::clone(db);
-                        // Fire-and-forget: drop the JoinHandle so the task runs
-                        // independently.  A DB write failure must not abort the
-                        // sync iteration — the file operation already succeeded.
-                        drop(tokio::spawn(async move {
-                            if let Err(e) = db_clone.create_conflict(&rec).await {
-                                tracing::warn!(
-                                    error = %e,
-                                    "conflict apply: failed to persist ConflictRecord (non-fatal)"
-                                );
-                            }
-                        }));
+                        // Persist synchronously before the iteration returns: the
+                        // row must be visible to a subsequent `list` query, and the
+                        // write is a cheap local SQLite insert. A DB failure is
+                        // logged but does not abort the sync iteration — the file
+                        // operation already succeeded.
+                        if let Err(e) = db.create_conflict(&rec).await {
+                            tracing::warn!(
+                                error = %e,
+                                "conflict apply: failed to persist ConflictRecord (non-fatal)"
+                            );
+                        }
                     }
                 }
             }

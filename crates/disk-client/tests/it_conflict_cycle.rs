@@ -387,7 +387,7 @@ async fn conflict_apply_persists_row_to_client_meta_db() {
     // Execute — the APPLY path must create a ConflictRecord in the DB.
     transport.execute().await.expect("execute must succeed");
 
-    // Wait briefly for the fire-and-forget spawn to complete.
+    // Conflict-row persistence is synchronous within execute(); no wait needed.
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Assert: the DB now contains an unresolved conflict row for CONFLICT_PATH.
@@ -643,7 +643,7 @@ async fn two_cycle_no_hand_seed_auto_merges_non_overlap() {
 
         transport.execute().await.expect("cycle 1 must succeed");
 
-        // Wait for the fire-and-forget baseline write to complete.
+        // Baseline write is synchronous within execute(); no wait needed.
         tokio::time::sleep(Duration::from_millis(150)).await;
     }
 
@@ -699,7 +699,7 @@ async fn two_cycle_no_hand_seed_auto_merges_non_overlap() {
 
         transport.execute().await.expect("cycle 2 must succeed");
 
-        // Wait briefly for the fire-and-forget DB writes.
+        // Baseline + conflict-row persistence is synchronous within execute().
         tokio::time::sleep(Duration::from_millis(150)).await;
     }
 
