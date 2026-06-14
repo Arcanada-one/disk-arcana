@@ -149,7 +149,10 @@ fn validate_no_traversal(rel: &Path) -> Result<(), ForkWriteError> {
         return Err(ForkWriteError::PathTraversal);
     }
     for comp in rel.components() {
-        if matches!(comp, Component::ParentDir | Component::RootDir | Component::Prefix(_)) {
+        if matches!(
+            comp,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        ) {
             return Err(ForkWriteError::PathTraversal);
         }
     }

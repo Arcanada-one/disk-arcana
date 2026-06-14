@@ -50,8 +50,7 @@ pub fn fork_filename(rel_path: &Path, node_id: &str, ts: SystemTime) -> PathBuf 
     // Filter node_id to [0-9a-f] then take the first 8 chars.
     let node_id8: String = node_id
         .chars()
-        .filter(|c| c.is_ascii_hexdigit() && c.is_ascii_lowercase()
-            || c.is_ascii_digit())
+        .filter(|c| c.is_ascii_hexdigit() && c.is_ascii_lowercase() || c.is_ascii_digit())
         .take(NODE_ID_PREFIX_LEN)
         .collect();
     // Pad with '0' if too short (e.g. empty node_id).
@@ -149,7 +148,11 @@ fn is_leap(y: u32) -> bool {
 }
 
 fn days_in_year(y: u32) -> u64 {
-    if is_leap(y) { 366 } else { 365 }
+    if is_leap(y) {
+        366
+    } else {
+        365
+    }
 }
 
 fn days_in_month(y: u32, mo: u32) -> u64 {
@@ -157,7 +160,11 @@ fn days_in_month(y: u32, mo: u32) -> u64 {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
         2 => {
-            if is_leap(y) { 29 } else { 28 }
+            if is_leap(y) {
+                29
+            } else {
+                28
+            }
         }
         _ => panic!("invalid month {mo}"),
     }
@@ -194,12 +201,12 @@ mod tests {
         let result = fork_filename(Path::new(".obsidian/config"), "abc12345", ts);
         let name = result.file_name().unwrap().to_str().unwrap();
         // Should be: config.sync-conflict-abc12345-...  (no trailing extension)
-        assert!(
-            name.starts_with("config.sync-conflict-"),
-            "name={name}"
-        );
+        assert!(name.starts_with("config.sync-conflict-"), "name={name}");
         // No trailing dot-extension.
-        assert!(!name.ends_with(".config"), "should not end with .config: {name}");
+        assert!(
+            !name.ends_with(".config"),
+            "should not end with .config: {name}"
+        );
     }
 
     #[test]
@@ -252,7 +259,10 @@ mod tests {
         let name = result.to_string_lossy();
         assert!(!name.contains(".."), "no dot-dot: {name}");
         assert!(!name.contains('\0'), "no NUL: {name}");
-        assert!(!name.contains('/'), "file name must not contain slash: {name}");
+        assert!(
+            !name.contains('/'),
+            "file name must not contain slash: {name}"
+        );
         // Verify only the file name portion — parent is preserved from rel_path.
         let file_name = result.file_name().unwrap().to_str().unwrap();
         assert!(!file_name.contains('/'), "file_name portion: {file_name}");

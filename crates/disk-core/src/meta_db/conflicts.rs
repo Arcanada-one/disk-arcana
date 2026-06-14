@@ -9,6 +9,9 @@ use crate::types::ConflictRecord;
 const VAULT_DEFAULT: &str = "default";
 
 /// Default TTL for resolved conflicts: 30 days in seconds.
+///
+/// Pass to [`MetaDb::cleanup_resolved_conflicts`] from the daemon's periodic
+/// maintenance loop to prune old resolved rows.
 pub const DEFAULT_CONFLICT_TTL_SECS: i64 = 30 * 24 * 3600;
 
 impl MetaDb {
@@ -65,11 +68,7 @@ impl MetaDb {
     /// Sets `resolved = 1`, `resolution = resolution`, and `resolved_at = now()`
     /// for the row with `id`. The row disappears from `list_unresolved_conflicts`
     /// after this call.
-    pub async fn resolve_conflict(
-        &self,
-        id: i64,
-        resolution: &str,
-    ) -> Result<(), MetaDbError> {
+    pub async fn resolve_conflict(&self, id: i64, resolution: &str) -> Result<(), MetaDbError> {
         let now = unix_now();
         sqlx::query(
             r#"
@@ -93,10 +92,7 @@ impl MetaDb {
     ///
     /// Returns the number of rows deleted.  Unresolved conflicts are never
     /// touched.  Pass [`DEFAULT_CONFLICT_TTL_SECS`] for the 30-day default.
-    pub async fn cleanup_resolved_conflicts(
-        &self,
-        ttl_secs: i64,
-    ) -> Result<u64, MetaDbError> {
+    pub async fn cleanup_resolved_conflicts(&self, ttl_secs: i64) -> Result<u64, MetaDbError> {
         let cutoff = unix_now() - ttl_secs;
         let result = sqlx::query(
             r#"
@@ -220,7 +216,10 @@ mod tests {
 
         // After resolve: gone from list.
         let after = db.list_unresolved_conflicts().await.unwrap();
-        assert!(after.is_empty(), "resolved conflict must not appear in unresolved list");
+        assert!(
+            after.is_empty(),
+            "resolved conflict must not appear in unresolved list"
+        );
     }
 
     /// cleanup_resolved_conflicts deletes only resolved rows older than TTL.

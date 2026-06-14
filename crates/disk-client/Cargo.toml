@@ -49,3 +49,4 @@ rand     = { workspace = true }
 pem      = { workspace = true }
 rcgen    = { workspace = true }
 reqwest  = { workspace = true }
+tower    = { version = "0.5", features = ["util"] }

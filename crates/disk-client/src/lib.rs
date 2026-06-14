@@ -5,8 +5,8 @@
 
 #![forbid(unsafe_code)]
 
-pub mod conflict_writer;
 pub mod config;
+pub mod conflict_writer;
 pub mod connection;
 pub mod enrollment;
 pub mod import_state;
@@ -16,8 +16,8 @@ pub mod rest_api;
 pub mod sync_loop;
 pub mod watcher;
 
-pub use conflict_writer::{write_fork, ForkWriteError};
 pub use config::{spawn_config_watcher, ConfigSnapshot, ConfigWatcher, ReloadStatus};
+pub use conflict_writer::{write_fork, ForkWriteError};
 pub use connection::{ClientConfig, ClientError, DiskClient};
 pub use enrollment::{
     gen_keypair_and_csr, parse_bootstrap_file, redact_token, write_cert_file, write_key_file,
@@ -33,8 +33,8 @@ pub use mtls::{
 };
 pub use rest_api::{
     assert_loopback_bind, direction_to_schema, format_iso8601, loop_state_to_schema, router, serve,
-    AcceptedResponse, DaemonState, RestApiError, ShareSnapshot, StatusResponse, StatusShare,
-    DEFAULT_PORT, LOOPBACK_BIND_PREFIX,
+    AcceptedResponse, ConflictListItem, DaemonState, ResolveRequest, RestApiError, ShareSnapshot,
+    StatusResponse, StatusShare, DEFAULT_PORT, LOOPBACK_BIND_PREFIX,
 };
 pub use sync_loop::{
     classify_client_error, classify_tonic_status, Backoff, LoopError, LoopState, LoopTrigger,

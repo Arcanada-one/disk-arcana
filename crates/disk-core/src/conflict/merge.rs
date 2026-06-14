@@ -5,8 +5,8 @@
 //!
 //! - `Clean`     — all hunks applied without conflict (both versions merged).
 //! - `Conflicted` — at least one hunk overlaps; the result contains git-style
-//!                  `<<<<<<<` / `=======` / `>>>>>>>` conflict markers AND
-//!                  signals that the caller must fall back to an auto-fork.
+//!   `<<<<<<<` / `=======` / `>>>>>>>` conflict markers AND signals that the
+//!   caller must fall back to an auto-fork.
 //! - `Refused`   — a guard-rail fired before merging was attempted:
 //!   - `NoBase`    — no base version available.
 //!   - `TooLarge`  — any input exceeds 10 MiB.

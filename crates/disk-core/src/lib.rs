@@ -13,8 +13,8 @@
 
 #![forbid(unsafe_code)]
 
-pub mod conflict;
 pub mod config;
+pub mod conflict;
 pub mod delta;
 pub mod error;
 pub mod filter;
@@ -33,6 +33,7 @@ pub use error::{
 };
 pub use filter::{Filter, FilterRules};
 
+pub use meta_db::conflicts::DEFAULT_CONFLICT_TTL_SECS;
 pub use meta_db::MetaDb;
 pub use path_guard::validate as validate_path;
 pub use reconciler::ReconciliationEngine;
