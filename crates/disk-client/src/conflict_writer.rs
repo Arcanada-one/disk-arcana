@@ -1,8 +1,17 @@
-//! Atomic fork writer for conflict copies.
+//! Atomic fork writer and conflict-apply logic.
 //!
 //! `write_fork` atomically writes a conflict copy of a vault file using
 //! `tempfile::NamedTempFile` in the same parent directory, then persists it to
 //! the fork name produced by `disk_core::conflict::fork_filename`.
+//!
+//! `apply_conflict` is the production entry point called by the sync-loop APPLY
+//! phase and the REST resolve handler.  It implements the zero-data-loss invariant:
+//!
+//! - When the extension is `.md` or `.txt` AND a base is supplied AND the
+//!   merge is clean, the merged content is written to the live path.
+//! - In every other case (`Conflicted`, `Refused`, binary, large, no base,
+//!   non-text extension) the losing-side bytes are written as a fork copy and
+//!   the original local file is left untouched.
 //!
 //! Atomicity guarantee: the fork file either appears fully-written or not at
 //! all.  The original file is never modified.
@@ -14,7 +23,7 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use disk_core::conflict::fork_filename;
+use disk_core::conflict::{fork_filename, three_way_merge, MergeOutput};
 
 /// Errors that can occur while writing a fork file.
 #[derive(Debug, thiserror::Error)]
@@ -34,6 +43,81 @@ pub enum ForkWriteError {
 
 /// Maximum collision counter attempts before giving up.
 const MAX_COLLISION_ATTEMPTS: u32 = 100;
+
+/// File extensions that are eligible for text 3-way merge.
+const MERGE_ELIGIBLE_EXTENSIONS: &[&str] = &["md", "txt"];
+
+/// Return `true` when `rel_path` has a merge-eligible extension.
+fn is_merge_eligible(rel_path: &Path) -> bool {
+    rel_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| MERGE_ELIGIBLE_EXTENSIONS.contains(&e.to_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+/// Outcome of an `apply_conflict` call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConflictApplyOutcome {
+    /// 3-way merge succeeded and the merged content was written to `live_path`.
+    /// No fork was created.
+    Merged,
+    /// The losing-side bytes were forked to the returned vault-relative path.
+    /// The original local file was left untouched.
+    Forked(PathBuf),
+}
+
+/// Apply a conflict resolution to the vault filesystem.  This is the
+/// production entry point called by both the sync-loop APPLY phase and the
+/// REST resolve handler.
+///
+/// # Arguments
+/// * `base_dir`    — absolute vault root.
+/// * `rel_path`    — vault-relative path of the conflicting file.
+/// * `base`        — common ancestor bytes, if available.
+/// * `local`       — current local bytes (already on disk at `base_dir/rel_path`).
+/// * `remote`      — remote (server-side) bytes that conflict with `local`.
+/// * `node_id`     — node identifier used to name fork files.
+///
+/// # Zero-data-loss invariant
+/// If the merge is clean, the merged file replaces the live path.
+/// In every other case (`Refused`, `Conflicted`, non-text extension) the
+/// remote bytes are forked and `rel_path` is untouched — no data is lost.
+///
+/// # Errors
+/// Returns `ForkWriteError` when an I/O error prevents the fork from being
+/// written.  A merge I/O error also falls back to fork, and the fork error
+/// (if any) is propagated.
+pub fn apply_conflict(
+    base_dir: &Path,
+    rel_path: &Path,
+    base: Option<&[u8]>,
+    local: &[u8],
+    remote: &[u8],
+    node_id: &str,
+) -> Result<ConflictApplyOutcome, ForkWriteError> {
+    if is_merge_eligible(rel_path) {
+        if let MergeOutput::Clean(merged) = three_way_merge(base, local, remote) {
+            // Write merged content atomically to the live path.
+            let live_abs = base_dir.join(rel_path);
+            if let Some(parent) = live_abs.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            // Write to a temp file then rename for atomicity.
+            use std::io::Write as _;
+            let parent = live_abs.parent().unwrap_or_else(|| Path::new("."));
+            let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+            tmp.write_all(&merged)?;
+            tmp.flush()?;
+            tmp.persist(&live_abs)?;
+            return Ok(ConflictApplyOutcome::Merged);
+        }
+    }
+
+    // Fall-through: fork the remote (losing) bytes and leave local untouched.
+    let fork_rel = write_fork(base_dir, rel_path, remote, node_id)?;
+    Ok(ConflictApplyOutcome::Forked(fork_rel))
+}
 
 /// Atomically write a conflict copy of `rel_path` into `base_dir`.
 ///

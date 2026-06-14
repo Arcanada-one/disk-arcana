@@ -17,7 +17,7 @@ pub mod sync_loop;
 pub mod watcher;
 
 pub use config::{spawn_config_watcher, ConfigSnapshot, ConfigWatcher, ReloadStatus};
-pub use conflict_writer::{write_fork, ForkWriteError};
+pub use conflict_writer::{apply_conflict, write_fork, ConflictApplyOutcome, ForkWriteError};
 pub use connection::{ClientConfig, ClientError, DiskClient};
 pub use enrollment::{
     gen_keypair_and_csr, parse_bootstrap_file, redact_token, write_cert_file, write_key_file,

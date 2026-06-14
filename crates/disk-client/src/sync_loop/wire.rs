@@ -29,6 +29,7 @@ use prost::Message;
 use tonic::{Code, Status};
 
 use super::LoopError;
+use crate::conflict_writer::apply_conflict;
 use crate::connection::{ClientError, DiskClient};
 
 /// Map a `tonic::Status` returned by `SyncService` to a [`LoopError`].
@@ -213,6 +214,76 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                         let _ = std::fs::create_dir_all(parent);
                     }
                     let _ = std::fs::write(&dest, bytes);
+                }
+            }
+
+            // Conflicts: for each conflict reported by the server, apply the
+            // resolution on the client's local vault filesystem.
+            //
+            // Strategy:
+            //   1. Read the current local file bytes.
+            //   2. Download the remote bytes from the server.
+            //   3. Attempt `apply_conflict` (3-way merge when base is available
+            //      and extension is merge-eligible; otherwise fork the remote
+            //      bytes and leave the local file untouched).
+            //
+            // Non-fatal: a failure to resolve a single conflict is logged and
+            // skipped so that the remainder of the sync iteration can proceed.
+            for conflict in &response.conflicts {
+                let rel_path = std::path::Path::new(&conflict.path);
+
+                // Read the current local file.
+                let local_bytes = match std::fs::read(self.scan_root.join(rel_path)) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        tracing::warn!(
+                            path = %conflict.path,
+                            error = %e,
+                            "conflict apply: cannot read local file, skipping"
+                        );
+                        continue;
+                    }
+                };
+
+                // Download the remote bytes.
+                let remote_bytes = match self.client.download_file(&conflict.path).await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        tracing::warn!(
+                            path = %conflict.path,
+                            error = %e,
+                            "conflict apply: cannot download remote file, skipping"
+                        );
+                        continue;
+                    }
+                };
+
+                // Apply: merge when eligible and base is available; fork otherwise.
+                // Base is not carried in the proto ConflictReport, so we pass None —
+                // three_way_merge will refuse (NoBase) and apply_conflict falls back
+                // to fork, preserving both versions.
+                match apply_conflict(
+                    &self.scan_root,
+                    rel_path,
+                    None,
+                    &local_bytes,
+                    &remote_bytes,
+                    &self.node_id,
+                ) {
+                    Ok(outcome) => {
+                        tracing::info!(
+                            path = %conflict.path,
+                            outcome = ?outcome,
+                            "conflict apply: resolved"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            path = %conflict.path,
+                            error = %e,
+                            "conflict apply: fork write failed"
+                        );
+                    }
                 }
             }
         }

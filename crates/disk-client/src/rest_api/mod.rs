@@ -19,6 +19,7 @@
 //! trigger into the running loop iteration scheduler.
 
 use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -92,6 +93,9 @@ struct DaemonStateInner {
     reload_tx: mpsc::Sender<()>,
     /// Optional database handle for conflict REST endpoints.
     meta_db: Option<Arc<disk_core::MetaDb>>,
+    /// Absolute vault root used by the conflict REST endpoints to perform
+    /// file operations.  Populated via `with_vault_root` after construction.
+    vault_root: Option<PathBuf>,
 }
 
 impl DaemonState {
@@ -112,6 +116,7 @@ impl DaemonState {
             manual_sync_tx: manual_tx,
             reload_tx,
             meta_db: None,
+            vault_root: None,
         };
         (
             Self {
@@ -185,6 +190,31 @@ impl DaemonState {
     /// Access the database handle, if one was attached.
     pub fn meta_db(&self) -> Option<&Arc<disk_core::MetaDb>> {
         self.inner.meta_db.as_ref()
+    }
+
+    /// Attach the vault root path for conflict file operations.
+    ///
+    /// The REST conflict resolve handler uses this path to read local files
+    /// and write fork copies.  Call this once after construction.
+    pub fn with_vault_root(self, root: PathBuf) -> Self {
+        let inner = Arc::try_unwrap(self.inner).unwrap_or_else(|arc| {
+            panic!(
+                "DaemonState::with_vault_root called after clone: Arc has {} refs",
+                Arc::strong_count(&arc)
+            );
+        });
+        let new_inner = DaemonStateInner {
+            vault_root: Some(root),
+            ..inner
+        };
+        Self {
+            inner: Arc::new(new_inner),
+        }
+    }
+
+    /// Access the vault root path, if one was attached.
+    pub fn vault_root(&self) -> Option<&PathBuf> {
+        self.inner.vault_root.as_ref()
     }
 }
 
