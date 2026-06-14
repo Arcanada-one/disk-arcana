@@ -1,0 +1,43 @@
+[package]
+name         = "disk-gui"
+version      = { workspace = true }
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+authors      = { workspace = true }
+description  = "Disk Arcana macOS desktop GUI client."
+
+[[bin]]
+name = "disk-gui"
+path = "src/main.rs"
+
+[lib]
+name = "disk_gui"
+path = "src/lib.rs"
+
+[dependencies]
+disk-client = { path = "../disk-client" }
+reqwest     = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+toml        = { workspace = true }
+anyhow      = { workspace = true }
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio       = { workspace = true }
+dirs        = "5"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }
+
+[package.metadata.bundle]
+name       = "Disk Arcana"
+identifier = "com.arcanada.disk-arcana.gui"
+icon       = ["assets/disk-arcana.icns"]
+category   = "Utility"
+short_description = "Disk Arcana — file sync client for Obsidian vaults."
+
+[dev-dependencies]
+tempfile = "3"
+serde    = { workspace = true }
