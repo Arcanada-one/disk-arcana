@@ -969,9 +969,9 @@ node_id_hint = "from-bf"
         );
     }
 
-    // ── TAIL-6: `disk conflicts show` subcommand parse ──────────────────────
+    // `disk conflicts show` subcommand parse────────────────────
 
-    /// TAIL-6: `disk conflicts show --path <file>` parses into
+    /// `disk conflicts show --path <file>` parses into
     /// `ConflictsCommand::Show(ConflictsShowArgs { path, addr: None })`.
     ///
     /// This test proves the new subcommand is wired in the clap tree — it
@@ -1002,7 +1002,7 @@ node_id_hint = "from-bf"
         }
     }
 
-    /// TAIL-6: `disk conflicts show --path <file> --addr 127.0.0.1:9444` parses
+    /// `disk conflicts show --path <file> --addr 127.0.0.1:9444` parses
     /// the optional `--addr` override correctly.
     #[test]
     fn cli_parses_conflicts_show_with_addr_override() {

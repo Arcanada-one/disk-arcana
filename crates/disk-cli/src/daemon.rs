@@ -667,7 +667,7 @@ client_key  = "/b"
         );
     }
 
-    /// TAIL-4: the 30-day maintenance cleanup is driven by `cleanup_resolved_conflicts`
+    /// The 30-day maintenance cleanup is driven by `cleanup_resolved_conflicts`
     /// with `DEFAULT_CONFLICT_TTL_SECS`.  This unit test proves the call contract:
     ///   - an empty DB returns Ok(0) — nothing deleted, no panic.
     ///   - the TTL constant is the correct value (30 × 24 × 3600 = 2592000 s).

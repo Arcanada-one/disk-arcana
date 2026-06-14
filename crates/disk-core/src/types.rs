@@ -101,7 +101,7 @@ pub struct ConflictReport {
     pub base_hash: Option<[u8; 32]>,
 }
 
-/// Type of conflict observed; consumed by DISK-0007 conflict policy.
+/// Type of conflict observed; consumed by the conflict-resolution policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConflictKind {
     /// Concurrent edits with divergent vector clocks.

@@ -310,7 +310,7 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                     // This hash serves two purposes:
                     //   (a) keying the blob cache for future 3-way merges;
                     //   (b) recording as the new post-sync baseline in
-                    //       node_baselines (TAIL-3 fix).
+                    //       node_baselines.
                     let hash: [u8; 32] = *blake3::hash(&bytes).as_bytes();
 
                     // Cache bytes by their blake3 hash so that a future cycle
@@ -345,7 +345,7 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                 }
             }
 
-            // ── Persist post-cycle baselines (TAIL-3) ────────────────────
+            // ── Persist post-cycle baselines ────────────────────
             //
             // After every successful cycle, write the content-hashes of all
             // files that were just downloaded to node_baselines.  The NEXT

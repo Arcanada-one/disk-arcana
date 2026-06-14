@@ -610,7 +610,7 @@ mod tests {
         assert!(items.is_empty(), "conflict must be gone after resolve");
     }
 
-    /// TAIL-5: `POST /conflicts/{path}` returns 409 + `{"resolved":false,...}`
+    /// `POST /conflicts/{path}` returns 409 + `{"resolved":false,...}`
     /// when the fork artifact file is absent on disk.
     ///
     /// Before the fix the handler returned 200 `{"resolved":true}` even when the
@@ -676,7 +676,7 @@ mod tests {
             resp.status(),
             axum::http::StatusCode::CONFLICT,
             "POST /conflicts when fork artifact is absent must return 409 CONFLICT; \
-             returning 200 would be a silent no-op (TAIL-5 regression)"
+             returning 200 would be a silent no-op"
         );
 
         let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
