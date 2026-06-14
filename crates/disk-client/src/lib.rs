@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod conflict_writer;
 pub mod config;
 pub mod connection;
 pub mod enrollment;
@@ -15,6 +16,7 @@ pub mod rest_api;
 pub mod sync_loop;
 pub mod watcher;
 
+pub use conflict_writer::{write_fork, ForkWriteError};
 pub use config::{spawn_config_watcher, ConfigSnapshot, ConfigWatcher, ReloadStatus};
 pub use connection::{ClientConfig, ClientError, DiskClient};
 pub use enrollment::{
