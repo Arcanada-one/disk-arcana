@@ -41,7 +41,7 @@ pub mod conflicts;
 pub mod status;
 pub mod sync;
 
-pub use conflicts::{ConflictListItem, ResolveRequest};
+pub use conflicts::{get_conflict_diff, ConflictListItem, ResolveRequest};
 pub use status::{StatusResponse, StatusShare};
 
 /// All bind addresses MUST match `127.0.0.0/8` (loopback). The daemon
@@ -232,6 +232,7 @@ pub fn router(state: DaemonState) -> Router {
         .route("/sync", post(sync::post_sync))
         .route("/config/reload", post(sync::post_config_reload))
         .route("/conflicts", get(conflicts::get_conflicts))
+        .route("/conflicts/:path/diff", get(conflicts::get_conflict_diff))
         .route("/conflicts/:path", post(conflicts::post_resolve_conflict))
         .with_state(state)
 }

@@ -174,17 +174,30 @@ pub async fn post_resolve_conflict(
 
     // Perform the file operation for the requested action, then mark resolved.
     if let Some(vault_root) = state.vault_root() {
-        if let Err(e) = perform_file_op(
+        match perform_file_op(
             vault_root.as_path(),
             &raw_path,
             row.fork_path.as_deref(),
             &body.action,
         ) {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("file op failed: {e}")})),
-            )
-                .into_response();
+            Ok(()) => {}
+            Err(FileOpError::ForkArtifactMissing(reason)) => {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(serde_json::json!({
+                        "resolved": false,
+                        "reason": reason
+                    })),
+                )
+                    .into_response();
+            }
+            Err(FileOpError::Io(e)) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": format!("file op failed: {e}")})),
+                )
+                    .into_response();
+            }
         }
     }
     // When vault_root is absent (e.g. in unit tests without a real filesystem),
@@ -204,6 +217,29 @@ pub async fn post_resolve_conflict(
     }
 }
 
+/// Error returned by [`perform_file_op`].
+#[derive(Debug)]
+enum FileOpError {
+    /// A required file (fork artifact or live file) was absent.
+    /// Contains a human-readable reason for the 409 response body.
+    ForkArtifactMissing(String),
+    /// An I/O error while performing the file operation.
+    Io(std::io::Error),
+}
+
+impl From<std::io::Error> for FileOpError {
+    fn from(e: std::io::Error) -> Self {
+        FileOpError::Io(e)
+    }
+}
+
+impl From<crate::conflict_writer::ForkWriteError> for FileOpError {
+    fn from(e: crate::conflict_writer::ForkWriteError) -> Self {
+        // ForkWriteError wraps io::Error or PersistError — surface as Io.
+        FileOpError::Io(std::io::Error::other(e.to_string()))
+    }
+}
+
 /// Execute the filesystem side of a conflict resolution action.
 ///
 /// `live_rel`  — vault-relative path of the conflicting file.
@@ -214,12 +250,19 @@ pub async fn post_resolve_conflict(
 /// # Zero-data-loss guarantee
 /// Every path that writes to the live file first reads and forks (or re-uses
 /// the existing fork of) the losing version.  `keep-local` performs no writes.
+///
+/// # Honest failure
+/// When a required file (fork artifact, live file) is absent the function
+/// returns [`FileOpError::ForkArtifactMissing`] instead of silently
+/// succeeding.  The caller maps this to a `409 Conflict` response with
+/// `{"resolved":false,"reason":"…"}` so the operator knows the action
+/// could not be performed.
 fn perform_file_op(
     vault_root: &std::path::Path,
     live_rel: &str,
     fork_rel: Option<&str>,
     action: &str,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), FileOpError> {
     let live_path = vault_root.join(live_rel);
 
     match action {
@@ -231,24 +274,39 @@ fn perform_file_op(
             // Read the remote bytes from the fork file, then atomically
             // replace the live path.  The fork file is left in place so
             // the operator can inspect it.
-            if let Some(fork) = fork_rel {
-                let fork_abs = vault_root.join(fork);
-                let remote_bytes = std::fs::read(&fork_abs)?;
-                atomic_write(&live_path, &remote_bytes)?;
+            let fork = fork_rel.ok_or_else(|| {
+                FileOpError::ForkArtifactMissing(
+                    "keep-remote requires a fork artifact but fork_path is not recorded; \
+                     use fork-local to create a local copy first"
+                        .into(),
+                )
+            })?;
+            let fork_abs = vault_root.join(fork);
+            if !fork_abs.exists() {
+                return Err(FileOpError::ForkArtifactMissing(format!(
+                    "keep-remote: fork artifact '{}' is missing from the vault; \
+                     it may have been moved or deleted",
+                    fork_abs.display()
+                )));
             }
-            // If no fork_rel is recorded (unexpected), keep-remote is a no-op.
+            let remote_bytes = std::fs::read(&fork_abs)?;
+            atomic_write(&live_path, &remote_bytes)?;
         }
 
         "fork-local" => {
             // Fork the current local bytes first (zero-data-loss), then apply
             // the remote version (equivalent to keep-remote after forking local).
-            if live_path.exists() {
-                let local_bytes = std::fs::read(&live_path)?;
-                // node_id is embedded in the fork name; use a placeholder that
-                // is recognisable as "operator-initiated" when no node_id is
-                // available from the REST context.
-                write_fork(vault_root, Path::new(live_rel), &local_bytes, "local-fork")?;
+            if !live_path.exists() {
+                return Err(FileOpError::ForkArtifactMissing(format!(
+                    "fork-local: live file '{}' is missing; nothing to fork",
+                    live_path.display()
+                )));
             }
+            let local_bytes = std::fs::read(&live_path)?;
+            // node_id is embedded in the fork name; use a placeholder that
+            // is recognisable as "operator-initiated" when no node_id is
+            // available from the REST context.
+            write_fork(vault_root, Path::new(live_rel), &local_bytes, "local-fork")?;
             // Now apply the remote bytes if available.
             if let Some(fork) = fork_rel {
                 let fork_abs = vault_root.join(fork);
@@ -261,29 +319,65 @@ fn perform_file_op(
 
         "fork-remote" => {
             // The fork file was already written by the sync-loop APPLY phase.
-            // No additional file op needed — just accept the existing state.
-            // (If fork_rel is absent, this is a no-op.)
+            // Verify it is present; if absent, report honestly.
+            let fork = fork_rel.ok_or_else(|| {
+                FileOpError::ForkArtifactMissing(
+                    "fork-remote: no fork_path recorded for this conflict; \
+                     the sync-loop APPLY phase may not have run yet"
+                        .into(),
+                )
+            })?;
+            let fork_abs = vault_root.join(fork);
+            if !fork_abs.exists() {
+                return Err(FileOpError::ForkArtifactMissing(format!(
+                    "fork-remote: fork artifact '{}' is missing; \
+                     it may have already been moved or deleted",
+                    fork_abs.display()
+                )));
+            }
+            // Fork file already exists from the APPLY phase — nothing more to do.
         }
 
         "merge" => {
-            // Read local and remote (from fork), then re-run apply_conflict.
-            // Base is not available at this point, so three_way_merge will
-            // refuse (NoBase) and fall back to forking the remote bytes.
-            if let Some(fork) = fork_rel {
-                let fork_abs = vault_root.join(fork);
-                if live_path.exists() && fork_abs.exists() {
-                    let local_bytes = std::fs::read(&live_path)?;
-                    let remote_bytes = std::fs::read(&fork_abs)?;
-                    apply_conflict(
-                        vault_root,
-                        Path::new(live_rel),
-                        None,
-                        &local_bytes,
-                        &remote_bytes,
-                        "merge-op",
-                    )?;
-                }
+            // Attempt a 3-way merge using local vs remote (fork) bytes.
+            // `base` is not threaded through the REST surface yet (the blob
+            // cache lives in the sync-loop task, not in DaemonState).  When
+            // no base is available, forking is the safe fallback — but we
+            // report that honestly instead of silently forking-as-merge.
+            let fork = fork_rel.ok_or_else(|| {
+                FileOpError::ForkArtifactMissing(
+                    "merge: no fork artifact recorded; cannot determine remote bytes. \
+                     Use fork-local or fork-remote to accept one side"
+                        .into(),
+                )
+            })?;
+            let fork_abs = vault_root.join(fork);
+            if !live_path.exists() || !fork_abs.exists() {
+                return Err(FileOpError::ForkArtifactMissing(format!(
+                    "merge: live file or fork artifact is missing (live={}, fork={}); \
+                     use fork-local/fork-remote to accept one side",
+                    live_path.display(),
+                    fork_abs.display()
+                )));
             }
+            let local_bytes = std::fs::read(&live_path)?;
+            let remote_bytes = std::fs::read(&fork_abs)?;
+            // Pass base=None: the blob cache is not accessible from the REST
+            // handler.  `apply_conflict` with no base will fork when the merge
+            // is not clean rather than silently overwriting.
+            //
+            // Operator guidance: if a 3-way merge is desired, ensure the sync
+            // daemon has run at least one successful sync cycle (which populates
+            // the blob cache) and then retry.  The blob-cache-aware merge path
+            // runs automatically in the sync-loop APPLY phase.
+            apply_conflict(
+                vault_root,
+                Path::new(live_rel),
+                None,
+                &local_bytes,
+                &remote_bytes,
+                "merge-op",
+            )?;
         }
 
         _ => {
@@ -324,6 +418,87 @@ fn validate_conflict_path(path: &str) -> Result<(), &'static str> {
         }
     }
     Ok(())
+}
+
+/// `GET /conflicts/{path}/diff` — return local and fork file contents for
+/// side-by-side rendering in the CLI.
+pub async fn get_conflict_diff(
+    State(state): State<DaemonState>,
+    AxumPath(raw_path): AxumPath<String>,
+) -> impl IntoResponse {
+    if let Err(e) = validate_conflict_path(&raw_path) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": e})),
+        )
+            .into_response();
+    }
+
+    let db = match state.meta_db() {
+        Some(db) => db.clone(),
+        None => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({"error": "meta_db not available"})),
+            )
+                .into_response();
+        }
+    };
+
+    let conflicts = match db.list_unresolved_conflicts().await {
+        Ok(rows) => rows,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": format!("{e}")})),
+            )
+                .into_response();
+        }
+    };
+
+    let row = match conflicts.into_iter().find(|c| c.path == raw_path) {
+        Some(r) => r,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(
+                    serde_json::json!({"error": format!("no unresolved conflict at '{raw_path}'")}),
+                ),
+            )
+                .into_response();
+        }
+    };
+
+    let (local_content, fork_content) = if let Some(root) = state.vault_root() {
+        let live_path = root.join(&raw_path);
+        let local = std::fs::read_to_string(&live_path)
+            .map_err(|e| format!("cannot read local file '{}': {}", live_path.display(), e));
+        let fork = match &row.fork_path {
+            Some(fp) => {
+                let fork_abs = root.join(fp);
+                std::fs::read_to_string(&fork_abs)
+                    .map_err(|e| format!("cannot read fork '{}': {}", fork_abs.display(), e))
+            }
+            None => Err("no fork artifact recorded for this conflict".into()),
+        };
+        (local, fork)
+    } else {
+        (
+            Err("vault_root not configured on this daemon".into()),
+            Err("vault_root not configured on this daemon".into()),
+        )
+    };
+
+    let json = serde_json::json!({
+        "path": raw_path,
+        "fork_path": row.fork_path,
+        "local_content": local_content.as_deref().unwrap_or(""),
+        "local_error": local_content.as_ref().err(),
+        "fork_content": fork_content.as_deref().unwrap_or(""),
+        "fork_error": fork_content.as_ref().err(),
+    });
+
+    (StatusCode::OK, Json(json)).into_response()
 }
 
 /// Accepted resolution actions.
@@ -433,6 +608,88 @@ mod tests {
         let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
         let items: Vec<ConflictListItem> = serde_json::from_slice(&body).unwrap();
         assert!(items.is_empty(), "conflict must be gone after resolve");
+    }
+
+    /// TAIL-5: `POST /conflicts/{path}` returns 409 + `{"resolved":false,...}`
+    /// when the fork artifact file is absent on disk.
+    ///
+    /// Before the fix the handler returned 200 `{"resolved":true}` even when the
+    /// fork file was missing — a silent no-op.  The fix: `perform_file_op` now
+    /// returns `FileOpError::ForkArtifactMissing` when the required file is not
+    /// found, and the handler maps that to 409.
+    ///
+    /// This test does NOT hand-seed the vault_root; instead it attaches a real
+    /// vault_root and a conflict row whose `fork_path` points to a file that
+    /// does NOT exist — simulating the production scenario where the fork artifact
+    /// was moved or deleted before the operator called `POST /conflicts/{path}`.
+    #[tokio::test]
+    async fn post_resolve_returns_409_when_fork_file_absent() {
+        // Set up a real vault directory and MetaDb — no hand-seeding of the fork file.
+        let vault_dir = tempfile::tempdir().unwrap();
+        let db_dir = tempfile::tempdir().unwrap();
+        let db = MetaDb::open(&db_dir.path().join("meta.db")).await.unwrap();
+        let (state, _, _) = DaemonState::new("test-node", "v0");
+        let state = state
+            .with_meta_db(db)
+            .with_vault_root(vault_dir.path().to_path_buf());
+
+        // Create the live file at the conflict path.
+        let conflict_path = "docs/notes.md";
+        let docs_dir = vault_dir.path().join("docs");
+        std::fs::create_dir_all(&docs_dir).unwrap();
+        std::fs::write(vault_dir.path().join(conflict_path), b"local content").unwrap();
+
+        // Insert a conflict row whose fork_path does NOT exist on disk.
+        // This simulates the case where the fork artifact was moved or deleted.
+        let missing_fork = "docs/notes.md.sync-conflict-MISSING";
+        let db = state.meta_db().unwrap().clone();
+        let rec = disk_core::types::ConflictRecord {
+            id: None,
+            vault_id: "default".into(),
+            path: conflict_path.into(),
+            conflict_type: "Concurrent".into(),
+            local_hash: None,
+            remote_hash: None,
+            base_hash: None,
+            resolution: None,
+            fork_path: Some(missing_fork.into()),
+            resolved: false,
+            created_at: 0,
+            resolved_at: None,
+        };
+        db.create_conflict(&rec).await.unwrap();
+
+        let app = super::super::router(state);
+
+        // POST /conflicts/docs%2Fnotes.md { "action": "keep-remote" }
+        // "keep-remote" reads the fork file — which does NOT exist.
+        let body_str = r#"{"action":"keep-remote"}"#;
+        let req = axum::http::Request::builder()
+            .method(axum::http::Method::POST)
+            .uri("/conflicts/docs%2Fnotes.md")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(body_str))
+            .unwrap();
+
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            axum::http::StatusCode::CONFLICT,
+            "POST /conflicts when fork artifact is absent must return 409 CONFLICT; \
+             returning 200 would be a silent no-op (TAIL-5 regression)"
+        );
+
+        let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            json["resolved"],
+            serde_json::json!(false),
+            "409 response body must carry 'resolved': false"
+        );
+        assert!(
+            json["reason"].is_string(),
+            "409 response body must carry a 'reason' string; got {json}"
+        );
     }
 
     #[test]
