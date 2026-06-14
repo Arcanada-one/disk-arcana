@@ -20,15 +20,18 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use disk_core::filter::{Filter, FilterRules};
 use disk_core::scanner::FileScanner;
-use disk_core::types::FileMeta;
+use disk_core::types::{ConflictKind, ConflictRecord, FileMeta};
 use disk_proto::disk::{AclMismatchDetails, FileMetadata};
 use prost::Message;
 use tonic::{Code, Status};
 
 use super::LoopError;
+use crate::blob_cache::BlobCache;
+use crate::conflict_writer::{apply_conflict, ConflictApplyOutcome};
 use crate::connection::{ClientError, DiskClient};
 
 /// Map a `tonic::Status` returned by `SyncService` to a [`LoopError`].
@@ -78,7 +81,24 @@ pub trait SyncTransport: Send {
 /// configured share.
 ///
 /// DISK-0043: sends real local scan (Scan → Hash → ExchangeState) and
-/// executes SyncStateResponse actions (Upload / Download).
+/// executes SyncStateResponse actions (Upload / Download / Conflict-apply).
+///
+/// # Auto-3-way-merge (conflict APPLY path)
+///
+/// When a [`BlobCache`] is attached (via [`RemoteSync::with_blob_cache`]) and
+/// a pre-loaded baseline map is supplied, the APPLY path can provide the
+/// common-ancestor bytes to `apply_conflict`.  The lifecycle is:
+///
+/// 1. **Previous cycle DOWNLOAD**: bytes written to disk are also stored in the
+///    blob cache keyed by their blake3 hash.  That hash becomes the baseline
+///    `content_hash` recorded in `node_baselines` after a successful sync.
+/// 2. **Current cycle APPLY**: for each `ConflictReport`, look up the path in
+///    `baselines` to find the baseline hash, then look up the blob cache to
+///    get the base bytes.  If both lookups succeed, `apply_conflict` receives
+///    `Some(base)` and can perform a 3-way merge instead of forking.
+///
+/// Without a blob cache or baseline map, `base = None` is passed and
+/// `apply_conflict` falls back to forking (zero-data-loss, as before).
 pub struct RemoteSync<'a> {
     client: &'a DiskClient,
     share: String,
@@ -86,6 +106,20 @@ pub struct RemoteSync<'a> {
     scan_root: PathBuf,
     /// Node id used as the writer in FileMeta rows.
     node_id: String,
+    /// Optional content-addressed blob cache.  When set, downloaded file bytes
+    /// are stored here keyed by their blake3 hash so that subsequent cycles can
+    /// recover the common-ancestor content for 3-way merges.
+    blob_cache: Option<Arc<BlobCache>>,
+    /// Last-synced baseline hashes per vault-relative path.  Populated from
+    /// `node_baselines` before a cycle begins (see `with_blob_cache`).
+    /// Maps `path_string → content_hash([u8;32])`.
+    baselines: HashMap<String, [u8; 32]>,
+    /// Optional MetaDb handle for persisting conflict rows on the client side.
+    /// When set, the conflict APPLY path creates a `ConflictRecord` for every
+    /// server-reported conflict so that `GET /conflicts` on the local REST
+    /// surface returns them.  Without this handle conflict detection is still
+    /// functional — only the client-side index is missing.
+    meta_db: Option<Arc<disk_core::MetaDb>>,
 }
 
 impl<'a> RemoteSync<'a> {
@@ -96,6 +130,9 @@ impl<'a> RemoteSync<'a> {
             share: share.into(),
             scan_root: PathBuf::new(),
             node_id: String::new(),
+            blob_cache: None,
+            baselines: HashMap::new(),
+            meta_db: None,
         }
     }
 
@@ -111,11 +148,62 @@ impl<'a> RemoteSync<'a> {
             share: share.into(),
             scan_root,
             node_id: node_id.into(),
+            blob_cache: None,
+            baselines: HashMap::new(),
+            meta_db: None,
         }
+    }
+
+    /// Attach a MetaDb handle so the conflict APPLY path can persist
+    /// `ConflictRecord` rows on the client side.
+    ///
+    /// Without this the conflict is still handled on the filesystem; only the
+    /// client-side `conflicts` index (queried by `GET /conflicts`) is missing.
+    pub fn with_meta_db(mut self, db: Arc<disk_core::MetaDb>) -> Self {
+        self.meta_db = Some(db);
+        self
+    }
+
+    /// Attach a blob cache and pre-loaded baseline hashes to enable auto
+    /// 3-way-merge on the conflict APPLY path.
+    ///
+    /// `baselines` maps a vault-relative path string to the blake3
+    /// `content_hash` of the last successfully synced version of that file
+    /// (i.e. the common-ancestor bytes).  Callers typically build this from
+    /// `MetaDb::load_node_baseline()` before constructing `RemoteSync`.
+    pub fn with_blob_cache(
+        mut self,
+        cache: Arc<BlobCache>,
+        baselines: HashMap<String, [u8; 32]>,
+    ) -> Self {
+        self.blob_cache = Some(cache);
+        self.baselines = baselines;
+        self
     }
 
     pub fn share(&self) -> &str {
         &self.share
+    }
+
+    /// Return `true` when a blob cache has been attached via
+    /// [`Self::with_blob_cache`].  Used by tests that drive the daemon's own
+    /// construction path to assert the cache is wired without needing a live
+    /// gRPC connection.
+    pub fn has_blob_cache(&self) -> bool {
+        self.blob_cache.is_some()
+    }
+
+    /// Return the number of baseline entries loaded into this transport.  Used
+    /// alongside [`Self::has_blob_cache`] in daemon-construction tests.
+    pub fn baseline_count(&self) -> usize {
+        self.baselines.len()
+    }
+
+    /// Return `true` when a MetaDb handle has been attached via
+    /// [`Self::with_meta_db`].  Used by daemon-construction tests to assert
+    /// the client conflict index is wired before any network I/O occurs.
+    pub fn has_meta_db(&self) -> bool {
+        self.meta_db.is_some()
     }
 }
 
@@ -206,13 +294,220 @@ impl<'a> SyncTransport for RemoteSync<'a> {
             }
 
             // Download: client pulls files the server wants it to fetch.
+            // Collect successfully-downloaded (path, hash) pairs so that the
+            // post-cycle baseline write can record them in node_baselines.
+            let mut downloaded_baselines: Vec<disk_core::types::FileMeta> = Vec::new();
+
             for to_download in &response.to_download {
                 if let Ok(bytes) = self.client.download_file(&to_download.path).await {
                     let dest = self.scan_root.join(&to_download.path);
                     if let Some(parent) = dest.parent() {
                         let _ = std::fs::create_dir_all(parent);
                     }
-                    let _ = std::fs::write(&dest, bytes);
+                    let _ = std::fs::write(&dest, &bytes);
+
+                    // Compute the blake3 hash of the downloaded content.
+                    // This hash serves two purposes:
+                    //   (a) keying the blob cache for future 3-way merges;
+                    //   (b) recording as the new post-sync baseline in
+                    //       node_baselines.
+                    let hash: [u8; 32] = *blake3::hash(&bytes).as_bytes();
+
+                    // Cache bytes by their blake3 hash so that a future cycle
+                    // can retrieve the common-ancestor content for 3-way merge
+                    // without a round-trip to the server.
+                    if let Some(ref cache) = self.blob_cache {
+                        if let Err(e) = cache.put(&hash, &bytes) {
+                            tracing::debug!(
+                                path = %to_download.path,
+                                error = %e,
+                                "blob cache put failed (non-fatal)"
+                            );
+                        }
+                    }
+
+                    // Accumulate a baseline entry for this path.
+                    // mtime_ns, inode, and vector_clock are not available from
+                    // the download payload alone; we leave them at defaults.
+                    // The baseline is keyed only on content_hash for the merge
+                    // path, so these fields are not load-bearing there.
+                    downloaded_baselines.push(disk_core::types::FileMeta {
+                        path: std::path::PathBuf::from(&to_download.path),
+                        content_hash: hash,
+                        size: bytes.len() as u64,
+                        mtime_ns: 0,
+                        inode: None,
+                        vector_clock: disk_core::VectorClock::default(),
+                        deleted: false,
+                        deleted_at: None,
+                        node_id: self.node_id.clone(),
+                    });
+                }
+            }
+
+            // ── Persist post-cycle baselines ────────────────────
+            //
+            // After every successful cycle, write the content-hashes of all
+            // files that were just downloaded to node_baselines.  The NEXT
+            // cycle's `load_baselines_for_share` call will find these rows
+            // and supply them as the common-ancestor map so that a conflict on
+            // any of these paths can attempt a 3-way merge.
+            //
+            // Non-fatal: a baseline write failure must not abort the sync
+            // iteration — the file operations already succeeded.
+            if let (Some(db), true) = (&self.meta_db, !downloaded_baselines.is_empty()) {
+                // Persist synchronously before the iteration returns: the NEXT
+                // cycle's `load_baselines_for_share` must see these rows, so the
+                // write cannot race the next sync. A failure is logged but does
+                // not abort the sync iteration — the file operations already
+                // succeeded.
+                if let Err(e) = db
+                    .upsert_node_baselines(&self.node_id, &self.share, &downloaded_baselines)
+                    .await
+                {
+                    tracing::warn!(
+                        share = %self.share,
+                        error = %e,
+                        "sync: failed to persist post-cycle baselines (non-fatal)"
+                    );
+                }
+            }
+
+            // Conflicts: for each conflict reported by the server, apply the
+            // resolution on the client's local vault filesystem.
+            //
+            // Strategy:
+            //   1. Read the current local file bytes.
+            //   2. Download the remote bytes from the server.
+            //   3. Resolve the common-ancestor (base) bytes from the blob cache
+            //      using the baseline content_hash for this path.  When a base
+            //      is available, `apply_conflict` attempts a 3-way merge for
+            //      eligible extensions (.md / .txt); on clean merge the merged
+            //      file replaces the live path with no fork.
+            //   4. When no base is available (cache miss or no blob_cache),
+            //      pass `None` — `apply_conflict` falls back to fork, preserving
+            //      both versions (zero-data-loss invariant unchanged).
+            //
+            // Non-fatal: a failure to resolve a single conflict is logged and
+            // skipped so that the remainder of the sync iteration can proceed.
+            for conflict in &response.conflicts {
+                let rel_path = std::path::Path::new(&conflict.path);
+
+                // Read the current local file.
+                let local_bytes = match std::fs::read(self.scan_root.join(rel_path)) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        tracing::warn!(
+                            path = %conflict.path,
+                            error = %e,
+                            "conflict apply: cannot read local file, skipping"
+                        );
+                        continue;
+                    }
+                };
+
+                // Download the remote bytes.
+                let remote_bytes = match self.client.download_file(&conflict.path).await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        tracing::warn!(
+                            path = %conflict.path,
+                            error = %e,
+                            "conflict apply: cannot download remote file, skipping"
+                        );
+                        continue;
+                    }
+                };
+
+                // Resolve the base (common-ancestor) bytes from the blob cache.
+                //
+                // The baseline map (populated from node_baselines before the
+                // cycle) records the content_hash of the last successfully
+                // synced version of each file.  That hash is the blob cache key
+                // for the common-ancestor content.  When both lookups succeed
+                // the merge path is enabled; otherwise we fall back to fork.
+                let base_bytes: Option<Vec<u8>> = self.blob_cache.as_ref().and_then(|cache| {
+                    let hash = self.baselines.get(&conflict.path)?;
+                    cache.get(hash)
+                });
+
+                // Apply: merge (Some(base)) or fork (None).
+                let apply_result = apply_conflict(
+                    &self.scan_root,
+                    rel_path,
+                    base_bytes.as_deref(),
+                    &local_bytes,
+                    &remote_bytes,
+                    &self.node_id,
+                );
+
+                match &apply_result {
+                    Ok(outcome) => {
+                        tracing::info!(
+                            path = %conflict.path,
+                            outcome = ?outcome,
+                            had_base = base_bytes.is_some(),
+                            "conflict apply: resolved"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            path = %conflict.path,
+                            error = %e,
+                            "conflict apply: fork write failed"
+                        );
+                    }
+                }
+
+                // Persist the conflict row to the client MetaDb so that
+                // `GET /conflicts` on the local REST surface returns it.
+                // Only unresolved (forked) outcomes create a row; a clean
+                // 3-way merge means there is nothing left to resolve.
+                if let (Some(db), Ok(outcome)) = (&self.meta_db, &apply_result) {
+                    let fork_path = match outcome {
+                        ConflictApplyOutcome::Forked(p) => Some(p.to_string_lossy().into_owned()),
+                        ConflictApplyOutcome::Merged => None,
+                    };
+                    // Only record a row when the conflict is still unresolved
+                    // (i.e. it forked rather than merged cleanly).
+                    if fork_path.is_some() {
+                        let local_hash: Option<[u8; 32]> = {
+                            let h = *blake3::hash(&local_bytes).as_bytes();
+                            Some(h)
+                        };
+                        let remote_hash: Option<[u8; 32]> = {
+                            let h = *blake3::hash(&remote_bytes).as_bytes();
+                            Some(h)
+                        };
+                        let base_hash: Option<[u8; 32]> =
+                            base_bytes.as_deref().map(|b| *blake3::hash(b).as_bytes());
+                        let conflict_type = format!("{:?}", ConflictKind::Concurrent);
+                        let rec = ConflictRecord {
+                            id: None,
+                            vault_id: self.share.clone(),
+                            path: conflict.path.clone(),
+                            conflict_type,
+                            local_hash,
+                            remote_hash,
+                            base_hash,
+                            resolution: None,
+                            fork_path,
+                            resolved: false,
+                            created_at: 0,
+                            resolved_at: None,
+                        };
+                        // Persist synchronously before the iteration returns: the
+                        // row must be visible to a subsequent `list` query, and the
+                        // write is a cheap local SQLite insert. A DB failure is
+                        // logged but does not abort the sync iteration — the file
+                        // operation already succeeded.
+                        if let Err(e) = db.create_conflict(&rec).await {
+                            tracing::warn!(
+                                error = %e,
+                                "conflict apply: failed to persist ConflictRecord (non-fatal)"
+                            );
+                        }
+                    }
                 }
             }
         }

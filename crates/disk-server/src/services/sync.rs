@@ -680,6 +680,7 @@ impl SyncService for SyncServiceImpl {
         let mut to_upload: Vec<FileMetadata> = Vec::new();
         let mut to_download: Vec<FileMetadata> = Vec::new();
         let mut to_delete: Vec<FileMetadata> = Vec::new();
+        let mut conflict_reports: Vec<disk_proto::disk::ConflictReport> = Vec::new();
 
         for action in &actions {
             match action.action {
@@ -707,7 +708,70 @@ impl SyncService for SyncServiceImpl {
                         ..Default::default()
                     });
                 }
-                // Skip, ConflictFork, etc. — not surfaced in this response.
+                // Conflict detected — surface in response and persist to meta_db.
+                ActionType::ConflictFork | ActionType::ConflictMerge => {
+                    let path_str = action.path.to_string_lossy().to_string();
+
+                    // Determine the suggested resolution from the conflict kind.
+                    let suggested = action
+                        .conflict
+                        .as_ref()
+                        .map(|c| suggested_resolution_for(c.kind))
+                        .unwrap_or("fork-local");
+
+                    // Build proto ConflictReport.
+                    let local_meta = client_files
+                        .iter()
+                        .find(|m| m.path == action.path)
+                        .map(file_meta_to_proto);
+                    let remote_meta = server_files
+                        .iter()
+                        .find(|m| m.path == action.path)
+                        .map(file_meta_to_proto);
+
+                    conflict_reports.push(disk_proto::disk::ConflictReport {
+                        path: path_str.clone(),
+                        local: local_meta,
+                        remote: remote_meta,
+                        suggested_resolution: suggested.to_string(),
+                    });
+
+                    // Compute fork filename for persistence.
+                    let fork_rel = disk_core::conflict::fork_filename(
+                        &action.path,
+                        &node_id,
+                        std::time::SystemTime::now(),
+                    );
+                    let fork_path_str = fork_rel.to_string_lossy().to_string();
+
+                    // Persist conflict record to meta_db.
+                    let conflict_record = disk_core::types::ConflictRecord {
+                        id: None,
+                        vault_id: vault_id.to_string(),
+                        path: path_str,
+                        conflict_type: action
+                            .conflict
+                            .as_ref()
+                            .map(|c| format!("{:?}", c.kind))
+                            .unwrap_or_else(|| "Concurrent".to_string()),
+                        local_hash: action.conflict.as_ref().and_then(|c| c.local_hash),
+                        remote_hash: action.conflict.as_ref().and_then(|c| c.remote_hash),
+                        base_hash: action.conflict.as_ref().and_then(|c| c.base_hash),
+                        resolution: None,
+                        fork_path: Some(fork_path_str),
+                        resolved: false,
+                        created_at: 0,
+                        resolved_at: None,
+                    };
+                    if let Err(e) = db.create_conflict(&conflict_record).await {
+                        tracing::warn!(
+                            path = %action.path.display(),
+                            error = %e,
+                            "failed to persist conflict record"
+                        );
+                    }
+                }
+                // Skip and rename variants — no action needed here.
                 _ => {}
             }
         }
@@ -772,7 +836,7 @@ impl SyncService for SyncServiceImpl {
             to_upload,
             to_download,
             to_delete,
-            conflicts: Vec::new(),
+            conflicts: conflict_reports,
             server_clock,
         }))
     }
@@ -786,6 +850,25 @@ impl SyncService for SyncServiceImpl {
         self.check_acl_by_cert(cert_id.as_ref(), &share, WRITE_ROLES, "send_only")
             .await?;
         Err(Status::unimplemented("use DeltaUpload streaming"))
+    }
+}
+
+// ── Conflict helpers ───────────────────────────────────────────────────────
+
+/// Map a `ConflictKind` to the canonical `suggested_resolution` string.
+///
+/// Mapping:
+/// - `Concurrent`           → `"merge"` (3-way merge may resolve it cleanly)
+/// - `ModifiedDeleted`      → `"keep-local"` (preserve the modified version)
+/// - `RenameRename`         → `"fork-local"` (keep both names via fork)
+/// - `DirDeleteChildModify` → `"keep-local"` (child modified — preserve it)
+fn suggested_resolution_for(kind: disk_core::types::ConflictKind) -> &'static str {
+    use disk_core::types::ConflictKind;
+    match kind {
+        ConflictKind::Concurrent => "merge",
+        ConflictKind::ModifiedDeleted => "keep-local",
+        ConflictKind::RenameRename => "fork-local",
+        ConflictKind::DirDeleteChildModify => "keep-local",
     }
 }
 
@@ -1960,6 +2043,131 @@ mod tests {
             conflict.remote_hash,
             Some([0xDD; 32]),
             "ConflictReport.remote_hash must be C's pre-delete copy (0xDD) — bytes preserved"
+        );
+    }
+
+    // ── conflict_transport: ConflictFork actions populate SyncStateResponse ──
+
+    /// When the reconciler produces a ConflictFork action, exchange_state must:
+    /// 1. Include a non-empty `conflicts` list in the response.
+    /// 2. Persist a row to the `conflicts` table (fork_path set).
+    /// 3. Set a non-empty `suggested_resolution` on the ConflictReport.
+    ///
+    /// Setup: server has "shared.md" with hash [0xAA;32]; client sends
+    /// "shared.md" with a *different* hash [0xBB;32].  Both sides have the
+    /// file in the node baseline with the SAME original hash [0xCC;32], so
+    /// from the reconciler's perspective both sides diverged from a common
+    /// ancestor → ConflictFork.
+    #[tokio::test]
+    async fn conflict_transport_fork_populates_response_and_db() {
+        let (svc, token, _root, _db_dir) = make_service_with_db("ct-node").await;
+
+        // Server side: seed "shared.md" with hash [0xAA;32].
+        let server_vc = {
+            let mut vc = disk_core::VectorClock::new();
+            vc.advance("server");
+            vc.advance("server"); // tick=2
+            vc
+        };
+        let server_file = disk_core::types::FileMeta {
+            path: std::path::PathBuf::from("shared.md"),
+            content_hash: [0xAA; 32],
+            size: 100,
+            mtime_ns: 1_700_000_002_000_000_000,
+            inode: None,
+            vector_clock: server_vc,
+            deleted: false,
+            deleted_at: None,
+            node_id: "server".into(),
+        };
+        svc.meta_db
+            .as_ref()
+            .unwrap()
+            .upsert_file(&server_file)
+            .await
+            .unwrap();
+
+        // Baseline for "ct-node": shared.md was at hash [0xCC;32] (common ancestor).
+        let base_vc = disk_core::VectorClock::new(); // tick=0 for both
+        let baseline_file = disk_core::types::FileMeta {
+            path: std::path::PathBuf::from("shared.md"),
+            content_hash: [0xCC; 32],
+            size: 80,
+            mtime_ns: 1_700_000_000_000_000_000,
+            inode: None,
+            vector_clock: base_vc,
+            deleted: false,
+            deleted_at: None,
+            node_id: "ct-node".into(),
+        };
+        svc.meta_db
+            .as_ref()
+            .unwrap()
+            .upsert_node_baselines("ct-node", "default", &[baseline_file])
+            .await
+            .unwrap();
+
+        // Client sends "shared.md" with hash [0xBB;32] and a divergent clock.
+        let mut client_vc_map = std::collections::HashMap::new();
+        client_vc_map.insert("ct-node".to_string(), 2u64); // tick=2 (diverged)
+        let client_file = FileMetadata {
+            path: "shared.md".into(),
+            content_hash: [0xBB; 32].to_vec(),
+            size: 110,
+            mtime_ns: 1_700_000_003_000_000_000,
+            vector_clock: client_vc_map,
+            node_id: "ct-node".into(),
+            ..Default::default()
+        };
+
+        let req = auth_req(
+            SyncStateRequest {
+                node_id: "ct-node".into(),
+                session_token: token.clone(),
+                files: vec![client_file],
+                node_clock: std::collections::HashMap::new(),
+                ..Default::default()
+            },
+            &token,
+        );
+
+        let resp = svc.exchange_state(req).await.unwrap().into_inner();
+
+        // Assert 1: conflicts list is non-empty.
+        assert!(
+            !resp.conflicts.is_empty(),
+            "conflicts must be populated when ConflictFork action is present"
+        );
+        let conflict = &resp.conflicts[0];
+        assert_eq!(conflict.path, "shared.md");
+        assert!(
+            !conflict.suggested_resolution.is_empty(),
+            "suggested_resolution must be non-empty"
+        );
+
+        // Assert 2: conflict row persisted in meta_db with fork_path set.
+        let db_conflicts = svc
+            .meta_db
+            .as_ref()
+            .unwrap()
+            .list_unresolved_conflicts()
+            .await
+            .unwrap();
+        assert!(
+            !db_conflicts.is_empty(),
+            "conflict must be persisted in meta_db"
+        );
+        let db_conflict = db_conflicts
+            .iter()
+            .find(|c| c.path == "shared.md")
+            .expect("conflict row for shared.md must exist");
+        assert!(
+            db_conflict.fork_path.is_some(),
+            "fork_path must be set in the persisted conflict record"
+        );
+        assert!(
+            !db_conflict.fork_path.as_ref().unwrap().is_empty(),
+            "fork_path must be non-empty"
         );
     }
 }

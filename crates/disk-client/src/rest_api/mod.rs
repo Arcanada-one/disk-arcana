@@ -19,6 +19,7 @@
 //! trigger into the running loop iteration scheduler.
 
 use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -36,9 +37,11 @@ use tokio::sync::{mpsc, RwLock};
 use crate::config::schema::Direction;
 use crate::sync_loop::LoopState;
 
+pub mod conflicts;
 pub mod status;
 pub mod sync;
 
+pub use conflicts::{get_conflict_diff, ConflictListItem, ResolveRequest};
 pub use status::{StatusResponse, StatusShare};
 
 /// All bind addresses MUST match `127.0.0.0/8` (loopback). The daemon
@@ -88,6 +91,11 @@ struct DaemonStateInner {
     shares: RwLock<Vec<ShareSnapshot>>,
     manual_sync_tx: mpsc::Sender<()>,
     reload_tx: mpsc::Sender<()>,
+    /// Optional database handle for conflict REST endpoints.
+    meta_db: Option<Arc<disk_core::MetaDb>>,
+    /// Absolute vault root used by the conflict REST endpoints to perform
+    /// file operations.  Populated via `with_vault_root` after construction.
+    vault_root: Option<PathBuf>,
 }
 
 impl DaemonState {
@@ -107,6 +115,8 @@ impl DaemonState {
             shares: RwLock::new(Vec::new()),
             manual_sync_tx: manual_tx,
             reload_tx,
+            meta_db: None,
+            vault_root: None,
         };
         (
             Self {
@@ -148,6 +158,64 @@ impl DaemonState {
     pub(crate) fn reload_sender(&self) -> mpsc::Sender<()> {
         self.inner.reload_tx.clone()
     }
+
+    /// Attach a `MetaDb` handle for conflict REST endpoints.
+    ///
+    /// Call this once after construction.  Wraps the db in `Arc` so the
+    /// state can be cheaply cloned across handler tasks.
+    pub fn with_meta_db(self, db: disk_core::MetaDb) -> Self {
+        // We need to rebuild the inner since Arc<DaemonStateInner> is not mutably accessible.
+        // Use Arc::try_unwrap if we hold the only reference, otherwise create new inner.
+        // Since `new()` is the only constructor, at call time there should only be one ref
+        // unless the caller already cloned. We use a RwLock workaround instead.
+        //
+        // Simpler approach: store meta_db in a separate Arc<RwLock<Option<MetaDb>>> in inner.
+        // But that would require changing the inner struct. Instead, wrap inner in a new Arc:
+        let inner = Arc::try_unwrap(self.inner).unwrap_or_else(|arc| {
+            // Already cloned — should not happen right after new(); panic in debug.
+            panic!(
+                "DaemonState::with_meta_db called after clone: Arc has {} refs",
+                Arc::strong_count(&arc)
+            );
+        });
+        let new_inner = DaemonStateInner {
+            meta_db: Some(Arc::new(db)),
+            ..inner
+        };
+        Self {
+            inner: Arc::new(new_inner),
+        }
+    }
+
+    /// Access the database handle, if one was attached.
+    pub fn meta_db(&self) -> Option<&Arc<disk_core::MetaDb>> {
+        self.inner.meta_db.as_ref()
+    }
+
+    /// Attach the vault root path for conflict file operations.
+    ///
+    /// The REST conflict resolve handler uses this path to read local files
+    /// and write fork copies.  Call this once after construction.
+    pub fn with_vault_root(self, root: PathBuf) -> Self {
+        let inner = Arc::try_unwrap(self.inner).unwrap_or_else(|arc| {
+            panic!(
+                "DaemonState::with_vault_root called after clone: Arc has {} refs",
+                Arc::strong_count(&arc)
+            );
+        });
+        let new_inner = DaemonStateInner {
+            vault_root: Some(root),
+            ..inner
+        };
+        Self {
+            inner: Arc::new(new_inner),
+        }
+    }
+
+    /// Access the vault root path, if one was attached.
+    pub fn vault_root(&self) -> Option<&PathBuf> {
+        self.inner.vault_root.as_ref()
+    }
 }
 
 /// Endpoint envelope returned by `POST /sync` and `POST /config/reload`.
@@ -163,6 +231,9 @@ pub fn router(state: DaemonState) -> Router {
         .route("/status", get(status::get_status))
         .route("/sync", post(sync::post_sync))
         .route("/config/reload", post(sync::post_config_reload))
+        .route("/conflicts", get(conflicts::get_conflicts))
+        .route("/conflicts/:path/diff", get(conflicts::get_conflict_diff))
+        .route("/conflicts/:path", post(conflicts::post_resolve_conflict))
         .with_state(state)
 }
 
