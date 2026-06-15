@@ -151,6 +151,66 @@ impl DaemonState {
         self.inner.shares.read().await.clone()
     }
 
+    /// Targeted per-share live-field update.
+    ///
+    /// Finds the share whose `name` matches and overwrites only the live
+    /// fields (`state`, `last_success_at`, `last_error`, byte counters,
+    /// `pending_local_changes`). Static descriptor fields (`name`, `path`,
+    /// `declared_direction`) are intentionally left untouched.
+    ///
+    /// If no share with the given name exists (e.g. a concurrent reload
+    /// removed it), the call is a no-op — no panic.
+    pub async fn update_share(&self, name: &str, snapshot: ShareSnapshot) {
+        let mut shares = self.inner.shares.write().await;
+        if let Some(existing) = shares.iter_mut().find(|s| s.name == name) {
+            existing.state = snapshot.state;
+            existing.last_success_at = snapshot.last_success_at;
+            existing.last_error = snapshot.last_error;
+            existing.bytes_sent_session = snapshot.bytes_sent_session;
+            existing.bytes_received_session = snapshot.bytes_received_session;
+            existing.pending_local_changes = snapshot.pending_local_changes;
+        }
+    }
+
+    /// Merge a new share list from a config reload into the live state.
+    ///
+    /// For each share in `new_shares`:
+    /// - If a same-name share exists in the current state, the live fields
+    ///   (`state`, `last_success_at`, `last_error`, counters) are copied over
+    ///   from the current state into the new snapshot — the live sync
+    ///   progress is preserved.
+    /// - If the share is new, it stays as provided (seeded idle with null
+    ///   timestamps from `build_share_snapshots`).
+    ///
+    /// Shares present in the current state but absent from `new_shares` are
+    /// dropped (their sync task will be orphaned and continue until abort;
+    /// future iterations call `update_share` on an absent name which is a
+    ///  no-op).
+    ///
+    /// MUST NOT re-seed surviving shares to idle/null.
+    pub async fn reconcile_shares(&self, new_shares: Vec<ShareSnapshot>) {
+        use std::collections::HashMap;
+        let mut current = self.inner.shares.write().await;
+        // Build a map of name → live state from the current vector.
+        let live: HashMap<String, &ShareSnapshot> =
+            current.iter().map(|s| (s.name.clone(), s)).collect();
+        let merged: Vec<ShareSnapshot> = new_shares
+            .into_iter()
+            .map(|mut s| {
+                if let Some(old) = live.get(&s.name) {
+                    s.state = old.state;
+                    s.last_success_at = old.last_success_at;
+                    s.last_error = old.last_error.clone();
+                    s.bytes_sent_session = old.bytes_sent_session;
+                    s.bytes_received_session = old.bytes_received_session;
+                    s.pending_local_changes = old.pending_local_changes;
+                }
+                s
+            })
+            .collect();
+        *current = merged;
+    }
+
     pub(crate) fn manual_sync_sender(&self) -> mpsc::Sender<()> {
         self.inner.manual_sync_tx.clone()
     }
@@ -393,6 +453,128 @@ mod tests {
             let s = loop_state_to_schema(state);
             assert!(!s.is_empty());
         }
+    }
+
+    // Helper: build a minimal ShareSnapshot for tests.
+    fn make_snapshot(name: &str, state: LoopState) -> ShareSnapshot {
+        ShareSnapshot {
+            name: name.to_string(),
+            path: format!("/data/{name}"),
+            declared_direction: Direction::Bidirectional,
+            server_confirmed_role: None,
+            state,
+            last_success_at: None,
+            last_error: None,
+            bytes_sent_session: 0,
+            bytes_received_session: 0,
+            pending_local_changes: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn update_share_mutates_live_fields() {
+        let (state, _, _) = DaemonState::new("n1", "v1");
+        state
+            .set_shares(vec![make_snapshot("wiki", LoopState::Idle)])
+            .await;
+
+        let mut updated = make_snapshot("wiki", LoopState::Syncing);
+        updated.last_success_at = Some(1_700_000_000);
+        updated.last_error = Some("boom".into());
+        updated.bytes_sent_session = 42;
+        updated.bytes_received_session = 7;
+        updated.pending_local_changes = 3;
+        state.update_share("wiki", updated).await;
+
+        let snaps = state.snapshot_shares().await;
+        assert_eq!(snaps.len(), 1);
+        let s = &snaps[0];
+        assert_eq!(s.state, LoopState::Syncing);
+        assert_eq!(s.last_success_at, Some(1_700_000_000));
+        assert_eq!(s.last_error.as_deref(), Some("boom"));
+        assert_eq!(s.bytes_sent_session, 42);
+        assert_eq!(s.bytes_received_session, 7);
+        assert_eq!(s.pending_local_changes, 3);
+        // Static descriptor must be unchanged.
+        assert_eq!(s.name, "wiki");
+        assert_eq!(s.path, "/data/wiki");
+        assert_eq!(s.declared_direction, Direction::Bidirectional);
+    }
+
+    #[tokio::test]
+    async fn update_share_absent_name_is_noop() {
+        let (state, _, _) = DaemonState::new("n1", "v1");
+        state
+            .set_shares(vec![make_snapshot("wiki", LoopState::Idle)])
+            .await;
+
+        // Update a share that doesn't exist — must not panic.
+        state
+            .update_share(
+                "nonexistent",
+                make_snapshot("nonexistent", LoopState::Syncing),
+            )
+            .await;
+
+        let snaps = state.snapshot_shares().await;
+        assert_eq!(snaps.len(), 1, "share count must not change");
+        assert_eq!(snaps[0].state, LoopState::Idle, "existing share unchanged");
+    }
+
+    #[tokio::test]
+    async fn reconcile_shares_preserves_live_state_for_survivors() {
+        let (state, _, _) = DaemonState::new("n1", "v1");
+        // Seed wiki with advanced live state.
+        let mut wiki = make_snapshot("wiki", LoopState::Syncing);
+        wiki.last_success_at = Some(1_700_000_001);
+        wiki.last_error = Some("prev".into());
+        wiki.bytes_sent_session = 100;
+        state.set_shares(vec![wiki]).await;
+
+        // Reconcile with a new config that includes wiki (name unchanged)
+        // plus a brand-new share "notes".
+        let new_wiki = make_snapshot("wiki", LoopState::Idle); // would reset to idle
+        let new_notes = make_snapshot("notes", LoopState::Idle);
+        state.reconcile_shares(vec![new_wiki, new_notes]).await;
+
+        let snaps = state.snapshot_shares().await;
+        assert_eq!(snaps.len(), 2);
+
+        // wiki must keep the advanced live state (NOT re-seeded to idle).
+        let wiki = snaps.iter().find(|s| s.name == "wiki").unwrap();
+        assert_eq!(
+            wiki.state,
+            LoopState::Syncing,
+            "live state must be preserved"
+        );
+        assert_eq!(wiki.last_success_at, Some(1_700_000_001));
+        assert_eq!(wiki.last_error.as_deref(), Some("prev"));
+        assert_eq!(wiki.bytes_sent_session, 100);
+
+        // notes is new — stays idle with null timestamps.
+        let notes = snaps.iter().find(|s| s.name == "notes").unwrap();
+        assert_eq!(notes.state, LoopState::Idle);
+        assert_eq!(notes.last_success_at, None);
+    }
+
+    #[tokio::test]
+    async fn reconcile_shares_drops_removed_shares() {
+        let (state, _, _) = DaemonState::new("n1", "v1");
+        state
+            .set_shares(vec![
+                make_snapshot("wiki", LoopState::Idle),
+                make_snapshot("photos", LoopState::Syncing),
+            ])
+            .await;
+
+        // Reconcile with only wiki — photos must be dropped.
+        state
+            .reconcile_shares(vec![make_snapshot("wiki", LoopState::Idle)])
+            .await;
+
+        let snaps = state.snapshot_shares().await;
+        assert_eq!(snaps.len(), 1);
+        assert_eq!(snaps[0].name, "wiki");
     }
 
     #[test]

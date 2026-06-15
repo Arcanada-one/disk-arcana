@@ -191,6 +191,9 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
     for share in cfg.shares.iter() {
         let share_name = share.name.clone();
         let share_path = share.path.clone();
+        let declared_direction = share
+            .effective_direction(cfg.node.default.intended_direction)
+            .unwrap_or(Direction::Bidirectional);
         let server_addr = server_addr.clone();
         let ca_pem = ca_pem.clone();
         let client_cert_pem = client_cert_pem.clone();
@@ -199,6 +202,9 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
         let manual_sync_rx = Arc::clone(&manual_sync_rx);
         let meta_db = meta_db.clone();
         let blob_cache = Arc::clone(&blob_cache);
+        // Clone the DaemonState handle into the per-share task so it can
+        // write live loop state back via `update_share`.
+        let state_for_task = state.clone();
 
         let handle = tokio::spawn(async move {
             // Build a DiskClient if TLS material is available.
@@ -218,6 +224,19 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
                         error = %e,
                         "sync-loop: could not build DiskClient; share will not sync"
                     );
+                    // Write server_unreachable so /status reflects the failure
+                    // instead of staying frozen at the startup idle snapshot.
+                    let unreachable_snap = build_live_snapshot(
+                        &share_name,
+                        share_path.clone(),
+                        declared_direction,
+                        LoopState::ServerUnreachable,
+                        None,
+                        Some(e.to_string()),
+                    );
+                    state_for_task
+                        .update_share(&share_name, unreachable_snap)
+                        .await;
                     return;
                 }
             };
@@ -225,6 +244,9 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
             let mut loop_sm = SyncLoop::new();
             let mut rng = StdRng::from_entropy();
             let mut interval = tokio::time::interval(POLL_INTERVAL);
+            // Track last_success_at locally so syncing→idle transitions can
+            // advance the timestamp only on a real success.
+            let mut last_success_at: Option<i64> = None;
 
             loop {
                 let trigger = tokio::select! {
@@ -234,6 +256,18 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
                         guard.recv().await
                     } => LoopTrigger::Manual,
                 };
+
+                // Write a syncing snapshot before run_iteration so a fast
+                // iteration still surfaces "syncing" to GET /status callers.
+                let syncing_snap = build_live_snapshot(
+                    &share_name,
+                    share_path.clone(),
+                    declared_direction,
+                    LoopState::Syncing,
+                    last_success_at,
+                    None,
+                );
+                state_for_task.update_share(&share_name, syncing_snap).await;
 
                 // Load per-share baselines from the MetaDb for this cycle.
                 // A fresh load each cycle picks up baselines written in the
@@ -251,9 +285,31 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
                     baselines,
                     meta_db.clone(),
                 );
-                let _ = loop_sm
+                let outcome = loop_sm
                     .run_iteration(&mut transport, trigger, &mut rng)
                     .await;
+
+                // Advance last_success_at only on a real success.
+                if matches!(outcome, Some(Ok(()))) {
+                    last_success_at = Some(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs() as i64,
+                    );
+                }
+
+                // Write the final snapshot (reflects idle/backoff/error state
+                // and the potentially-advanced last_success_at).
+                let final_snap = build_live_snapshot(
+                    &share_name,
+                    share_path.clone(),
+                    declared_direction,
+                    loop_sm.state(),
+                    last_success_at,
+                    loop_sm.last_error().map(|e| e.to_string()),
+                );
+                state_for_task.update_share(&share_name, final_snap).await;
             }
         });
         sync_task_handles.push(handle);
@@ -292,6 +348,44 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
         })
     });
 
+    // ── P2: Config-reload reconcile consumer ─────────────────────────────
+    //
+    // Whenever the ConfigWatcher commits a new config via `snapshot.swap`,
+    // the watch channel fires.  This task picks up the new config's share
+    // list and calls `reconcile_shares` — preserving live sync state for
+    // surviving shares while adding/removing entries to match the new config.
+    //
+    // This is the daemon-side consumer that makes V-AC-4's sub-assertion
+    // work: a reload that adds or removes a share is reflected in `/status`
+    // rather than leaving it frozen at the startup snapshot.
+    let cfg_for_reconcile = cfg.clone();
+    let snapshot_handle = watcher.snapshot.clone();
+    let state_for_reconcile = state.clone();
+    let reconcile_handle = tokio::spawn(async move {
+        let mut change_rx = snapshot_handle.subscribe();
+        // Mark the current value as seen so the first `changed()` fires on
+        // the next actual swap, not immediately.
+        change_rx.mark_unchanged();
+        loop {
+            match change_rx.changed().await {
+                Ok(()) => {
+                    let new_cfg = snapshot_handle.current();
+                    let new_snaps = build_share_snapshots_from_cfg(&new_cfg, &cfg_for_reconcile);
+                    tracing::info!(
+                        share_count = new_snaps.len(),
+                        "daemon: config reloaded — reconciling share list"
+                    );
+                    state_for_reconcile.reconcile_shares(new_snaps).await;
+                }
+                Err(_) => {
+                    // Sender dropped (watcher task exited / aborted).
+                    tracing::debug!("daemon: config-snapshot watch channel closed");
+                    break;
+                }
+            }
+        }
+    });
+
     let shutdown_fut = async move {
         let _ = shutdown_rx.await;
     };
@@ -304,6 +398,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
 
     let _ = signal_task.await;
     watcher.abort();
+    reconcile_handle.abort();
     for h in sync_task_handles {
         h.abort();
     }
@@ -392,6 +487,44 @@ pub(crate) fn build_remote_sync_for_share<'a>(
         transport.with_meta_db(db)
     } else {
         transport
+    }
+}
+
+/// Build idle `ShareSnapshot`s from a config for the reconcile consumer.
+///
+/// The `_old_cfg` parameter is unused at runtime (the new config is
+/// self-contained for direction resolution) but kept for future use.
+fn build_share_snapshots_from_cfg(
+    new_cfg: &DiskConfig,
+    _old_cfg: &DiskConfig,
+) -> Vec<ShareSnapshot> {
+    build_share_snapshots(new_cfg)
+}
+
+/// Build a `ShareSnapshot` with static descriptor fields and the provided
+/// live loop fields. Used by per-share sync tasks to emit `update_share`
+/// calls before and after `run_iteration`.
+///
+/// Byte counters are always 0 — `SyncLoop` exposes no stats API.
+fn build_live_snapshot(
+    name: &str,
+    path: std::path::PathBuf,
+    declared_direction: Direction,
+    state: LoopState,
+    last_success_at: Option<i64>,
+    last_error: Option<String>,
+) -> ShareSnapshot {
+    ShareSnapshot {
+        name: name.to_string(),
+        path: path.display().to_string(),
+        declared_direction,
+        server_confirmed_role: None,
+        state,
+        last_success_at,
+        last_error,
+        bytes_sent_session: 0,
+        bytes_received_session: 0,
+        pending_local_changes: 0,
     }
 }
 

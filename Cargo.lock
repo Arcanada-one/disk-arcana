@@ -978,6 +978,7 @@ dependencies = [
  "libc",
  "prettydiff",
  "rand 0.8.6",
+ "rcgen",
  "reqwest",
  "serde",
  "serde_json",
