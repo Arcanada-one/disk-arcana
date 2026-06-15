@@ -25,8 +25,25 @@ allow = [
     # comfortably with the rest of the permissive allowlist. Pulled in via
     # reqwest → hyper-rustls.
     "CDLA-Permissive-2.0",
+    # BSL-1.0 (Boost Software License 1.0) — OSI- and FSF-approved, fully
+    # permissive (no attribution required for binaries). Pulled in transitively
+    # by the macOS GUI stack only: error-code → clipboard-win → arboard →
+    # egui-winit → eframe. Unavoidable if we use eframe on macOS.
+    "BSL-1.0",
+    # OFL-1.1 (SIL Open Font License 1.1) — covers the default UI fonts bundled
+    # by epaint_default_fonts → epaint → egui → eframe. A standard, permissive
+    # font license; the fonts are embedded data, not linked code.
+    "OFL-1.1",
 ]
 confidence-threshold = 0.8
+
+# epaint_default_fonts declares `(MIT OR Apache-2.0) AND OFL-1.1 AND
+# LicenseRef-UFL-1.0`. UFL-1.0 (Ubuntu Font Licence) is a permissive font
+# license but is not an SPDX identifier, so it cannot go in `allow`; grant it
+# as a crate-scoped exception. Source: eframe's default font set.
+exceptions = [
+    { allow = ["LicenseRef-UFL-1.0"], crate = "epaint_default_fonts" },
+]
 
 [bans]
 multiple-versions = "warn"
