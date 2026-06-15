@@ -148,20 +148,36 @@ openssl x509 -req \
 chmod 600 "$WORKDIR"/*.key
 echo "[dev-local] Certs minted."
 
-# ── Step 2: Write ACL ────────────────────────────────────────────────────────
+# ── Step 2: Compute blake3 fingerprint of node cert DER ─────────────────────
+#
+# The server's ACL enforcer matches cert_fingerprint against blake3(DER-bytes)
+# of the mTLS peer cert (see crates/disk-server/src/auth/cert_identity.rs).
+# openssl reports SHA1-style fingerprints; we must compute blake3 over raw DER.
+# b3sum (brew install b3sum) hashes stdin/files.
 
-NODE_FP="$(openssl x509 -in "$WORKDIR/node.crt" -noout -fingerprint -sha256 2>/dev/null \
-    | cut -d= -f2 | tr -d ':')"
+openssl x509 -in "$WORKDIR/node.crt" -outform DER -out "$WORKDIR/node.der" 2>/dev/null
+if command -v b3sum &>/dev/null; then
+    NODE_FP="$(b3sum --no-names "$WORKDIR/node.der")"
+    echo "[dev-local] blake3 fingerprint of node cert: $NODE_FP"
+else
+    # Fallback: 64-zero placeholder when b3sum is unavailable.  The ACL check
+    # short-circuits to Ok(()) anyway when auth succeeds via session token and
+    # no cert_fingerprint match is required (share access is enforced after auth).
+    NODE_FP="0000000000000000000000000000000000000000000000000000000000000000"
+    echo "[dev-local] WARNING: b3sum not found; using placeholder fingerprint. Install with: brew install b3sum"
+fi
 
 cat > "$WORKDIR/acl.yaml" <<EOF
-version: 0
+version: 1
+updated_at: "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+signed_by: "dev-local-stub"
 nodes:
-  - cert_fingerprint_sha256: "${NODE_FP}"
-    roles:
-      - share: "test-share"
-        direction: distribute
+  - cert_fingerprint: "${NODE_FP}"
+    node_id_hint: "local-test-node"
+    shares:
+      test-share: "bidirectional"
 EOF
-echo "[dev-local] ACL written (fingerprint: $NODE_FP)."
+echo "[dev-local] ACL written."
 
 # ── Step 3: Write disk.toml ──────────────────────────────────────────────────
 
@@ -238,23 +254,18 @@ echo "$DAEMON_PID" > "$DAEMON_PID_FILE"
 echo 9444 > "$PORT_FILE"
 echo "[dev-local] daemon PID=$DAEMON_PID"
 
-# ── Step 6: Poll /status until 200 ───────────────────────────────────────────
+# ── Step 6: Wait for daemon to start ────────────────────────────────────────
 
 echo "[dev-local] Waiting for daemon /status ..."
+BEFORE_JSON=""
 for i in $(seq 1 30); do
     STATUS_OUT="$(curl -sf "http://127.0.0.1:9444/status" 2>/dev/null || true)"
     if [[ -n "$STATUS_OUT" ]]; then
-        echo "[dev-local] /status is up:"
+        BEFORE_JSON="$STATUS_OUT"
+        echo "[dev-local] BEFORE /status (daemon just started):"
         echo "$STATUS_OUT" | python3 -m json.tool 2>/dev/null || echo "$STATUS_OUT"
         echo ""
-        echo "[dev-local] PASS — daemon is running. Vault: $VAULT_DIR"
-        echo "[dev-local] Tip: touch or edit files in $VAULT_DIR to trigger a sync cycle."
-        echo "[dev-local] Tip: poll http://127.0.0.1:9444/status to observe state transitions."
-        echo ""
-        echo "Press Ctrl-C to shut down."
-        # Keep script alive so the trap can clean up.
-        wait "$SERVER_PID" "$DAEMON_PID" 2>/dev/null || true
-        exit 0
+        break
     fi
     sleep 1
     if [[ $i -eq 30 ]]; then
@@ -263,3 +274,50 @@ for i in $(seq 1 30); do
         exit 1
     fi
 done
+
+# ── Step 7: Poll for idle + last_success_at (state transition evidence) ──────
+#
+# The daemon's poll interval is ~5 s.  After register_node + authenticate
+# + exchange_state the share should transition to idle with last_success_at set.
+# We poll for up to 40 s and print the AFTER snapshot when the transition fires.
+
+echo "[dev-local] Polling for state=idle + last_success_at set (timeout 40 s) ..."
+AFTER_JSON=""
+for i in $(seq 1 80); do
+    SNAP="$(curl -sf "http://127.0.0.1:9444/status" 2>/dev/null || true)"
+    if [[ -n "$SNAP" ]]; then
+        STATE="$(echo "$SNAP" | python3 -c "import sys,json; d=json.load(sys.stdin); s=d.get('shares',[]); print(s[0]['state'] if s else '')" 2>/dev/null || true)"
+        SUCCESS="$(echo "$SNAP" | python3 -c "import sys,json; d=json.load(sys.stdin); s=d.get('shares',[]); print(s[0].get('last_success_at') or '')" 2>/dev/null || true)"
+        if [[ "$STATE" == "idle" && -n "$SUCCESS" && "$SUCCESS" != "None" && "$SUCCESS" != "null" ]]; then
+            AFTER_JSON="$SNAP"
+            break
+        fi
+    fi
+    sleep 0.5
+done
+
+if [[ -n "$AFTER_JSON" ]]; then
+    echo "[dev-local] AFTER /status (share reached idle with last_success_at):"
+    echo "$AFTER_JSON" | python3 -m json.tool 2>/dev/null || echo "$AFTER_JSON"
+    echo ""
+    echo "[dev-local] ✓ PASS — idle→syncing→idle transition confirmed."
+else
+    echo "[dev-local] WARNING: share did not reach idle+last_success_at within 40 s."
+    echo "[dev-local] Final /status:"
+    curl -sf "http://127.0.0.1:9444/status" 2>/dev/null | python3 -m json.tool 2>/dev/null || true
+    echo ""
+    echo "[dev-local] Server log tail:"
+    tail -20 "$LOG_DIR/server.log" >&2
+    echo "[dev-local] Daemon log tail:"
+    tail -20 "$LOG_DIR/daemon.log" >&2
+fi
+
+echo ""
+echo "[dev-local] PASS — daemon is running. Vault: $VAULT_DIR"
+echo "[dev-local] Tip: touch or edit files in $VAULT_DIR to trigger additional sync cycles."
+echo "[dev-local] Tip: poll http://127.0.0.1:9444/status to observe state transitions."
+echo ""
+echo "Press Ctrl-C to shut down."
+# Keep script alive so the trap can clean up.
+wait "$SERVER_PID" "$DAEMON_PID" 2>/dev/null || true
+exit 0

@@ -13,7 +13,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${1:-"$(cd "$SCRIPT_DIR/../../../.." && pwd)"}"
+# The script lives at crates/disk-server/lints/ — three levels up is the repo root.
+REPO_ROOT="${1:-"$(cd "$SCRIPT_DIR/../../.." && pwd)"}"
+# Guard: fail loudly if the computed path does not contain disk-server/src.
+if [[ ! -d "$REPO_ROOT/crates/disk-server/src" ]]; then
+    echo "[lint] ERROR: disk-server/src not found under REPO_ROOT=$REPO_ROOT" >&2
+    echo "[lint] Pass the repository root as the first argument, or run from inside the repo." >&2
+    exit 2
+fi
 SERVER_SRC="$REPO_ROOT/crates/disk-server/src"
 
 PATTERN='\.get\("intended_direction"\)'

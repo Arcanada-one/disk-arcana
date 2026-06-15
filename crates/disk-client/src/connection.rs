@@ -27,6 +27,14 @@ pub struct ClientConfig {
     /// PEM-encoded CA certificate for TLS verification.
     /// If `None`, the system trust store is used.
     pub tls_ca_cert_pem: Option<Vec<u8>>,
+    /// PEM-encoded client certificate for mTLS.
+    /// When combined with `client_key_pem`, the channel presents this
+    /// certificate to the server during the TLS handshake.  Both fields
+    /// must be `Some` for the identity to be wired; a partial pair is
+    /// silently ignored (connect still proceeds without a client cert).
+    pub client_cert_pem: Option<Vec<u8>>,
+    /// PEM-encoded private key matching `client_cert_pem`.
+    pub client_key_pem: Option<Vec<u8>>,
     /// Node ID for registration / authentication.
     pub node_id: String,
     /// API key (obtained after `register_node`).
@@ -68,6 +76,13 @@ impl DiskClient {
             let ca_cert = tonic::transport::Certificate::from_pem(ca_pem.clone());
             tls_config = tls_config.ca_certificate(ca_cert);
         }
+        // Wire mTLS client identity when both cert and key are present.
+        // A partial pair (only cert or only key) is silently skipped so
+        // the connection degrades to one-way TLS rather than panicking.
+        if let (Some(ref cert), Some(ref key)) = (&config.client_cert_pem, &config.client_key_pem) {
+            let identity = tonic::transport::Identity::from_pem(cert.clone(), key.clone());
+            tls_config = tls_config.identity(identity);
+        }
         endpoint = endpoint.tls_config(tls_config)?;
 
         let channel = endpoint.connect().await?;
@@ -98,6 +113,10 @@ impl DiskClient {
         if let Some(ref ca_pem) = config.tls_ca_cert_pem {
             let ca_cert = tonic::transport::Certificate::from_pem(ca_pem.clone());
             tls_config = tls_config.ca_certificate(ca_cert);
+        }
+        if let (Some(ref cert), Some(ref key)) = (&config.client_cert_pem, &config.client_key_pem) {
+            let identity = tonic::transport::Identity::from_pem(cert.clone(), key.clone());
+            tls_config = tls_config.identity(identity);
         }
         endpoint = endpoint.tls_config(tls_config)?;
 
@@ -354,6 +373,8 @@ mod tests {
         let cfg = ClientConfig {
             endpoint: "https://localhost:9443".into(),
             tls_ca_cert_pem: None,
+            client_cert_pem: None,
+            client_key_pem: None,
             node_id: "test-node".into(),
             api_key: Some("arc_disk_KEY".into()),
         };

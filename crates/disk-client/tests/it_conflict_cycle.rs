@@ -181,6 +181,8 @@ async fn connect(fx: &Fixture) -> DiskClient {
     let client = DiskClient::connect(ClientConfig {
         endpoint: fx.server_url.clone(),
         tls_ca_cert_pem: Some(fx.ca_pem.clone()),
+        client_cert_pem: None,
+        client_key_pem: None,
         node_id: NODE_ID.into(),
         api_key: None,
     })

@@ -207,39 +207,111 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
         let state_for_task = state.clone();
 
         let handle = tokio::spawn(async move {
-            // Build a DiskClient if TLS material is available.
-            let client = match build_disk_client(
-                server_addr,
-                ca_pem,
-                client_cert_pem,
-                client_key_pem,
-                node_id_for_loop.clone(),
-            )
-            .await
-            {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::warn!(
-                        share = %share_name,
-                        error = %e,
-                        "sync-loop: could not build DiskClient; share will not sync"
-                    );
-                    // Write server_unreachable so /status reflects the failure
-                    // instead of staying frozen at the startup idle snapshot.
-                    let unreachable_snap = build_live_snapshot(
-                        &share_name,
-                        share_path.clone(),
-                        declared_direction,
-                        LoopState::ServerUnreachable,
-                        None,
-                        Some(e.to_string()),
-                    );
-                    state_for_task
-                        .update_share(&share_name, unreachable_snap)
-                        .await;
-                    return;
+            // Build a DiskClient with bounded connect-retry.
+            //
+            // A transient connect failure (e.g. server starts after the client
+            // task is spawned) must not abort the sync task — the task retries
+            // with backoff up to MAX_CONNECT_ATTEMPTS before marking the share
+            // server_unreachable.
+            const MAX_CONNECT_ATTEMPTS: u32 = 8;
+            let mut connect_delay = Duration::from_secs(1);
+            const CONNECT_DELAY_CAP: Duration = Duration::from_secs(30);
+
+            let client = {
+                let mut attempt = 0u32;
+                loop {
+                    match build_disk_client(
+                        server_addr.clone(),
+                        ca_pem.clone(),
+                        client_cert_pem.clone(),
+                        client_key_pem.clone(),
+                        node_id_for_loop.clone(),
+                    )
+                    .await
+                    {
+                        Ok(c) => break c,
+                        Err(e) => {
+                            attempt += 1;
+                            if attempt >= MAX_CONNECT_ATTEMPTS {
+                                tracing::warn!(
+                                    share = %share_name,
+                                    error = %e,
+                                    attempts = attempt,
+                                    "sync-loop: could not connect after {MAX_CONNECT_ATTEMPTS} \
+                                     attempts; share will not sync"
+                                );
+                                let unreachable_snap = build_live_snapshot(
+                                    &share_name,
+                                    share_path.clone(),
+                                    declared_direction,
+                                    LoopState::ServerUnreachable,
+                                    None,
+                                    Some(e.to_string()),
+                                );
+                                state_for_task
+                                    .update_share(&share_name, unreachable_snap)
+                                    .await;
+                                return;
+                            }
+                            tracing::debug!(
+                                share = %share_name,
+                                attempt,
+                                delay_ms = connect_delay.as_millis(),
+                                error = %e,
+                                "sync-loop: connect failed; retrying"
+                            );
+                            // Write server_unreachable during the retry window so
+                            // /status does not stay frozen at idle.
+                            let retrying_snap = build_live_snapshot(
+                                &share_name,
+                                share_path.clone(),
+                                declared_direction,
+                                LoopState::ServerUnreachable,
+                                None,
+                                Some(e.to_string()),
+                            );
+                            state_for_task
+                                .update_share(&share_name, retrying_snap)
+                                .await;
+                            tokio::time::sleep(connect_delay).await;
+                            connect_delay = (connect_delay * 2).min(CONNECT_DELAY_CAP);
+                        }
+                    }
                 }
             };
+
+            // Authenticate with the server so ExchangeState and other
+            // session-gated RPCs succeed.  register_node is idempotent: the
+            // server returns a fresh API key on each call; authenticate() then
+            // exchanges it for a session token stored in the channel-local cache.
+            //
+            // A failure here is non-fatal: the loop proceeds; individual
+            // iterations surface Unauthenticated → TransportUnavailable →
+            // backoff → retry, which is the correct degraded behaviour.
+            let mut client = client; // make mutable so we can set api_key
+            if let Ok(api_key) = client.register_node(&node_id_for_loop, "disk-daemon").await {
+                client.api_key = Some(api_key);
+                match client.authenticate().await {
+                    Ok(_token) => {
+                        tracing::info!(
+                            share = %share_name,
+                            "sync-loop: authenticated with server"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            share = %share_name,
+                            error = %e,
+                            "sync-loop: authenticate() failed; iterations will retry"
+                        );
+                    }
+                }
+            } else {
+                tracing::warn!(
+                    share = %share_name,
+                    "sync-loop: register_node() failed; ExchangeState will be unauthenticated"
+                );
+            }
 
             let mut loop_sm = SyncLoop::new();
             let mut rng = StdRng::from_entropy();
@@ -581,16 +653,20 @@ async fn wait_for_terminate_signal(tx: tokio::sync::oneshot::Sender<()>) {
     let _ = tx.send(());
 }
 
-/// Build a `DiskClient` from explicit TLS material (DISK-0043).
+/// Build a `DiskClient` from explicit TLS material.
 ///
 /// Used by per-share sync-loop tasks spawned in `run_start`.  Returns an
 /// error when cert/key loading fails so the task can log a warning and exit
 /// gracefully rather than panicking.
+///
+/// When both `client_cert_pem` and `client_key_pem` are `Some`, the channel
+/// presents the client certificate during the mTLS handshake.  A partial pair
+/// degrades to one-way TLS (see `ClientConfig` docs).
 async fn build_disk_client(
     endpoint: String,
     ca_pem: Option<Vec<u8>>,
-    _client_cert_pem: Option<Vec<u8>>,
-    _client_key_pem: Option<Vec<u8>>,
+    client_cert_pem: Option<Vec<u8>>,
+    client_key_pem: Option<Vec<u8>>,
     node_id: String,
 ) -> Result<DiskClient> {
     use disk_client::connection::ClientConfig;
@@ -598,6 +674,8 @@ async fn build_disk_client(
     let cfg = ClientConfig {
         endpoint,
         tls_ca_cert_pem: ca_pem,
+        client_cert_pem,
+        client_key_pem,
         node_id,
         api_key: None,
     };
@@ -723,6 +801,8 @@ client_key  = "/b"
         let client = DiskClient::connect_lazy_for_test(ClientConfig {
             endpoint: "https://localhost:9999".into(),
             tls_ca_cert_pem: None,
+            client_cert_pem: None,
+            client_key_pem: None,
             node_id: "arcana-ai".into(),
             api_key: None,
         })
@@ -848,6 +928,8 @@ client_key  = "/b"
         let client = DiskClient::connect_lazy_for_test(ClientConfig {
             endpoint: "https://localhost:9999".into(),
             tls_ca_cert_pem: None,
+            client_cert_pem: None,
+            client_key_pem: None,
             node_id: "n1".into(),
             api_key: None,
         })
