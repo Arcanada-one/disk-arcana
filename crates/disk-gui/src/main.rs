@@ -68,21 +68,26 @@ fn run_macos() {
     .expect("eframe run_native");
 }
 
-/// Decode the embedded PNG into an `egui::IconData` for the Dock/window icon.
+/// Build the embedded Dock/window icon as `egui::IconData`.
 ///
-/// The PNG is extracted from the bundled `.icns` (256×256) and compiled into
-/// the binary so the icon is available regardless of the working directory or
-/// bundle layout. Returns `None` if decoding fails — the caller falls back to
+/// The icon is shipped as a raw 256×256 RGBA blob (`assets/icon-256.rgba`,
+/// row-major, 4 bytes/pixel) compiled into the binary via `include_bytes!`.
+/// Shipping raw RGBA rather than a PNG avoids pulling an image-decoding crate
+/// (and its license/dependency tail) into the build just to draw one icon.
+/// Returns `None` if the blob size is unexpected — the caller falls back to
 /// eframe's default icon rather than aborting startup.
 #[cfg(target_os = "macos")]
 fn load_app_icon() -> Option<eframe::egui::IconData> {
-    const ICON_PNG: &[u8] = include_bytes!("../assets/icon-256.png");
+    const ICON_W: u32 = 256;
+    const ICON_H: u32 = 256;
+    const ICON_RGBA: &[u8] = include_bytes!("../assets/icon-256.rgba");
 
-    let image = image::load_from_memory(ICON_PNG).ok()?.into_rgba8();
-    let (width, height) = image.dimensions();
+    if ICON_RGBA.len() != (ICON_W * ICON_H * 4) as usize {
+        return None;
+    }
     Some(eframe::egui::IconData {
-        rgba: image.into_raw(),
-        width,
-        height,
+        rgba: ICON_RGBA.to_vec(),
+        width: ICON_W,
+        height: ICON_H,
     })
 }

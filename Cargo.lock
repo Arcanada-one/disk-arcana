@@ -1048,7 +1048,6 @@ dependencies = [
  "dirs",
  "disk-client",
  "eframe",
- "image",
  "reqwest",
  "serde",
  "serde_json",
