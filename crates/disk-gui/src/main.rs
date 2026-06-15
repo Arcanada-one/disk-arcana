@@ -42,11 +42,21 @@ fn run_macos() {
         .expect("tokio runtime");
     let handle = rt.handle().clone();
 
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title("Disk Arcana")
+        .with_inner_size([720.0, 480.0])
+        .with_min_inner_size([480.0, 320.0]);
+
+    // Set the runtime Dock/window icon. Without this, eframe falls back to its
+    // built-in default glyph in the Dock even though the bundled `.icns` is
+    // valid — the running process advertises its own icon, which wins while the
+    // app is open. A load failure is non-fatal: we just keep the default.
+    if let Some(icon) = load_app_icon() {
+        viewport = viewport.with_icon(icon);
+    }
+
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("Disk Arcana")
-            .with_inner_size([720.0, 480.0])
-            .with_min_inner_size([480.0, 320.0]),
+        viewport,
         ..Default::default()
     };
 
@@ -56,4 +66,23 @@ fn run_macos() {
         Box::new(move |_cc| Ok(Box::new(gui::DiskGuiApp::new(handle)))),
     )
     .expect("eframe run_native");
+}
+
+/// Decode the embedded PNG into an `egui::IconData` for the Dock/window icon.
+///
+/// The PNG is extracted from the bundled `.icns` (256×256) and compiled into
+/// the binary so the icon is available regardless of the working directory or
+/// bundle layout. Returns `None` if decoding fails — the caller falls back to
+/// eframe's default icon rather than aborting startup.
+#[cfg(target_os = "macos")]
+fn load_app_icon() -> Option<eframe::egui::IconData> {
+    const ICON_PNG: &[u8] = include_bytes!("../assets/icon-256.png");
+
+    let image = image::load_from_memory(ICON_PNG).ok()?.into_rgba8();
+    let (width, height) = image.dimensions();
+    Some(eframe::egui::IconData {
+        rgba: image.into_raw(),
+        width,
+        height,
+    })
 }
