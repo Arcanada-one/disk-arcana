@@ -90,7 +90,23 @@ async fn status_command_prints_daemon_snapshot() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("status-host"), "node id missing: {stdout}");
     assert!(stdout.contains("wiki"), "share name missing: {stdout}");
-    assert!(stdout.contains("idle"), "share state missing: {stdout}");
+    // The share state is now live-written by the sync task.  With a
+    // non-reachable server (host:9443 has no listener) the sync task
+    // immediately transitions to server_unreachable.  Accept any valid
+    // schema state — we are testing the CLI's pretty-print path, not the
+    // specific state value (covered by it_local_e2e_writeback.rs).
+    let valid_states = [
+        "idle",
+        "syncing",
+        "server_unreachable",
+        "unknown_share",
+        "acl_mismatch",
+        "error",
+    ];
+    assert!(
+        valid_states.iter().any(|s| stdout.contains(s)),
+        "share state not in output: {stdout}"
+    );
 
     let pid = daemon.id().expect("child PID") as i32;
     unsafe {

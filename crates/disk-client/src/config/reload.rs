@@ -36,15 +36,27 @@ use crate::watcher::{FsWatcher, WatcherError, DEFAULT_DEBOUNCE_WINDOW};
 /// `current()` clones the inner `Arc<DiskConfig>` — readers hold the lock
 /// only long enough to bump the refcount. A concurrent swap installs a fresh
 /// `Arc`; in-flight readers keep using the old one until they drop it.
+///
+/// A `tokio::sync::watch` channel is wired alongside the `RwLock` so that
+/// the daemon's reconcile task can `await` config changes without polling.
+/// The watch value is a version counter incremented on each successful
+/// `swap`; consumers call `subscribe()` then `watch_rx.changed().await`.
 #[derive(Clone)]
 pub struct ConfigSnapshot {
     inner: Arc<RwLock<Arc<DiskConfig>>>,
+    /// Broadcasts a version tick whenever `swap` commits a new config.
+    change_tx: Arc<tokio::sync::watch::Sender<u64>>,
+    /// Readable by clones — callers call `.subscribe()` to get a receiver.
+    change_rx: Arc<tokio::sync::watch::Receiver<u64>>,
 }
 
 impl ConfigSnapshot {
     pub fn new(initial: Arc<DiskConfig>) -> Self {
+        let (tx, rx) = tokio::sync::watch::channel(0u64);
         Self {
             inner: Arc::new(RwLock::new(initial)),
+            change_tx: Arc::new(tx),
+            change_rx: Arc::new(rx),
         }
     }
 
@@ -58,9 +70,21 @@ impl ConfigSnapshot {
     }
 
     /// Replace the active config. Old `Arc` references stay valid until
-    /// their last holder drops.
+    /// their last holder drops.  Sends a version tick on the watch channel
+    /// so the daemon reconcile task is notified without polling.
     pub fn swap(&self, next: Arc<DiskConfig>) {
         *self.inner.write().expect("ConfigSnapshot lock poisoned") = next;
+        // Increment the version counter.  Receivers awaiting `changed()` are
+        // woken.  Saturating add is safe — a 64-bit counter would require ~585
+        // years of 1-per-nanosecond reloads to overflow.
+        let next_ver = self.change_tx.borrow().saturating_add(1);
+        let _ = self.change_tx.send(next_ver);
+    }
+
+    /// Subscribe to config change notifications.  The returned receiver's
+    /// `changed()` resolves each time `swap` commits a new config.
+    pub fn subscribe(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.change_rx.as_ref().clone()
     }
 }
 
