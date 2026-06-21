@@ -5,10 +5,13 @@
 > Dropbox, iCloud) corrupt code subprojects, embedding stores, and AI agent
 > state.
 
-**Status:** Phase 1 scaffold (`v0.0.1-phase1`). No functional sync yet — the
-crate skeleton, wire format, SQLite schema, and CI gate land here so subsequent
-phases (DISK-0003 sync engine, DISK-0004 transport, ...) build on a stable
-foundation.
+**Status:** Active development — mTLS bidirectional sync is functional (as of
+DISK-0056). The server and client daemons exchange deltas over gRPC with mutual
+TLS (Disk-mesh CA), GPG-signed ACL, and per-node blake3 cert fingerprint
+identity. The production deployment path (Disk-mesh CA provisioning, systemd +
+launchd bring-up, and canon migration) is covered by DISK-0057.
+Earlier phases landed the crate skeleton, wire format, SQLite schema, sync
+engine, conflict resolution, and CI gate that these daemons build on.
 
 ## Architecture
 
@@ -37,12 +40,13 @@ Crates:
 
 | Phase        | Tasks            | Status |
 | ------------ | ---------------- | ------ |
-| Foundation   | DISK-0002        | in-progress (this scaffold) |
-| Core sync    | DISK-0003        | planned |
-| Transport    | DISK-0004        | planned |
-| Server       | DISK-0005        | planned |
-| Client       | DISK-0006        | planned |
-| Conflicts    | DISK-0007        | planned |
+| Foundation   | DISK-0002        | done |
+| Core sync    | DISK-0003        | done |
+| Transport    | DISK-0004        | done |
+| Server       | DISK-0005        | done |
+| Client       | DISK-0006        | done |
+| Conflicts    | DISK-0007        | done |
+| Prod sync    | DISK-0057        | in-progress (config phase done; rollout operator-gated) |
 | v1.0 MVP     | DISK-0008..0014  | planned |
 | v1.5 / SaaS  | DISK-0015..0030  | planned |
 
@@ -58,11 +62,17 @@ cargo build --workspace --all-features
 cargo test  --workspace --all-features
 ```
 
-The Phase 1 binaries are stubs that print their version and exit:
+The daemons are fully functional. Example:
 
 ```sh
-cargo run --bin disk-server
-# disk-server v0.0.1 (Phase 1 stub)
+cargo run --bin disk-arcana-server -- --help
+cargo run --bin disk               -- --help
+```
+
+For a local end-to-end test (self-signed stub CA, no real mTLS cert needed):
+
+```sh
+./scripts/dev-local-e2e.sh
 ```
 
 ## Configuration

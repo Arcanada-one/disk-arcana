@@ -6,7 +6,11 @@
 version: 1
 
 nodes:
-  # Format: { cert_fingerprint: "<sha256hex>", shares: { <share>: <role> } }
+  # Format: { cert_fingerprint: "<blake3-hex of DER-encoded leaf cert>", shares: { <share>: <role> } }
+  # The ACL enforcer hashes the mTLS peer cert DER bytes with blake3, NOT sha256.
+  # Compute: openssl x509 -in <leaf>.crt -outform DER | b3sum --no-names
+  # (Install b3sum: brew install b3sum / cargo install b3sum)
+  # See: crates/disk-server/src/auth/cert_identity.rs and scripts/dev-local-e2e.sh:151-168
   # Roles: bidirectional | receive_only | send_only | publisher
   #
   # Example — operator Mac node:

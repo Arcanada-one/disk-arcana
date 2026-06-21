@@ -63,6 +63,14 @@ SystemCallFilter=@system-service
 SystemCallFilter=~@mount @debug @cpu-emulation @keyring @module @raw-io @reboot @swap @obsolete
 # Explicit writable carve-outs; everything else read-only via ProtectSystem=strict.
 ReadWritePaths=/var/lib/disk-arcana /var/log/disk-arcana
+# DISK-0057 (P5-S4a): DISK_SYNC_ROOT must resolve to a path covered by ReadWritePaths.
+# Default DISK_SYNC_ROOT=/var/lib/disk-arcana/sync — already covered by the entry above.
+# WARNING: If DISK_SYNC_ROOT is changed to a path outside /var/lib/disk-arcana (e.g. to
+# sync a canon datarim/ directory in the operator's home), that path must be appended here
+# OR bind-mounted into /var/lib/disk-arcana/sync before the daemon starts. A sync-root
+# outside ReadWritePaths causes silent write failures under ProtectSystem=strict — no crash,
+# no log entry; the daemon appears healthy but writes are rejected by the kernel namespace.
+# Check before deploy: verify DISK_SYNC_ROOT is under a ReadWritePaths entry.
 # TLS + ACL + GPG are read-only config.
 ReadOnlyPaths=/etc/disk-arcana
 

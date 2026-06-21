@@ -49,8 +49,17 @@
         <string>/var/lib/disk-arcana</string>
     </dict>
 
+    <!-- DISK-0057 (P5-S4b): Mac is single-user; the daemon syncs into the operator's
+         git tree. Running as root creates root-owned files causing excessive git churn
+         (every synced file appears modified due to ownership change). Run as the operator.
+         Replace __OPERATOR_USER__ with the actual login name at install time:
+           sudo sed "s/__OPERATOR_USER__/$(id -un)/g" \
+             /Library/LaunchDaemons/com.arcanada.disk-arcana.plist > /tmp/plist.tmp && \
+           sudo cp /tmp/plist.tmp /Library/LaunchDaemons/com.arcanada.disk-arcana.plist
+         Or use the install script: scripts/install-macos.sh (substitutes automatically).
+         See runbook: documentation/runbooks/disk-arcana-prod-sync.md § P5-R-S4 -->
     <key>UserName</key>
-    <string>root</string>
+    <string>__OPERATOR_USER__</string>
 
     <key>ProcessType</key>
     <string>Background</string>
