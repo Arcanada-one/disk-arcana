@@ -54,6 +54,12 @@ pub enum CaError {
 
     #[error("CA response missing expected field: {0}")]
     ResponseFormat(String),
+
+    /// Returned by `OfflineCaClient` when `DISK_CA_MODE=offline`. Enrollment
+    /// is disabled in offline mode (Approach A-a: leaf certs are pre-provisioned;
+    /// no CA contact at runtime).
+    #[error("enrollment disabled in offline CA mode — leaf certs must be pre-provisioned")]
+    EnrollmentDisabled,
 }
 
 /// Issued certificate returned from the CA.
@@ -203,6 +209,32 @@ impl CaClient for StubCaClient {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Offline implementation — DISK-0058 (Approach A-a)
+// ---------------------------------------------------------------------------
+
+/// No-op CA client for `DISK_CA_MODE=offline`.
+///
+/// When leaf certificates are pre-provisioned offline (Approach A-a), the
+/// server does not contact any CA at runtime. The enrollment endpoint still
+/// exists in the gRPC service definition, but any call to `issue_cert` returns
+/// [`CaError::EnrollmentDisabled`] so the caller gets an explicit error rather
+/// than a timeout or a misrouted HTTP attempt.
+///
+/// The enrollment **public listener** (`:9445`) is not bound at all when
+/// offline mode is active — `main.rs` skips the bind. This client is wired to
+/// the `EnrollmentServiceImpl` on the **mTLS listener** in case any future
+/// admin call is routed there; it returns a clear error instead of silently
+/// hanging.
+pub struct OfflineCaClient;
+
+#[async_trait::async_trait]
+impl CaClient for OfflineCaClient {
+    async fn issue_cert(&self, _csr_pem: &[u8]) -> Result<IssuedCert, CaError> {
+        Err(CaError::EnrollmentDisabled)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,5 +285,32 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, CaError::MissingToken));
+    }
+
+    // --- DISK-0058: offline CA mode ---
+
+    #[tokio::test]
+    async fn offline_client_returns_enrollment_disabled() {
+        // OfflineCaClient must return EnrollmentDisabled on any issue_cert call.
+        // No network call, no token required.
+        let client = OfflineCaClient;
+        let err = client
+            .issue_cert(b"-----BEGIN CSR-----\nfake\n-----END CSR-----")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, CaError::EnrollmentDisabled),
+            "expected EnrollmentDisabled, got {err}"
+        );
+    }
+
+    #[test]
+    fn ca_error_enrollment_disabled_displays_useful_message() {
+        let err = CaError::EnrollmentDisabled;
+        let msg = err.to_string();
+        assert!(
+            msg.contains("offline"),
+            "error message should mention 'offline', got: {msg}"
+        );
     }
 }
