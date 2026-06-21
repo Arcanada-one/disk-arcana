@@ -56,6 +56,10 @@ jobs:
         id: meta
         run: |
           TAG="${GITHUB_REF_NAME:-workflow-dispatch}"
+          # Sanitize ref name for artifact naming: branch refs (e.g.
+          # feat/disk-0058-offline-ca) contain '/', which actions/upload-artifact
+          # rejects. Replace any path separator with '-'.
+          TAG="${TAG//\//-}"
           NAME="${{ env.BINARY_NAME }}-${TAG}-${{ env.BUILD_TARGET }}"
           echo "artifact_name=${NAME}" >> "$GITHUB_OUTPUT"
 
