@@ -175,6 +175,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
     // where certs exist, the task builds its own client; if cert loading fails
     // the task logs a warning and exits (daemon stays alive for REST surface).
     let server_addr = format!("https://{}", cfg.server.address);
+    let server_tls_domain = cfg.server.tls_domain.clone();
     let ca_pem: Option<Vec<u8>> = cfg
         .server
         .server_ca
@@ -195,6 +196,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
             .effective_direction(cfg.node.default.intended_direction)
             .unwrap_or(Direction::Bidirectional);
         let server_addr = server_addr.clone();
+        let server_tls_domain = server_tls_domain.clone();
         let ca_pem = ca_pem.clone();
         let client_cert_pem = client_cert_pem.clone();
         let client_key_pem = client_key_pem.clone();
@@ -223,6 +225,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
                     match build_disk_client(
                         server_addr.clone(),
                         ca_pem.clone(),
+                        server_tls_domain.clone(),
                         client_cert_pem.clone(),
                         client_key_pem.clone(),
                         node_id_for_loop.clone(),
@@ -665,6 +668,7 @@ async fn wait_for_terminate_signal(tx: tokio::sync::oneshot::Sender<()>) {
 async fn build_disk_client(
     endpoint: String,
     ca_pem: Option<Vec<u8>>,
+    tls_domain: Option<String>,
     client_cert_pem: Option<Vec<u8>>,
     client_key_pem: Option<Vec<u8>>,
     node_id: String,
@@ -674,6 +678,7 @@ async fn build_disk_client(
     let cfg = ClientConfig {
         endpoint,
         tls_ca_cert_pem: ca_pem,
+        tls_domain,
         client_cert_pem,
         client_key_pem,
         node_id,
@@ -801,6 +806,7 @@ client_key  = "/b"
         let client = DiskClient::connect_lazy_for_test(ClientConfig {
             endpoint: "https://localhost:9999".into(),
             tls_ca_cert_pem: None,
+            tls_domain: None,
             client_cert_pem: None,
             client_key_pem: None,
             node_id: "arcana-ai".into(),
@@ -928,6 +934,7 @@ client_key  = "/b"
         let client = DiskClient::connect_lazy_for_test(ClientConfig {
             endpoint: "https://localhost:9999".into(),
             tls_ca_cert_pem: None,
+            tls_domain: None,
             client_cert_pem: None,
             client_key_pem: None,
             node_id: "n1".into(),

@@ -27,6 +27,14 @@ pub struct ClientConfig {
     /// PEM-encoded CA certificate for TLS verification.
     /// If `None`, the system trust store is used.
     pub tls_ca_cert_pem: Option<Vec<u8>>,
+    /// Expected server domain for TLS SNI / certificate-name verification.
+    ///
+    /// Set this when `endpoint` is an IP address but the server certificate
+    /// only carries a DNS SAN (e.g. endpoint `https://65.108.236.39:9443`,
+    /// cert SAN `disk.arcanada.ai`).  When `None`, tonic derives the name
+    /// from the endpoint URI host — which fails when the host is an IP and
+    /// the cert has no matching IP SAN (DISK-0060).
+    pub tls_domain: Option<String>,
     /// PEM-encoded client certificate for mTLS.
     /// When combined with `client_key_pem`, the channel presents this
     /// certificate to the server during the TLS handshake.  Both fields
@@ -83,6 +91,13 @@ impl DiskClient {
             let identity = tonic::transport::Identity::from_pem(cert.clone(), key.clone());
             tls_config = tls_config.identity(identity);
         }
+        // Override the TLS server-name used for SNI and cert-name verification.
+        // Required when `endpoint` is an IP address but the server cert only
+        // carries a DNS SAN (DISK-0060).  When `None`, tonic's default
+        // behaviour (derive name from the URI host) is preserved.
+        if let Some(ref domain) = config.tls_domain {
+            tls_config = tls_config.domain_name(domain.clone());
+        }
         endpoint = endpoint.tls_config(tls_config)?;
 
         let channel = endpoint.connect().await?;
@@ -117,6 +132,9 @@ impl DiskClient {
         if let (Some(ref cert), Some(ref key)) = (&config.client_cert_pem, &config.client_key_pem) {
             let identity = tonic::transport::Identity::from_pem(cert.clone(), key.clone());
             tls_config = tls_config.identity(identity);
+        }
+        if let Some(ref domain) = config.tls_domain {
+            tls_config = tls_config.domain_name(domain.clone());
         }
         endpoint = endpoint.tls_config(tls_config)?;
 
@@ -373,6 +391,7 @@ mod tests {
         let cfg = ClientConfig {
             endpoint: "https://localhost:9443".into(),
             tls_ca_cert_pem: None,
+            tls_domain: None,
             client_cert_pem: None,
             client_key_pem: None,
             node_id: "test-node".into(),

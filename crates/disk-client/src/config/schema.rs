@@ -74,6 +74,23 @@ pub struct ServerSection {
     /// Path to server CA PEM bundle (when `tls != "auto"`).
     #[serde(default)]
     pub server_ca: Option<PathBuf>,
+    /// Expected TLS domain (cert SAN) when `address` is an IP address.
+    ///
+    /// When the server endpoint is specified by IP (e.g. `65.108.236.39:9443`)
+    /// but the server certificate only carries a DNS SAN (e.g.
+    /// `disk.arcanada.ai`), TLS name verification fails unless this field
+    /// pins the expected name.  When absent, the host portion of `address`
+    /// is used for name verification — which works when `address` is a DNS
+    /// name that matches the cert SAN (DISK-0060).
+    ///
+    /// Example `disk.toml`:
+    /// ```toml
+    /// [server]
+    /// address = "65.108.236.39:9443"
+    /// tls_domain = "disk.arcanada.ai"
+    /// ```
+    #[serde(default)]
+    pub tls_domain: Option<String>,
 }
 
 fn default_tls_mode() -> String {

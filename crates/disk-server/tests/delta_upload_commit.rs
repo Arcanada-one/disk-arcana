@@ -323,6 +323,7 @@ async fn v_ac_5_pull_server_file_to_client() {
     let client = DiskClient::connect(ClientConfig {
         endpoint: format!("https://localhost:{port}"),
         tls_ca_cert_pem: Some(ca_pem_bytes),
+        tls_domain: None,
         client_cert_pem: None,
         client_key_pem: None,
         node_id: "pull-client".into(),
@@ -339,6 +340,7 @@ async fn v_ac_5_pull_server_file_to_client() {
     let client = DiskClient::connect(ClientConfig {
         endpoint: format!("https://localhost:{port}"),
         tls_ca_cert_pem: Some(cert_pem.as_bytes().to_vec()),
+        tls_domain: None,
         client_cert_pem: None,
         client_key_pem: None,
         node_id: "pull-client".into(),
