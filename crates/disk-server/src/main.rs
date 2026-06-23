@@ -19,8 +19,8 @@ use disk_proto::disk::{
 };
 use disk_server::acl::reload::start_reload_loop;
 use disk_server::audit;
-use disk_server::enrollment::ca_client::{CaClient, HttpCaClient, OfflineCaClient, StubCaClient};
 use disk_server::config::CaMode;
+use disk_server::enrollment::ca_client::{CaClient, HttpCaClient, OfflineCaClient, StubCaClient};
 use disk_server::multi_node;
 use disk_server::{
     AclEnforcer, AuditEmitter, AuthServiceImpl, AuthStore, EnrollmentServiceImpl, GpgVerifier,
