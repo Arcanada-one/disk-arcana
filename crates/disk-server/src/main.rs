@@ -46,6 +46,16 @@ async fn main() -> anyhow::Result<()> {
         "disk-arcana-server starting"
     );
 
+    // DISK-0063: ensure the sync-root exists before any request hits the
+    // SyncService. `path_guard::validate` canonicalizes `self.root`, and
+    // `canonicalize()` on a non-existent directory returns OutsideRoot — which
+    // silently rejects EVERY `delta_upload` with `invalid_argument "path guard"`
+    // on the first chunk. A freshly-provisioned host (DB reprovisioned, sync-root
+    // not yet created) would otherwise have all uploads fail invisibly. Creating
+    // it here (idempotent, mirrors the DB's `create_if_missing`) closes that gap.
+    std::fs::create_dir_all(&cfg.sync_root)
+        .with_context(|| format!("create sync_root at {}", cfg.sync_root.display()))?;
+
     // SQLite pool + migrations from disk-core/migrations/.
     //
     // WAL must be set via SqliteConnectOptions *before* migrations run,

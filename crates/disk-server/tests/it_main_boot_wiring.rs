@@ -229,3 +229,74 @@ async fn boot_wiring_emits_f1_markers_and_shuts_down_clean() {
     drop(fixture);
     let _ = sleep(Duration::from_millis(50)).await;
 }
+
+/// DISK-0063 regression: the server must create `DISK_SYNC_ROOT` at startup.
+///
+/// A freshly-provisioned host (MetaDb reprovisioned, sync-root dir not yet
+/// created) previously had EVERY `delta_upload` silently rejected, because
+/// `path_guard::validate` canonicalizes `self.root` and `canonicalize()` on a
+/// non-existent directory returns `OutsideRoot` → `invalid_argument "path
+/// guard"` on the first chunk. The fix (main.rs `create_dir_all(&cfg.sync_root)`
+/// before wiring the SyncService) means a missing sync-root can no longer break
+/// all uploads invisibly. This test deletes the fixture's sync-root before boot
+/// and asserts the binary recreates it and still reaches the listening state.
+#[tokio::test]
+async fn boot_creates_missing_sync_root() {
+    let fixture = ServerFixture::build();
+
+    // Remove the sync-root the fixture pre-created, to simulate a host where the
+    // dir does not exist yet (the DISK-0063 live scenario).
+    std::fs::remove_dir_all(&fixture.sync_root).expect("remove sync_root");
+    assert!(
+        !fixture.sync_root.exists(),
+        "precondition: sync_root must be absent before boot"
+    );
+
+    let mut cmd = fixture.spawn_server("127.0.0.1:0");
+    let mut child = cmd.spawn().expect("spawn disk-arcana-server");
+
+    let stderr = child.stderr.take().expect("stderr piped");
+    let mut reader = BufReader::new(stderr).lines();
+    let mut collected = String::new();
+
+    let scan = async {
+        while let Ok(Some(line)) = reader.next_line().await {
+            collected.push_str(&line);
+            collected.push('\n');
+            if line.contains("disk-arcana-server listening") {
+                break;
+            }
+        }
+    };
+    let scan_result = timeout(STARTUP_TIMEOUT, scan).await;
+    assert!(
+        scan_result.is_ok(),
+        "server did not reach listening state within {STARTUP_TIMEOUT:?}; collected log:\n{collected}"
+    );
+
+    // The decisive assertion: the binary recreated the sync-root at startup.
+    assert!(
+        fixture.sync_root.is_dir(),
+        "server must create DISK_SYNC_ROOT at startup; dir still absent. log:\n{collected}"
+    );
+
+    // Drain remaining output so the pipe never stalls shutdown.
+    tokio::spawn(async move { while let Ok(Some(_)) = reader.next_line().await {} });
+
+    let pid = child.id().expect("child has pid");
+    // SAFETY: kill(2) on unix; pid is a valid child handle until exit.
+    unsafe {
+        libc::kill(pid as libc::pid_t, libc::SIGTERM);
+    }
+    let exit = timeout(SHUTDOWN_TIMEOUT, child.wait())
+        .await
+        .expect("shutdown timed out")
+        .expect("child wait failed");
+    assert!(
+        exit.success(),
+        "server exited non-zero on SIGTERM: {exit:?}"
+    );
+
+    drop(fixture);
+    let _ = sleep(Duration::from_millis(50)).await;
+}
