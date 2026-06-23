@@ -368,8 +368,9 @@ async fn v_ac_5_pull_server_file_to_client() {
     );
 
     // ── 5. Download the file via DiskClient::download_file ───────────────────
+    // DISK-0062: first argument is the share name (x-disk-share header).
     let downloaded = client
-        .download_file(relative_path)
+        .download_file("default", relative_path)
         .await
         .expect("download_file");
 

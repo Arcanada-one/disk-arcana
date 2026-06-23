@@ -357,7 +357,12 @@ impl DiskClient {
     }
 
     /// Download a file as a stream of `DeltaChunk`s, returning reassembled bytes.
-    pub async fn download_file(&self, path: &str) -> Result<Vec<u8>, ClientError> {
+    ///
+    /// `share` is the share name sent in the `x-disk-share` gRPC metadata header
+    /// so the server's ACL enforcer can route the request to the correct share.
+    /// Mirrors the header pattern used by [`Self::exchange_state`] and
+    /// [`Self::delta_upload`] (DISK-0062).
+    pub async fn download_file(&self, share: &str, path: &str) -> Result<Vec<u8>, ClientError> {
         let token = self.session_token().await?;
         let mut client = SyncServiceClient::new(self.channel.clone());
 
@@ -371,6 +376,14 @@ impl DiskClient {
                 ClientError::MetadataError(e.to_string())
             })?;
         req.metadata_mut().insert("authorization", bearer);
+
+        let share_value: MetadataValue<tonic::metadata::Ascii> =
+            share
+                .parse()
+                .map_err(|e: tonic::metadata::errors::InvalidMetadataValue| {
+                    ClientError::MetadataError(format!("x-disk-share: {e}"))
+                })?;
+        req.metadata_mut().insert("x-disk-share", share_value);
 
         use tokio_stream::StreamExt;
         let mut stream = client.delta_download(req).await?.into_inner();
