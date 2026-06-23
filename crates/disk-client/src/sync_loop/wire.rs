@@ -282,14 +282,48 @@ impl<'a> SyncTransport for RemoteSync<'a> {
 
         // ── Execute actions ─────────────────────────────────────────────
         // Upload: client pushes files the server asked for.
+        //
+        // DISK-0064: a failed upload (read error or transport error) is a
+        // pure no-op — warn and continue.  We must NOT swallow the error
+        // silently: a swallowed failure leaves the server without the file,
+        // and the NEXT cycle's `to_delete` logic (server-directed local
+        // deletion) can then remove the client's own local original.
+        // The local file is the source of truth; a transient upload failure
+        // must never propagate into a local delete on any future cycle.
         if !self.scan_root.as_os_str().is_empty() {
             for to_upload in &response.to_upload {
                 let file_path = self.scan_root.join(&to_upload.path);
-                if let Ok(bytes) = std::fs::read(&file_path) {
-                    let _ = self
-                        .client
-                        .delta_upload(&self.share, &to_upload.path, &bytes)
-                        .await;
+                // DISK-0064: log read failures explicitly rather than
+                // silently skipping them via `if let Ok(...)`.
+                let bytes = match std::fs::read(&file_path) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        tracing::warn!(
+                            path = %to_upload.path,
+                            error = %e,
+                            "upload skipped: cannot read local file"
+                        );
+                        continue;
+                    }
+                };
+                // DISK-0064: explicit match instead of `let _ = ...` so that
+                // a transport error is surfaced as a warning, not swallowed.
+                // A failed upload is a pure no-op; the server never saw the
+                // bytes, so the next cycle will simply request it again.
+                match self
+                    .client
+                    .delta_upload(&self.share, &to_upload.path, &bytes)
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!(
+                            path = %to_upload.path,
+                            error = %e,
+                            "upload failed; skipping"
+                        );
+                        continue;
+                    }
                 }
             }
 
