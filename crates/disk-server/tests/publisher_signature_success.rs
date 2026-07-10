@@ -10,6 +10,13 @@ use disk_server::publisher::{
 };
 use sqlx::SqlitePool;
 
+fn gen_signing_key() -> ed25519_dalek::SigningKey {
+    use rand::RngCore;
+    let mut seed = [0u8; 32];
+    rand::rng().fill_bytes(&mut seed);
+    ed25519_dalek::SigningKey::from_bytes(&seed)
+}
+
 async fn make_pool() -> SqlitePool {
     let pool = SqlitePool::connect(":memory:").await.unwrap();
     sqlx::migrate!("../../crates/disk-core/migrations")
@@ -21,11 +28,10 @@ async fn make_pool() -> SqlitePool {
 
 #[tokio::test]
 async fn valid_signature_succeeds_and_advances_counter() {
-    use ed25519_dalek::{Signer, SigningKey};
-    use rand::rngs::OsRng;
+    use ed25519_dalek::Signer;
 
     let pool = make_pool().await;
-    let key = SigningKey::generate(&mut OsRng);
+    let key = gen_signing_key();
     let verifying_bytes = key.verifying_key().to_bytes();
     let cert_fp = [0xAAu8; 32];
 
@@ -65,11 +71,10 @@ async fn valid_signature_succeeds_and_advances_counter() {
 
 #[tokio::test]
 async fn counter_advances_on_second_valid_upload() {
-    use ed25519_dalek::{Signer, SigningKey};
-    use rand::rngs::OsRng;
+    use ed25519_dalek::Signer;
 
     let pool = make_pool().await;
-    let key = SigningKey::generate(&mut OsRng);
+    let key = gen_signing_key();
     let verifying_bytes = key.verifying_key().to_bytes();
     let cert_fp = [0xDDu8; 32];
 
