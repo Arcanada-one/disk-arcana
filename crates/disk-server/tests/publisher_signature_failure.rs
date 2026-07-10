@@ -37,7 +37,7 @@ async fn make_pool() -> SqlitePool {
 async fn bad_signature_returns_signature_mismatch() {
     let pool = make_pool().await;
 
-    use ed25519_dalek::{Signer, SigningKey};
+    use ed25519_dalek::Signer;
 
     let correct_key = gen_signing_key();
     let wrong_key = gen_signing_key();
@@ -71,7 +71,7 @@ async fn bad_signature_returns_signature_mismatch() {
 async fn replay_counter_returns_replay_detected() {
     let pool = make_pool().await;
 
-    use ed25519_dalek::{Signer, SigningKey};
+    use ed25519_dalek::Signer;
 
     let key = gen_signing_key();
     let verifying_bytes = key.verifying_key().to_bytes();

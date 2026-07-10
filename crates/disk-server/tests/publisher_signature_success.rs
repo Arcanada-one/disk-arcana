@@ -28,7 +28,7 @@ async fn make_pool() -> SqlitePool {
 
 #[tokio::test]
 async fn valid_signature_succeeds_and_advances_counter() {
-    use ed25519_dalek::{Signer, SigningKey};
+    use ed25519_dalek::Signer;
 
     let pool = make_pool().await;
     let key = gen_signing_key();
@@ -71,7 +71,7 @@ async fn valid_signature_succeeds_and_advances_counter() {
 
 #[tokio::test]
 async fn counter_advances_on_second_valid_upload() {
-    use ed25519_dalek::{Signer, SigningKey};
+    use ed25519_dalek::Signer;
 
     let pool = make_pool().await;
     let key = gen_signing_key();
