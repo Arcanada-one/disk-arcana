@@ -23,8 +23,26 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Verify protoc
-        run: protoc --version
+      - name: Ensure protoc is available
+        # Self-hosted runner pool is heterogeneous — some machines lack a
+        # preinstalled protoc, so a bare `protoc --version` check fails with
+        # exit 127 and the whole job dies before it can compile anything
+        # (disk-proto build.rs invokes protoc). Fetch a pinned prebuilt protoc
+        # without root — same pattern as the gitleaks step — when it is
+        # missing; no-op when protoc is already present.
+        run: |
+          set -euo pipefail
+          if command -v protoc >/dev/null 2>&1; then
+            protoc --version
+            exit 0
+          fi
+          PROTOC_VERSION=25.3
+          curl -sSL -o /tmp/protoc.zip \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+          python3 -c "import zipfile; zipfile.ZipFile('/tmp/protoc.zip').extractall('/tmp/protoc')"
+          chmod +x /tmp/protoc/bin/protoc
+          echo "/tmp/protoc/bin" >> "$GITHUB_PATH"
+          /tmp/protoc/bin/protoc --version
       - name: cargo fmt
         run: cargo fmt --all -- --check
       - name: cargo clippy
@@ -77,8 +95,26 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Verify protoc
-        run: protoc --version
+      - name: Ensure protoc is available
+        # Self-hosted runner pool is heterogeneous — some machines lack a
+        # preinstalled protoc, so a bare `protoc --version` check fails with
+        # exit 127 and the whole job dies before it can compile anything
+        # (disk-proto build.rs invokes protoc). Fetch a pinned prebuilt protoc
+        # without root — same pattern as the gitleaks step — when it is
+        # missing; no-op when protoc is already present.
+        run: |
+          set -euo pipefail
+          if command -v protoc >/dev/null 2>&1; then
+            protoc --version
+            exit 0
+          fi
+          PROTOC_VERSION=25.3
+          curl -sSL -o /tmp/protoc.zip \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+          python3 -c "import zipfile; zipfile.ZipFile('/tmp/protoc.zip').extractall('/tmp/protoc')"
+          chmod +x /tmp/protoc/bin/protoc
+          echo "/tmp/protoc/bin" >> "$GITHUB_PATH"
+          /tmp/protoc/bin/protoc --version
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov --locked --quiet
       - name: cargo test
@@ -142,8 +178,26 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      - name: Verify protoc
-        run: protoc --version
+      - name: Ensure protoc is available
+        # Self-hosted runner pool is heterogeneous — some machines lack a
+        # preinstalled protoc, so a bare `protoc --version` check fails with
+        # exit 127 and the whole job dies before it can compile anything
+        # (disk-proto build.rs invokes protoc). Fetch a pinned prebuilt protoc
+        # without root — same pattern as the gitleaks step — when it is
+        # missing; no-op when protoc is already present.
+        run: |
+          set -euo pipefail
+          if command -v protoc >/dev/null 2>&1; then
+            protoc --version
+            exit 0
+          fi
+          PROTOC_VERSION=25.3
+          curl -sSL -o /tmp/protoc.zip \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+          python3 -c "import zipfile; zipfile.ZipFile('/tmp/protoc.zip').extractall('/tmp/protoc')"
+          chmod +x /tmp/protoc/bin/protoc
+          echo "/tmp/protoc/bin" >> "$GITHUB_PATH"
+          /tmp/protoc/bin/protoc --version
       - name: Install cross
         if: matrix.use_cross
         run: cargo install cross --locked
