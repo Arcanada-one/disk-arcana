@@ -95,7 +95,7 @@ impl LoopError {
 ///
 /// Public surface intentionally accepts an explicit RNG so tests can
 /// pin a seeded source — the production sync loop will pass
-/// `rand::thread_rng()` from the caller's context.
+/// `rand::rng()` from the caller's context.
 #[derive(Debug, Clone)]
 pub struct Backoff {
     base: Duration,
@@ -140,7 +140,7 @@ impl Backoff {
         let jitter_scale = if self.jitter == 0.0 {
             1.0
         } else {
-            1.0 + rng.gen_range(-self.jitter..=self.jitter)
+            1.0 + rng.random_range(-self.jitter..=self.jitter)
         };
         // Bound the result so jitter cannot push past the cap.
         let jittered = ((capped as f64) * jitter_scale).max(0.0);

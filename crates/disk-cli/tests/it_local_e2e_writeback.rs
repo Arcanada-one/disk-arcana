@@ -126,8 +126,9 @@ fn make_server_cert(ca_cert: &rcgen::Certificate, ca_key: &KeyPair) -> (String, 
     srv_params
         .extended_key_usages
         .push(ExtendedKeyUsagePurpose::ServerAuth);
+    let issuer = rcgen::Issuer::from_ca_cert_pem(&ca_cert.pem(), ca_key).expect("issuer");
     let srv_cert = srv_params
-        .signed_by(&srv_key, ca_cert, ca_key)
+        .signed_by(&srv_key, &issuer)
         .expect("sign server cert");
     (srv_cert.pem(), srv_key.serialize_pem())
 }
@@ -142,8 +143,9 @@ fn make_node_cert(ca_cert: &rcgen::Certificate, ca_key: &KeyPair) -> (String, St
     params
         .extended_key_usages
         .push(ExtendedKeyUsagePurpose::ClientAuth);
+    let issuer = rcgen::Issuer::from_ca_cert_pem(&ca_cert.pem(), ca_key).expect("issuer");
     let node_cert = params
-        .signed_by(&node_key, ca_cert, ca_key)
+        .signed_by(&node_key, &issuer)
         .expect("sign node cert");
     let cert_der = node_cert.der().to_vec();
     (node_cert.pem(), node_key.serialize_pem(), cert_der)

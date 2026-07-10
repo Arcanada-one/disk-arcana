@@ -180,7 +180,7 @@ mod tests {
 
     fn ephemeral_cert_pair() -> (String, String) {
         let bundle = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
-        (bundle.cert.pem(), bundle.key_pair.serialize_pem())
+        (bundle.cert.pem(), bundle.signing_key.serialize_pem())
     }
 
     #[test]

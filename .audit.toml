@@ -12,6 +12,21 @@ ignore = [
     # Tracked upstream: https://github.com/launchbadge/sqlx/issues/2876
     "RUSTSEC-2023-0071",
 
+    # quick-xml 0.39.4 DoS advisories — RUSTSEC-2026-0194 (quadratic run-time on
+    # duplicate start-tag attributes) and RUSTSEC-2026-0195 (unbounded
+    # namespace-declaration allocation). quick-xml is a build-time-only dep of
+    # wayland-scanner (egui/eframe GUI stack: eframe → egui-winit →
+    # smithay-clipboard → sctk → wayland-scanner), which parses the Wayland
+    # protocol XML files that ship inside the crate — trusted, fixed, local
+    # input, never runtime/user data — so neither DoS vector can fire. Cannot be
+    # bumped to >=0.41 without upgrading the whole egui 0.29 GUI stack
+    # (wayland-scanner pins quick-xml at 0.39). Re-evaluate on the egui bump.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+
+    # RUSTSEC-2026-0204 (crossbeam-epoch invalid-pointer deref) is NOT suppressed
+    # — it was fixed for real by bumping crossbeam-epoch to 0.9.20 in Cargo.lock.
+
     # RUSTSEC-2025-0134 (rustls-pemfile unmaintained) is intentionally NOT
     # suppressed: the tonic 0.13 upgrade removed rustls-pemfile from the
     # dependency tree entirely, so the advisory matches no crate. Re-add a

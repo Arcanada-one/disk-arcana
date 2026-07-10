@@ -26,7 +26,7 @@ impl ApiKey {
     /// Generate a new random API key: `arc_disk_<32-byte base32>`.
     pub fn generate() -> Self {
         let mut raw = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut raw);
+        rand::rng().fill_bytes(&mut raw);
         let encoded = base32::encode(Alphabet::Rfc4648 { padding: false }, &raw);
         ApiKey(format!("arc_disk_{encoded}"))
     }
@@ -78,7 +78,7 @@ impl SessionToken {
     /// Generate a new random session token.
     pub fn generate() -> Self {
         let mut raw = [0u8; 64];
-        rand::thread_rng().fill_bytes(&mut raw);
+        rand::rng().fill_bytes(&mut raw);
         let encoded = base32::encode(Alphabet::Rfc4648 { padding: false }, &raw);
         SessionToken(format!("arc_disk_sess_{encoded}"))
     }
