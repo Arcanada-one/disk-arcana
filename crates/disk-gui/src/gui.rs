@@ -7,7 +7,7 @@
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use disk_client::StatusResponse;
+use disk_client::{ConflictListItem, StatusResponse};
 use eframe::egui;
 use tracing::error;
 
@@ -16,6 +16,14 @@ use disk_gui::{format_status, StatusDisplay};
 
 /// How often the GUI polls the daemon REST endpoint.
 const POLL_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Resolution actions offered by the conflict modal, paired with the
+/// REST `action` string accepted by `POST /conflicts/{path}`.
+const CONFLICT_ACTIONS: &[(&str, &str)] = &[
+    ("Keep Local", "keep-local"),
+    ("Keep Remote", "keep-remote"),
+    ("Keep Both (fork)", "fork-local"),
+];
 
 /// Internal state of the settings panel during editing.
 #[derive(Clone)]
@@ -68,6 +76,16 @@ pub struct DiskGuiApp {
     settings_open: bool,
     /// Editable copy of settings (used while the panel is open).
     settings_edit: Option<SettingsEdit>,
+    /// Whether the conflicts panel is open.
+    conflicts_open: bool,
+    /// Last successfully fetched conflict list.
+    conflicts: Vec<ConflictListItem>,
+    /// Last conflict-fetch error message.
+    conflicts_error: Option<String>,
+    /// Pending async conflicts-list fetch.
+    conflicts_rx: Option<tokio::sync::oneshot::Receiver<Result<Vec<ConflictListItem>>>>,
+    /// Pending async conflict-resolve call: (path, result).
+    resolve_rx: Option<tokio::sync::oneshot::Receiver<(String, Result<()>)>>,
     /// Tokio runtime for spawning async tasks inside the sync eframe callback.
     rt: tokio::runtime::Handle,
 }
@@ -82,7 +100,101 @@ impl DiskGuiApp {
             pending_rx: None,
             settings_open: false,
             settings_edit: None,
+            conflicts_open: false,
+            conflicts: Vec::new(),
+            conflicts_error: None,
+            conflicts_rx: None,
+            resolve_rx: None,
             rt,
+        }
+    }
+
+    /// Kick off an async conflicts-list fetch if none is already in flight.
+    fn refresh_conflicts(&mut self, ctx: &egui::Context) {
+        if self.conflicts_rx.is_some() {
+            return;
+        }
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let host = self.settings.daemon_host.clone();
+        let port = self.settings.daemon_port;
+        let ctx2 = ctx.clone();
+
+        self.rt.spawn(async move {
+            let result = disk_gui::fetch_conflicts(&host, port).await;
+            let _ = tx.send(result);
+            ctx2.request_repaint();
+        });
+
+        self.conflicts_rx = Some(rx);
+    }
+
+    /// Drain the pending conflicts-list fetch, if any result has arrived.
+    fn drain_conflicts(&mut self) {
+        if let Some(rx) = &mut self.conflicts_rx {
+            match rx.try_recv() {
+                Ok(Ok(items)) => {
+                    self.conflicts = items;
+                    self.conflicts_error = None;
+                    self.conflicts_rx = None;
+                }
+                Ok(Err(e)) => {
+                    self.conflicts_error = Some(format!("{e:#}"));
+                    self.conflicts_rx = None;
+                }
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
+                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                    self.conflicts_error = Some("conflicts fetch dropped".to_string());
+                    self.conflicts_rx = None;
+                }
+            }
+        }
+    }
+
+    /// Kick off an async resolve call for `path` with `action`.
+    fn start_resolve_conflict(&mut self, ctx: &egui::Context, path: String, action: &'static str) {
+        if self.resolve_rx.is_some() {
+            // A resolve is already in flight — ignore extra clicks until it lands.
+            return;
+        }
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let host = self.settings.daemon_host.clone();
+        let port = self.settings.daemon_port;
+        let ctx2 = ctx.clone();
+        let path2 = path.clone();
+
+        self.rt.spawn(async move {
+            let result = disk_gui::resolve_conflict(&host, port, &path2, action).await;
+            let _ = tx.send((path2, result));
+            ctx2.request_repaint();
+        });
+
+        self.resolve_rx = Some(rx);
+    }
+
+    /// Drain the pending resolve call, if a result has arrived.
+    ///
+    /// On success, the resolved path is removed from the locally cached
+    /// conflict list immediately (so the UI updates without waiting for the
+    /// next fetch); a full refresh is also kicked off to reconcile state.
+    fn drain_resolve(&mut self, ctx: &egui::Context) {
+        if let Some(rx) = &mut self.resolve_rx {
+            match rx.try_recv() {
+                Ok((path, Ok(()))) => {
+                    self.conflicts.retain(|c| c.path != path);
+                    self.conflicts_error = None;
+                    self.resolve_rx = None;
+                    self.refresh_conflicts(ctx);
+                }
+                Ok((_, Err(e))) => {
+                    self.conflicts_error = Some(format!("{e:#}"));
+                    self.resolve_rx = None;
+                }
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
+                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                    self.conflicts_error = Some("resolve call dropped".to_string());
+                    self.resolve_rx = None;
+                }
+            }
         }
     }
 
@@ -147,6 +259,8 @@ impl eframe::App for DiskGuiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.drain_pending();
         self.maybe_poll(ctx);
+        self.drain_conflicts();
+        self.drain_resolve(ctx);
 
         // Top panel — menu bar.
         egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
@@ -157,6 +271,17 @@ impl eframe::App for DiskGuiApp {
                         self.settings_open = !self.settings_open;
                         if self.settings_open {
                             self.settings_edit = Some(SettingsEdit::from_settings(&self.settings));
+                        }
+                    }
+                    let conflicts_label = if self.conflicts.is_empty() {
+                        "Conflicts".to_string()
+                    } else {
+                        format!("Conflicts ({})", self.conflicts.len())
+                    };
+                    if ui.button(conflicts_label).clicked() {
+                        self.conflicts_open = !self.conflicts_open;
+                        if self.conflicts_open {
+                            self.refresh_conflicts(ctx);
                         }
                     }
                 });
@@ -259,6 +384,53 @@ impl eframe::App for DiskGuiApp {
         if do_cancel {
             self.settings_open = false;
             self.settings_edit = None;
+        }
+
+        // Conflicts modal window.
+        // We collect the requested (path, action) into a local to avoid
+        // mutating `self` while `self.conflicts` is borrowed by the closure.
+        let mut do_resolve: Option<(String, &'static str)> = None;
+        if self.conflicts_open {
+            let mut open = self.conflicts_open;
+            egui::Window::new("Conflicts")
+                .open(&mut open)
+                .resizable(true)
+                .default_width(480.0)
+                .show(ctx, |ui| {
+                    if let Some(err) = &self.conflicts_error {
+                        ui.colored_label(egui::Color32::RED, err);
+                    }
+                    if self.conflicts_rx.is_some() {
+                        ui.label("refreshing…");
+                    }
+                    if self.conflicts.is_empty() && self.conflicts_rx.is_none() {
+                        ui.label("no unresolved conflicts");
+                    } else {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            for item in &self.conflicts {
+                                egui::Frame::group(ui.style()).show(ui, |ui| {
+                                    ui.label(egui::RichText::new(&item.path).strong());
+                                    ui.label(format!("Type: {}", item.conflict_type));
+                                    if let Some(fork) = &item.fork_path {
+                                        ui.label(format!("Fork: {fork}"));
+                                    }
+                                    ui.horizontal(|ui| {
+                                        for (label, action) in CONFLICT_ACTIONS {
+                                            if ui.button(*label).clicked() {
+                                                do_resolve = Some((item.path.clone(), *action));
+                                            }
+                                        }
+                                    });
+                                });
+                                ui.add_space(4.0);
+                            }
+                        });
+                    }
+                });
+            self.conflicts_open = open;
+        }
+        if let Some((path, action)) = do_resolve {
+            self.start_resolve_conflict(ctx, path, action);
         }
 
         // Main central panel.
