@@ -68,6 +68,25 @@ jobs:
       - name: Coverage gate (≥80 % lines, DISK-0032)
         run: cargo llvm-cov --workspace --all-features --fail-under-lines 80
 
+  fuzz-smoke:
+    name: Fuzz smoke (apply_plan, 60s)
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - name: Verify protoc
+        run: protoc --version
+      - name: Install cargo-fuzz
+        run: cargo +nightly install cargo-fuzz --locked --quiet
+      - name: cargo fuzz run apply_plan (bounded smoke run, DISK-0012)
+        # Coverage-guided smoke run, not exhaustive fuzzing — catches panics
+        # in disk-core::delta::apply_plan on every PR without slowing CI down.
+        # Long-running/scheduled deep fuzzing is a separate future workflow.
+        run: cargo +nightly fuzz run apply_plan -- -max_total_time=60
+
   build:
     name: Build (${{ matrix.target }})
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
