@@ -35,7 +35,7 @@ jobs:
     outputs:
       artifact_name: ${{ steps.meta.outputs.artifact_name }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -64,7 +64,7 @@ jobs:
           echo "artifact_name=${NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
           path: target/${{ env.BUILD_TARGET }}/release/${{ env.BINARY_NAME }}
@@ -76,7 +76,7 @@ jobs:
       # failed with `gh: command not found`).
       - name: Attach to GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: target/${{ env.BUILD_TARGET }}/release/${{ env.BINARY_NAME }}
           fail_on_unmatched_files: true
@@ -95,7 +95,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64, arcana-dev]
     environment: dev
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: ${{ needs.build.outputs.artifact_name }}
           path: /tmp/disk-release
@@ -148,7 +148,7 @@ jobs:
     runs-on: [self-hosted, Linux, X64, arcana-prod]
     environment: production
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: ${{ needs.build.outputs.artifact_name }}
           path: /tmp/disk-release

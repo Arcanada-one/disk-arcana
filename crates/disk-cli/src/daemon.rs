@@ -317,7 +317,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
             }
 
             let mut loop_sm = SyncLoop::new();
-            let mut rng = StdRng::from_entropy();
+            let mut rng = StdRng::from_os_rng();
             let mut interval = tokio::time::interval(POLL_INTERVAL);
             // Track last_success_at locally so syncing→idle transitions can
             // advance the timestamp only on a real success.

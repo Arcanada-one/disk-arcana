@@ -346,8 +346,16 @@ fn unix_now_ms() -> u64 {
 mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
-    use rand::rngs::OsRng;
+    use rand::RngCore;
     use std::sync::Arc;
+
+    // rand 0.9's OsRng no longer implements ed25519-dalek 2's rand_core 0.6
+    // `CryptoRngCore`, so generate a seed with rand 0.9 and build the key from it.
+    fn gen_signing_key() -> SigningKey {
+        let mut seed = [0u8; 32];
+        rand::rng().fill_bytes(&mut seed);
+        SigningKey::from_bytes(&seed)
+    }
 
     async fn make_pool() -> SqlitePool {
         let pool = SqlitePool::connect(":memory:").await.unwrap();
@@ -378,7 +386,7 @@ mod tests {
     #[tokio::test]
     async fn verify_happy_path() {
         let pool = make_pool().await;
-        let signing_key = SigningKey::generate(&mut OsRng);
+        let signing_key = gen_signing_key();
         let verifying_bytes = signing_key.verifying_key().to_bytes();
         let cert_fp = [0x01u8; 32];
         let file = FileMetadata {
@@ -408,8 +416,8 @@ mod tests {
     #[tokio::test]
     async fn verify_signature_mismatch() {
         let pool = make_pool().await;
-        let signing_key = SigningKey::generate(&mut OsRng);
-        let wrong_key = SigningKey::generate(&mut OsRng);
+        let signing_key = gen_signing_key();
+        let wrong_key = gen_signing_key();
         let cert_fp = [0x02u8; 32];
         let file = FileMetadata {
             path: "notes/bar.md".into(),
@@ -432,7 +440,7 @@ mod tests {
     #[tokio::test]
     async fn verify_replay_detected() {
         let pool = make_pool().await;
-        let signing_key = SigningKey::generate(&mut OsRng);
+        let signing_key = gen_signing_key();
         let verifying_bytes = signing_key.verifying_key().to_bytes();
         let cert_fp = [0x03u8; 32];
         let file = FileMetadata {
@@ -468,7 +476,7 @@ mod tests {
     #[tokio::test]
     async fn verify_missing_key() {
         let pool = make_pool().await;
-        let signing_key = SigningKey::generate(&mut OsRng);
+        let signing_key = gen_signing_key();
         let cert_fp = [0x04u8; 32];
         let file = FileMetadata {
             path: "notes/x.md".into(),
@@ -493,7 +501,7 @@ mod tests {
     #[tokio::test]
     async fn verify_vault_unreachable() {
         let pool = make_pool().await;
-        let signing_key = SigningKey::generate(&mut OsRng);
+        let signing_key = gen_signing_key();
         let cert_fp = [0x05u8; 32];
         let file = FileMetadata {
             path: "notes/y.md".into(),

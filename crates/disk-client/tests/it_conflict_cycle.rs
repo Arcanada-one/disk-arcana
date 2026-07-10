@@ -137,7 +137,7 @@ async fn spawn_stub(remote_bytes: Vec<u8>) -> Fixture {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind 0");
     let port = listener.local_addr().expect("local_addr").port();
 
-    let CertifiedKey { cert, key_pair } =
+    let CertifiedKey { cert, signing_key: key_pair } =
         generate_simple_self_signed(vec!["localhost".into(), "127.0.0.1".into()]).unwrap();
     let cert_pem = cert.pem();
     let key_pem = key_pair.serialize_pem();
@@ -538,7 +538,7 @@ async fn spawn_two_cycle_stub(
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind 0");
     let port = listener.local_addr().expect("local_addr").port();
 
-    let CertifiedKey { cert, key_pair } =
+    let CertifiedKey { cert, signing_key: key_pair } =
         rcgen::generate_simple_self_signed(vec!["localhost".into(), "127.0.0.1".into()]).unwrap();
     let cert_pem = cert.pem();
     let key_pem = key_pair.serialize_pem();
