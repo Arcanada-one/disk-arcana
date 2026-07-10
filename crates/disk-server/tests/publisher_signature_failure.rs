@@ -17,6 +17,13 @@ use disk_server::publisher::{
 };
 use sqlx::SqlitePool;
 
+fn gen_signing_key() -> ed25519_dalek::SigningKey {
+    use rand::RngCore;
+    let mut seed = [0u8; 32];
+    rand::rng().fill_bytes(&mut seed);
+    ed25519_dalek::SigningKey::from_bytes(&seed)
+}
+
 async fn make_pool() -> SqlitePool {
     let pool = SqlitePool::connect(":memory:").await.unwrap();
     sqlx::migrate!("../../crates/disk-core/migrations")
@@ -31,10 +38,9 @@ async fn bad_signature_returns_signature_mismatch() {
     let pool = make_pool().await;
 
     use ed25519_dalek::{Signer, SigningKey};
-    use rand::rngs::OsRng;
 
-    let correct_key = SigningKey::generate(&mut OsRng);
-    let wrong_key = SigningKey::generate(&mut OsRng);
+    let correct_key = gen_signing_key();
+    let wrong_key = gen_signing_key();
     let verifying_bytes = correct_key.verifying_key().to_bytes();
     let cert_fp = [0xBBu8; 32];
 
@@ -66,9 +72,8 @@ async fn replay_counter_returns_replay_detected() {
     let pool = make_pool().await;
 
     use ed25519_dalek::{Signer, SigningKey};
-    use rand::rngs::OsRng;
 
-    let key = SigningKey::generate(&mut OsRng);
+    let key = gen_signing_key();
     let verifying_bytes = key.verifying_key().to_bytes();
     let cert_fp = [0xCCu8; 32];
 
