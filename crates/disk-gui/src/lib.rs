@@ -18,14 +18,16 @@
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used)]
 
+pub mod conflicts_client;
 pub mod settings;
 pub mod status_client;
 
+pub use conflicts_client::{fetch_conflicts, resolve_conflict};
 pub use settings::GuiSettings;
 pub use status_client::fetch_status;
 
 use anyhow::{Context, Result};
-use disk_client::{StatusResponse, StatusShare};
+use disk_client::{ConflictListItem, StatusResponse, StatusShare};
 
 // Re-export for consumers of this crate.
 pub use disk_client::DEFAULT_PORT;
@@ -106,6 +108,29 @@ fn format_share(s: &StatusShare) -> ShareDisplay {
         last_error: s.last_error.clone(),
         pending_changes: s.pending_local_changes,
     }
+}
+
+/// Human-readable representation of a single unresolved conflict suitable
+/// for UI labels.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConflictDisplay {
+    pub path: String,
+    pub conflict_type: String,
+    pub fork_path: Option<String>,
+    pub created_at: String,
+}
+
+/// Convert daemon-reported conflicts into display-ready strings.
+pub fn format_conflicts(items: &[ConflictListItem]) -> Vec<ConflictDisplay> {
+    items
+        .iter()
+        .map(|c| ConflictDisplay {
+            path: c.path.clone(),
+            conflict_type: c.conflict_type.clone(),
+            fork_path: c.fork_path.clone(),
+            created_at: disk_client::format_iso8601(c.created_at),
+        })
+        .collect()
 }
 
 /// Deserialise a raw JSON string from the daemon's `GET /status` endpoint
@@ -270,5 +295,47 @@ mod tests {
             d.shares[0].last_error.as_deref(),
             Some("connection refused")
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // format_conflicts
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn format_conflicts_empty() {
+        assert!(format_conflicts(&[]).is_empty());
+    }
+
+    #[test]
+    fn format_conflicts_maps_fields_and_formats_timestamp() {
+        let items = vec![ConflictListItem {
+            id: 1,
+            path: "notes/todo.md".to_string(),
+            conflict_type: "Concurrent".to_string(),
+            fork_path: Some("notes/todo.md.sync-conflict-abc".to_string()),
+            created_at: 1_700_000_000,
+        }];
+        let display = format_conflicts(&items);
+        assert_eq!(display.len(), 1);
+        assert_eq!(display[0].path, "notes/todo.md");
+        assert_eq!(display[0].conflict_type, "Concurrent");
+        assert_eq!(
+            display[0].fork_path.as_deref(),
+            Some("notes/todo.md.sync-conflict-abc")
+        );
+        assert_eq!(display[0].created_at, "2023-11-14T22:13:20Z");
+    }
+
+    #[test]
+    fn format_conflicts_no_fork_path() {
+        let items = vec![ConflictListItem {
+            id: 2,
+            path: "a.md".to_string(),
+            conflict_type: "DeleteRemoteModifyLocal".to_string(),
+            fork_path: None,
+            created_at: 0,
+        }];
+        let display = format_conflicts(&items);
+        assert_eq!(display[0].fork_path, None);
     }
 }
