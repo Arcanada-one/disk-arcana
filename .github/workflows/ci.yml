@@ -95,8 +95,26 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: fuzz
-      - name: Verify protoc
-        run: protoc --version
+      - name: Ensure protoc is available
+        # The self-hosted runner pool is heterogeneous: some machines have
+        # protoc pre-installed (the lint/test jobs rely on that), others do not,
+        # so this nightly fuzz job can land on a protoc-less runner and fail at
+        # build time (disk-core -> disk-proto build.rs invokes protoc). Mirror
+        # the gitleaks step below: fetch a pinned prebuilt protoc without root
+        # and put it on PATH. No-op when protoc is already present.
+        run: |
+          set -euo pipefail
+          if command -v protoc >/dev/null 2>&1; then
+            protoc --version
+            exit 0
+          fi
+          PROTOC_VERSION=25.3
+          curl -sSL -o /tmp/protoc.zip \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+          python3 -c "import zipfile; zipfile.ZipFile('/tmp/protoc.zip').extractall('/tmp/protoc')"
+          chmod +x /tmp/protoc/bin/protoc
+          echo "/tmp/protoc/bin" >> "$GITHUB_PATH"
+          /tmp/protoc/bin/protoc --version
       - name: Install cargo-fuzz
         run: cargo +nightly install cargo-fuzz --locked --quiet
       - name: cargo fuzz run apply_plan (bounded smoke run, DISK-0012)
