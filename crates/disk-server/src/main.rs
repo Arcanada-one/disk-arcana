@@ -19,7 +19,8 @@ use disk_proto::disk::{
 };
 use disk_server::acl::reload::start_reload_loop;
 use disk_server::audit;
-use disk_server::enrollment::ca_client::{CaClient, HttpCaClient, StubCaClient};
+use disk_server::config::CaMode;
+use disk_server::enrollment::ca_client::{CaClient, HttpCaClient, OfflineCaClient, StubCaClient};
 use disk_server::multi_node;
 use disk_server::{
     AclEnforcer, AuditEmitter, AuthServiceImpl, AuthStore, EnrollmentServiceImpl, GpgVerifier,
@@ -44,6 +45,16 @@ async fn main() -> anyhow::Result<()> {
         stub_ca = cfg.use_stub_ca,
         "disk-arcana-server starting"
     );
+
+    // DISK-0063: ensure the sync-root exists before any request hits the
+    // SyncService. `path_guard::validate` canonicalizes `self.root`, and
+    // `canonicalize()` on a non-existent directory returns OutsideRoot — which
+    // silently rejects EVERY `delta_upload` with `invalid_argument "path guard"`
+    // on the first chunk. A freshly-provisioned host (DB reprovisioned, sync-root
+    // not yet created) would otherwise have all uploads fail invisibly. Creating
+    // it here (idempotent, mirrors the DB's `create_if_missing`) closes that gap.
+    std::fs::create_dir_all(&cfg.sync_root)
+        .with_context(|| format!("create sync_root at {}", cfg.sync_root.display()))?;
 
     // SQLite pool + migrations from disk-core/migrations/.
     //
@@ -105,18 +116,14 @@ async fn main() -> anyhow::Result<()> {
     let _tombstone_task = multi_node::lifecycle::spawn_tombstone_publisher(pool.clone());
     tracing::info!("tombstone publisher spawned");
 
-    // Enrollment service. Production wires `HttpCaClient::from_env()` (real
-    // CA); `DISK_USE_STUB_CA=1` overrides with `StubCaClient::ok` for
-    // bootstrap deployments where AUTH-0085 is not yet live.
-    let ca: Arc<dyn CaClient> = if cfg.use_stub_ca {
-        tracing::warn!("DISK_USE_STUB_CA=1 — enrollment uses StubCaClient (test-only)");
-        Arc::new(StubCaClient::ok(
-            b"STUB-CERT-PEM\n".to_vec(),
-            b"STUB-CHAIN-PEM\n".to_vec(),
-        ))
-    } else {
-        Arc::new(HttpCaClient::from_env().context("HttpCaClient::from_env")?)
-    };
+    // Enrollment CA client — selected by DISK_CA_MODE (or legacy DISK_USE_STUB_CA).
+    //
+    // - Http (default): real Auth Arcana CA. Requires AUTH_ARCANA_CA_TOKEN.
+    // - Stub: fixed cert pair. Dev/test only (DISK_USE_STUB_CA=1 or DISK_CA_MODE=stub).
+    // - Offline (DISK-0058): Approach A-a — leaf certs pre-provisioned offline.
+    //   OfflineCaClient returns EnrollmentDisabled on any issue_cert call.
+    //   The enrollment public listener is not bound in this mode (see below).
+    let ca: Arc<dyn CaClient> = select_ca_client(&cfg).context("select CA client")?;
     let mut enrollment_impl = EnrollmentServiceImpl::new(pool.clone(), audit_emitter.clone(), ca);
     if let Some(tok) = cfg.admin_token.clone() {
         enrollment_impl = enrollment_impl.with_admin_token(tok);
@@ -199,14 +206,8 @@ async fn main() -> anyhow::Result<()> {
     use tonic::transport::server::TcpIncoming;
     let incoming_mtls = TcpIncoming::bind(cfg.bind_addr)
         .with_context(|| format!("bind mTLS listener on {}", cfg.bind_addr))?;
-    let incoming_public = TcpIncoming::bind(cfg.enrollment_bind_addr)
-        .with_context(|| format!("bind enrollment listener on {}", cfg.enrollment_bind_addr))?;
 
     tracing::info!(addr = %cfg.bind_addr, "disk-arcana-server listening");
-    tracing::info!(
-        addr = %cfg.enrollment_bind_addr,
-        "enrollment public listener listening"
-    );
 
     // Private mTLS listener: auth + sync + enroll, each wrapped in the
     // peer-cert propagation interceptor (DISK-0043 a027937) so the ACL
@@ -222,21 +223,75 @@ async fn main() -> anyhow::Result<()> {
             let _ = rx_mtls.changed().await;
         });
 
-    // Public TLS-only enrollment listener (DISK-0037): cold-boot nodes without
-    // a client cert reach `Enroll` here, gated by opaque-token bearer. No ACL
-    // interceptor — there is no client cert to propagate on this listener.
-    let srv_public = Server::builder()
-        .tls_config(tls_public)
-        .context("apply ServerTlsConfig (public)")?
-        .add_service(enroll_svc_public)
-        .serve_with_incoming_shutdown(incoming_public, async move {
-            let _ = rx_public.changed().await;
-        });
+    if cfg.ca_mode == CaMode::Offline {
+        // Offline CA mode (DISK-0058, Approach A-a): enrollment endpoint is
+        // disabled — leaf certs were pre-provisioned, no runtime CA contact.
+        // The public enrollment listener is NOT bound to reduce attack surface.
+        tracing::info!(
+            "DISK_CA_MODE=offline — enrollment public listener suppressed (Approach A-a)"
+        );
+        // Drop the watch receiver so the channel closes cleanly.
+        drop(rx_public);
+        // Run only the mTLS listener.
+        srv_mtls
+            .await
+            .context("mTLS listener terminated with error")?;
+    } else {
+        // Public TLS-only enrollment listener (DISK-0037): cold-boot nodes without
+        // a client cert reach `Enroll` here, gated by opaque-token bearer. No ACL
+        // interceptor — there is no client cert to propagate on this listener.
+        let incoming_public = TcpIncoming::bind(cfg.enrollment_bind_addr)
+            .with_context(|| format!("bind enrollment listener on {}", cfg.enrollment_bind_addr))?;
+        tracing::info!(
+            addr = %cfg.enrollment_bind_addr,
+            "enrollment public listener listening"
+        );
+        let srv_public = Server::builder()
+            .tls_config(tls_public)
+            .context("apply ServerTlsConfig (public)")?
+            .add_service(enroll_svc_public)
+            .serve_with_incoming_shutdown(incoming_public, async move {
+                let _ = rx_public.changed().await;
+            });
 
-    tokio::try_join!(srv_mtls, srv_public).context("tonic listeners terminated with error")?;
+        tokio::try_join!(srv_mtls, srv_public).context("tonic listeners terminated with error")?;
+    }
 
     tracing::info!("disk-arcana-server shutdown complete");
     Ok(())
+}
+
+/// Select the CA client implementation based on [`ServerConfig::ca_mode`].
+///
+/// - `CaMode::Http`: real Auth Arcana CA — reads `AUTH_ARCANA_CA_TOKEN` from env.
+/// - `CaMode::Stub`: fixed test cert — always succeeds (dev/test only).
+/// - `CaMode::Offline`: no-op — returns `CaError::EnrollmentDisabled` (Approach A-a).
+fn select_ca_client(cfg: &ServerConfig) -> anyhow::Result<Arc<dyn CaClient>> {
+    match cfg.ca_mode {
+        CaMode::Stub => {
+            tracing::warn!(
+                ca_mode = "stub",
+                "enrollment uses StubCaClient (test-only — do not use in production)"
+            );
+            Ok(Arc::new(StubCaClient::ok(
+                b"STUB-CERT-PEM\n".to_vec(),
+                b"STUB-CHAIN-PEM\n".to_vec(),
+            )))
+        }
+        CaMode::Offline => {
+            tracing::info!(
+                ca_mode = "offline",
+                "enrollment disabled — using OfflineCaClient (Approach A-a, DISK-0058)"
+            );
+            Ok(Arc::new(OfflineCaClient))
+        }
+        CaMode::Http => {
+            let client =
+                HttpCaClient::from_env().context("HttpCaClient::from_env (DISK_CA_MODE=http)")?;
+            tracing::info!(ca_mode = "http", "enrollment uses HttpCaClient");
+            Ok(Arc::new(client))
+        }
+    }
 }
 
 /// Choose the ACL signature verifier based on config and start the reload loop.

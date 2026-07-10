@@ -21,7 +21,7 @@ use tempfile::TempDir;
 /// we only need rustls-loadable PEM blocks.
 fn ephemeral_pem() -> (String, String) {
     let bundle = rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).expect("rcgen");
-    (bundle.cert.pem(), bundle.key_pair.serialize_pem())
+    (bundle.cert.pem(), bundle.signing_key.serialize_pem())
 }
 
 fn write_with_mode(dir: &TempDir, name: &str, contents: &str, mode: u32) -> PathBuf {
@@ -62,6 +62,7 @@ fn it_mtls_perms_audit_rejects_world_readable_key() {
         client_cert: cert.clone(),
         client_key: key.clone(),
         server_ca: None,
+        tls_domain: None,
     };
     build_client_tls_config(&server).expect_err("build_client_tls_config must refuse 0644 key");
 }
@@ -84,6 +85,7 @@ fn it_mtls_perms_audit_accepts_owner_only_key() {
         client_cert: cert,
         client_key: key,
         server_ca: None,
+        tls_domain: None,
     };
     let _cfg = build_client_tls_config(&server).expect("build must succeed at 0600");
 }

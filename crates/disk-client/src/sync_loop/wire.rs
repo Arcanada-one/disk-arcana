@@ -282,14 +282,48 @@ impl<'a> SyncTransport for RemoteSync<'a> {
 
         // ── Execute actions ─────────────────────────────────────────────
         // Upload: client pushes files the server asked for.
+        //
+        // DISK-0064: a failed upload (read error or transport error) is a
+        // pure no-op — warn and continue.  We must NOT swallow the error
+        // silently: a swallowed failure leaves the server without the file,
+        // and the NEXT cycle's `to_delete` logic (server-directed local
+        // deletion) can then remove the client's own local original.
+        // The local file is the source of truth; a transient upload failure
+        // must never propagate into a local delete on any future cycle.
         if !self.scan_root.as_os_str().is_empty() {
             for to_upload in &response.to_upload {
                 let file_path = self.scan_root.join(&to_upload.path);
-                if let Ok(bytes) = std::fs::read(&file_path) {
-                    let _ = self
-                        .client
-                        .delta_upload(&self.share, &to_upload.path, &bytes)
-                        .await;
+                // DISK-0064: log read failures explicitly rather than
+                // silently skipping them via `if let Ok(...)`.
+                let bytes = match std::fs::read(&file_path) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        tracing::warn!(
+                            path = %to_upload.path,
+                            error = %e,
+                            "upload skipped: cannot read local file"
+                        );
+                        continue;
+                    }
+                };
+                // DISK-0064: explicit match instead of `let _ = ...` so that
+                // a transport error is surfaced as a warning, not swallowed.
+                // A failed upload is a pure no-op; the server never saw the
+                // bytes, so the next cycle will simply request it again.
+                match self
+                    .client
+                    .delta_upload(&self.share, &to_upload.path, &bytes)
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!(
+                            path = %to_upload.path,
+                            error = %e,
+                            "upload failed; skipping"
+                        );
+                        continue;
+                    }
                 }
             }
 
@@ -299,50 +333,67 @@ impl<'a> SyncTransport for RemoteSync<'a> {
             let mut downloaded_baselines: Vec<disk_core::types::FileMeta> = Vec::new();
 
             for to_download in &response.to_download {
-                if let Ok(bytes) = self.client.download_file(&to_download.path).await {
-                    let dest = self.scan_root.join(&to_download.path);
-                    if let Some(parent) = dest.parent() {
-                        let _ = std::fs::create_dir_all(parent);
+                // DISK-0062: pass `share` so the server ACL enforcer can route
+                // the request correctly.  A failed download is a pure no-op —
+                // do NOT record a baseline or infer a delete from it.
+                let bytes = match self
+                    .client
+                    .download_file(&self.share, &to_download.path)
+                    .await
+                {
+                    Ok(b) => b,
+                    Err(e) => {
+                        tracing::warn!(
+                            path = %to_download.path,
+                            error = %e,
+                            "download failed; skipping"
+                        );
+                        continue;
                     }
-                    let _ = std::fs::write(&dest, &bytes);
+                };
 
-                    // Compute the blake3 hash of the downloaded content.
-                    // This hash serves two purposes:
-                    //   (a) keying the blob cache for future 3-way merges;
-                    //   (b) recording as the new post-sync baseline in
-                    //       node_baselines.
-                    let hash: [u8; 32] = *blake3::hash(&bytes).as_bytes();
-
-                    // Cache bytes by their blake3 hash so that a future cycle
-                    // can retrieve the common-ancestor content for 3-way merge
-                    // without a round-trip to the server.
-                    if let Some(ref cache) = self.blob_cache {
-                        if let Err(e) = cache.put(&hash, &bytes) {
-                            tracing::debug!(
-                                path = %to_download.path,
-                                error = %e,
-                                "blob cache put failed (non-fatal)"
-                            );
-                        }
-                    }
-
-                    // Accumulate a baseline entry for this path.
-                    // mtime_ns, inode, and vector_clock are not available from
-                    // the download payload alone; we leave them at defaults.
-                    // The baseline is keyed only on content_hash for the merge
-                    // path, so these fields are not load-bearing there.
-                    downloaded_baselines.push(disk_core::types::FileMeta {
-                        path: std::path::PathBuf::from(&to_download.path),
-                        content_hash: hash,
-                        size: bytes.len() as u64,
-                        mtime_ns: 0,
-                        inode: None,
-                        vector_clock: disk_core::VectorClock::default(),
-                        deleted: false,
-                        deleted_at: None,
-                        node_id: self.node_id.clone(),
-                    });
+                let dest = self.scan_root.join(&to_download.path);
+                if let Some(parent) = dest.parent() {
+                    let _ = std::fs::create_dir_all(parent);
                 }
+                let _ = std::fs::write(&dest, &bytes);
+
+                // Compute the blake3 hash of the downloaded content.
+                // This hash serves two purposes:
+                //   (a) keying the blob cache for future 3-way merges;
+                //   (b) recording as the new post-sync baseline in
+                //       node_baselines.
+                let hash: [u8; 32] = *blake3::hash(&bytes).as_bytes();
+
+                // Cache bytes by their blake3 hash so that a future cycle
+                // can retrieve the common-ancestor content for 3-way merge
+                // without a round-trip to the server.
+                if let Some(ref cache) = self.blob_cache {
+                    if let Err(e) = cache.put(&hash, &bytes) {
+                        tracing::debug!(
+                            path = %to_download.path,
+                            error = %e,
+                            "blob cache put failed (non-fatal)"
+                        );
+                    }
+                }
+
+                // Accumulate a baseline entry for this path.
+                // mtime_ns, inode, and vector_clock are not available from
+                // the download payload alone; we leave them at defaults.
+                // The baseline is keyed only on content_hash for the merge
+                // path, so these fields are not load-bearing there.
+                downloaded_baselines.push(disk_core::types::FileMeta {
+                    path: std::path::PathBuf::from(&to_download.path),
+                    content_hash: hash,
+                    size: bytes.len() as u64,
+                    mtime_ns: 0,
+                    inode: None,
+                    vector_clock: disk_core::VectorClock::default(),
+                    deleted: false,
+                    deleted_at: None,
+                    node_id: self.node_id.clone(),
+                });
             }
 
             // ── Persist post-cycle baselines ────────────────────
@@ -407,17 +458,19 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                 };
 
                 // Download the remote bytes.
-                let remote_bytes = match self.client.download_file(&conflict.path).await {
-                    Ok(b) => b,
-                    Err(e) => {
-                        tracing::warn!(
-                            path = %conflict.path,
-                            error = %e,
-                            "conflict apply: cannot download remote file, skipping"
-                        );
-                        continue;
-                    }
-                };
+                // DISK-0062: pass `share` for the x-disk-share header.
+                let remote_bytes =
+                    match self.client.download_file(&self.share, &conflict.path).await {
+                        Ok(b) => b,
+                        Err(e) => {
+                            tracing::warn!(
+                                path = %conflict.path,
+                                error = %e,
+                                "conflict apply: cannot download remote file, skipping"
+                            );
+                            continue;
+                        }
+                    };
 
                 // Resolve the base (common-ancestor) bytes from the blob cache.
                 //
@@ -507,6 +560,74 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                                 "conflict apply: failed to persist ConflictRecord (non-fatal)"
                             );
                         }
+                    }
+                }
+            }
+
+            // DISK-0062 S3 — Apply server-directed local deletions.
+            //
+            // `response.to_delete` lists files the server has determined this
+            // client should remove locally (e.g. the server reconciler emitted
+            // a DeleteLocal action after the client's baseline shows the file
+            // as present but the server-authoritative state is a tombstone).
+            //
+            // Trust the server's ACL-filtered response the same way the upload
+            // and download loops do.  For each entry:
+            //   1. Remove the local file (best-effort; missing file is not an error).
+            //   2. Record a tombstone in node_baselines so the NEXT cycle's
+            //      reconciler sees the deletion as acknowledged rather than
+            //      re-emitting to_delete indefinitely.
+            //
+            // Non-fatal: a failure to delete one file is logged and skipped so
+            // that the rest of the sync iteration proceeds.
+            if !response.to_delete.is_empty() {
+                let mut delete_baselines: Vec<disk_core::types::FileMeta> = Vec::new();
+
+                for to_delete in &response.to_delete {
+                    let dest = self.scan_root.join(&to_delete.path);
+                    if dest.exists() {
+                        if let Err(e) = std::fs::remove_file(&dest) {
+                            tracing::warn!(
+                                path = %to_delete.path,
+                                error = %e,
+                                "delete apply: failed to remove local file (non-fatal)"
+                            );
+                            // Skip tombstone so the server keeps sending to_delete
+                            // until we successfully remove the file.
+                            continue;
+                        }
+                    }
+
+                    // Record a tombstone baseline so the next cycle's reconciler
+                    // knows this client acknowledged the deletion.
+                    delete_baselines.push(disk_core::types::FileMeta {
+                        path: std::path::PathBuf::from(&to_delete.path),
+                        content_hash: [0u8; 32],
+                        size: 0,
+                        mtime_ns: 0,
+                        inode: None,
+                        vector_clock: disk_core::VectorClock::default(),
+                        deleted: true,
+                        deleted_at: Some(
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_nanos() as i64,
+                        ),
+                        node_id: self.node_id.clone(),
+                    });
+                }
+
+                if let (Some(db), false) = (&self.meta_db, delete_baselines.is_empty()) {
+                    if let Err(e) = db
+                        .upsert_node_baselines(&self.node_id, &self.share, &delete_baselines)
+                        .await
+                    {
+                        tracing::warn!(
+                            share = %self.share,
+                            error = %e,
+                            "sync: failed to persist delete tombstone baselines (non-fatal)"
+                        );
                     }
                 }
             }

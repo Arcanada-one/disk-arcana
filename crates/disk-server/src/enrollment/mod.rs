@@ -149,7 +149,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
 
         // Generate 32-byte cryptographic random token.
         let mut token = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut token);
+        rand::rng().fill_bytes(&mut token);
         let token_hash = blake3::hash(&token);
 
         sqlx::query(

@@ -27,6 +27,22 @@ pub struct ClientConfig {
     /// PEM-encoded CA certificate for TLS verification.
     /// If `None`, the system trust store is used.
     pub tls_ca_cert_pem: Option<Vec<u8>>,
+    /// Expected server domain for TLS SNI / certificate-name verification.
+    ///
+    /// Set this when `endpoint` is an IP address but the server certificate
+    /// only carries a DNS SAN (e.g. endpoint `https://65.108.236.39:9443`,
+    /// cert SAN `disk.arcanada.ai`).  When `None`, tonic derives the name
+    /// from the endpoint URI host — which fails when the host is an IP and
+    /// the cert has no matching IP SAN (DISK-0060).
+    pub tls_domain: Option<String>,
+    /// PEM-encoded client certificate for mTLS.
+    /// When combined with `client_key_pem`, the channel presents this
+    /// certificate to the server during the TLS handshake.  Both fields
+    /// must be `Some` for the identity to be wired; a partial pair is
+    /// silently ignored (connect still proceeds without a client cert).
+    pub client_cert_pem: Option<Vec<u8>>,
+    /// PEM-encoded private key matching `client_cert_pem`.
+    pub client_key_pem: Option<Vec<u8>>,
     /// Node ID for registration / authentication.
     pub node_id: String,
     /// API key (obtained after `register_node`).
@@ -68,6 +84,20 @@ impl DiskClient {
             let ca_cert = tonic::transport::Certificate::from_pem(ca_pem.clone());
             tls_config = tls_config.ca_certificate(ca_cert);
         }
+        // Wire mTLS client identity when both cert and key are present.
+        // A partial pair (only cert or only key) is silently skipped so
+        // the connection degrades to one-way TLS rather than panicking.
+        if let (Some(ref cert), Some(ref key)) = (&config.client_cert_pem, &config.client_key_pem) {
+            let identity = tonic::transport::Identity::from_pem(cert.clone(), key.clone());
+            tls_config = tls_config.identity(identity);
+        }
+        // Override the TLS server-name used for SNI and cert-name verification.
+        // Required when `endpoint` is an IP address but the server cert only
+        // carries a DNS SAN (DISK-0060).  When `None`, tonic's default
+        // behaviour (derive name from the URI host) is preserved.
+        if let Some(ref domain) = config.tls_domain {
+            tls_config = tls_config.domain_name(domain.clone());
+        }
         endpoint = endpoint.tls_config(tls_config)?;
 
         let channel = endpoint.connect().await?;
@@ -98,6 +128,13 @@ impl DiskClient {
         if let Some(ref ca_pem) = config.tls_ca_cert_pem {
             let ca_cert = tonic::transport::Certificate::from_pem(ca_pem.clone());
             tls_config = tls_config.ca_certificate(ca_cert);
+        }
+        if let (Some(ref cert), Some(ref key)) = (&config.client_cert_pem, &config.client_key_pem) {
+            let identity = tonic::transport::Identity::from_pem(cert.clone(), key.clone());
+            tls_config = tls_config.identity(identity);
+        }
+        if let Some(ref domain) = config.tls_domain {
+            tls_config = tls_config.domain_name(domain.clone());
         }
         endpoint = endpoint.tls_config(tls_config)?;
 
@@ -320,7 +357,12 @@ impl DiskClient {
     }
 
     /// Download a file as a stream of `DeltaChunk`s, returning reassembled bytes.
-    pub async fn download_file(&self, path: &str) -> Result<Vec<u8>, ClientError> {
+    ///
+    /// `share` is the share name sent in the `x-disk-share` gRPC metadata header
+    /// so the server's ACL enforcer can route the request to the correct share.
+    /// Mirrors the header pattern used by [`Self::exchange_state`] and
+    /// [`Self::delta_upload`] (DISK-0062).
+    pub async fn download_file(&self, share: &str, path: &str) -> Result<Vec<u8>, ClientError> {
         let token = self.session_token().await?;
         let mut client = SyncServiceClient::new(self.channel.clone());
 
@@ -334,6 +376,14 @@ impl DiskClient {
                 ClientError::MetadataError(e.to_string())
             })?;
         req.metadata_mut().insert("authorization", bearer);
+
+        let share_value: MetadataValue<tonic::metadata::Ascii> =
+            share
+                .parse()
+                .map_err(|e: tonic::metadata::errors::InvalidMetadataValue| {
+                    ClientError::MetadataError(format!("x-disk-share: {e}"))
+                })?;
+        req.metadata_mut().insert("x-disk-share", share_value);
 
         use tokio_stream::StreamExt;
         let mut stream = client.delta_download(req).await?.into_inner();
@@ -354,6 +404,9 @@ mod tests {
         let cfg = ClientConfig {
             endpoint: "https://localhost:9443".into(),
             tls_ca_cert_pem: None,
+            tls_domain: None,
+            client_cert_pem: None,
+            client_key_pem: None,
             node_id: "test-node".into(),
             api_key: Some("arc_disk_KEY".into()),
         };

@@ -19,7 +19,8 @@
 //! |---|---|
 //! | `OPS_BOT_URL` / `OPS_BOT_KEY` | Forwarder destination. Without `OPS_BOT_KEY` forwarder runs no-op. |
 //! | `DISK_ADMIN_TOKEN` | Override for the admin metadata token (enrollment helpers). |
-//! | `DISK_USE_STUB_CA=1` | Force `StubCaClient` instead of `HttpCaClient::from_env`. Also implies `DISK_ACL_ALLOW_UNSIGNED`. |
+//! | `DISK_CA_MODE` | CA client mode: `http` (default, requires `AUTH_ARCANA_CA_TOKEN`), `stub` (test-only, same as `DISK_USE_STUB_CA=1`), or `offline` (Approach A-a: pre-provisioned leaf certs, enrollment endpoint not used). |
+//! | `DISK_USE_STUB_CA=1` | Legacy alias for `DISK_CA_MODE=stub`. Force `StubCaClient`. Also implies `DISK_ACL_ALLOW_UNSIGNED`. |
 //! | `DISK_ACL_ALLOW_UNSIGNED=1` | Dev/test-only: start with an unsigned ACL (NoopVerifier) when no `DISK_ACL_SIG_PATH` is set, WITHOUT forcing the stub CA. Production MUST leave unset. |
 //! | `DISK_ACL_SIG_PATH` | Path to the detached `.asc` GPG signature for the ACL YAML (production). When absent and neither `DISK_ACL_ALLOW_UNSIGNED` nor `DISK_USE_STUB_CA` is `1`, the binary panics (fail-closed). |
 //! | `DISK_ACL_GNUPGHOME` | Override `GNUPGHOME` for the GPG verifier. |
@@ -27,6 +28,14 @@
 //!
 //! Missing required vars surface as `ConfigError::MissingEnv` so the binary
 //! refuses to start (fail-closed per Appendix A).
+//!
+//! ### `DISK_CA_MODE` values
+//!
+//! | Value | CA client | Enrollment listener |
+//! |---|---|---|
+//! | `http` (default) | `HttpCaClient` — calls Auth Arcana CA endpoint | Bound on `DISK_ENROLLMENT_BIND_ADDR` |
+//! | `stub` | `StubCaClient` — returns fixed test cert | Bound (returns stub cert) |
+//! | `offline` | `OfflineCaClient` — returns `EnrollmentDisabled` error | **Not bound** (Approach A-a: enrollment not needed) |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -40,6 +49,24 @@ pub enum ConfigError {
 
     #[error("invalid value for {0}: {1}")]
     InvalidValue(&'static str, String),
+}
+
+/// CA client selection mode.
+///
+/// Controlled by `DISK_CA_MODE` env var. The legacy `DISK_USE_STUB_CA=1` flag
+/// maps to `Stub` for backward compatibility.
+///
+/// - `Http` (default): `HttpCaClient` — posts CSR to Auth Arcana CA. Requires
+///   `AUTH_ARCANA_CA_TOKEN`. Used when `AUTH-0085` is live.
+/// - `Stub`: `StubCaClient` — returns a fixed cert pair. Dev/test only.
+/// - `Offline`: `OfflineCaClient` — enrollment endpoint disabled. The
+///   enrollment public listener is not bound. Use when leaf certs are
+///   pre-provisioned (Approach A-a, DISK-0058).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CaMode {
+    Http,
+    Stub,
+    Offline,
 }
 
 #[derive(Debug, Clone)]
@@ -62,6 +89,10 @@ pub struct ServerConfig {
     pub ops_bot_url: Option<String>,
     pub admin_token: Option<String>,
     pub use_stub_ca: bool,
+    /// CA client mode. Set by `DISK_CA_MODE` env var. `DISK_USE_STUB_CA=1`
+    /// is a legacy alias that maps to `CaMode::Stub` and additionally implies
+    /// `acl_allow_unsigned`.
+    pub ca_mode: CaMode,
     /// Allow the server to start with an unsigned ACL (NoopVerifier) when no
     /// `DISK_ACL_SIG_PATH` is set. Dev/test-only escape hatch, orthogonal to
     /// the CA client choice: `DISK_ACL_ALLOW_UNSIGNED=1` lets a test exercise
@@ -100,6 +131,31 @@ impl ServerConfig {
                     ConfigError::InvalidValue("DISK_ENROLLMENT_BIND_ADDR", e.to_string())
                 })?;
 
+        // Parse DISK_CA_MODE. DISK_USE_STUB_CA=1 is a legacy alias for `stub`.
+        let use_stub_ca_legacy = std::env::var("DISK_USE_STUB_CA").ok().as_deref() == Some("1");
+        let ca_mode = match std::env::var("DISK_CA_MODE")
+            .ok()
+            .as_deref()
+            .map(str::to_ascii_lowercase)
+            .as_deref()
+        {
+            None | Some("http") => {
+                if use_stub_ca_legacy {
+                    CaMode::Stub
+                } else {
+                    CaMode::Http
+                }
+            }
+            Some("stub") => CaMode::Stub,
+            Some("offline") => CaMode::Offline,
+            Some(other) => {
+                return Err(ConfigError::InvalidValue(
+                    "DISK_CA_MODE",
+                    format!("unknown value '{other}'; expected http, stub, or offline"),
+                ))
+            }
+        };
+
         Ok(Self {
             bind_addr,
             enrollment_bind_addr,
@@ -116,12 +172,13 @@ impl ServerConfig {
             admin_token: std::env::var("DISK_ADMIN_TOKEN")
                 .ok()
                 .filter(|s| !s.is_empty()),
-            use_stub_ca: std::env::var("DISK_USE_STUB_CA").ok().as_deref() == Some("1"),
-            // `use_stub_ca` implies allow-unsigned for backward compatibility
-            // (existing dev harnesses set only DISK_USE_STUB_CA); the dedicated
-            // DISK_ACL_ALLOW_UNSIGNED flag lets a real-CA test skip ACL signing
-            // without forcing the stub CA client.
-            acl_allow_unsigned: std::env::var("DISK_USE_STUB_CA").ok().as_deref() == Some("1")
+            use_stub_ca: ca_mode == CaMode::Stub,
+            ca_mode,
+            // `use_stub_ca` (legacy flag) implies allow-unsigned for backward
+            // compatibility. Explicit DISK_CA_MODE=stub does NOT imply it —
+            // only the legacy DISK_USE_STUB_CA=1 path does.
+            // DISK_CA_MODE=offline does NOT imply allow-unsigned (fail-closed).
+            acl_allow_unsigned: use_stub_ca_legacy
                 || std::env::var("DISK_ACL_ALLOW_UNSIGNED").ok().as_deref() == Some("1"),
         })
     }
@@ -170,6 +227,7 @@ mod tests {
             "DISK_ADMIN_TOKEN",
             "DISK_USE_STUB_CA",
             "DISK_ACL_ALLOW_UNSIGNED",
+            "DISK_CA_MODE",
             "OPS_BOT_URL",
         ] {
             std::env::remove_var(v);
@@ -340,5 +398,73 @@ mod tests {
         std::env::set_var("DISK_ENROLLMENT_BIND_ADDR", "127.0.0.1:7777");
         let cfg = ServerConfig::from_env().unwrap();
         assert_eq!(cfg.enrollment_bind_addr.to_string(), "127.0.0.1:7777");
+    }
+
+    // --- DISK-0058: offline CA mode ---
+
+    #[test]
+    fn ca_mode_default_is_http() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_env();
+        set_required();
+        let cfg = ServerConfig::from_env().unwrap();
+        assert_eq!(cfg.ca_mode, CaMode::Http);
+        // Backward-compat: use_stub_ca stays false when DISK_CA_MODE not set.
+        assert!(!cfg.use_stub_ca);
+    }
+
+    #[test]
+    fn ca_mode_offline_parsed_without_ca_token() {
+        // Core requirement: DISK_CA_MODE=offline must parse successfully even
+        // when AUTH_ARCANA_CA_TOKEN is absent. No panic, no CA token required.
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_env();
+        set_required();
+        std::env::set_var("DISK_CA_MODE", "offline");
+        let cfg = ServerConfig::from_env().unwrap();
+        assert_eq!(cfg.ca_mode, CaMode::Offline);
+        // Offline mode must NOT imply acl_allow_unsigned (fail-closed on ACL).
+        assert!(!cfg.acl_allow_unsigned);
+        // use_stub_ca stays false in offline mode.
+        assert!(!cfg.use_stub_ca);
+    }
+
+    #[test]
+    fn ca_mode_stub_set_by_disk_use_stub_ca() {
+        // Backward compat: DISK_USE_STUB_CA=1 continues to produce CaMode::Stub.
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_env();
+        set_required();
+        std::env::set_var("DISK_USE_STUB_CA", "1");
+        let cfg = ServerConfig::from_env().unwrap();
+        assert_eq!(cfg.ca_mode, CaMode::Stub);
+        assert!(cfg.use_stub_ca);
+        assert!(cfg.acl_allow_unsigned);
+    }
+
+    #[test]
+    fn ca_mode_stub_set_explicitly_by_disk_ca_mode() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_env();
+        set_required();
+        std::env::set_var("DISK_CA_MODE", "stub");
+        let cfg = ServerConfig::from_env().unwrap();
+        assert_eq!(cfg.ca_mode, CaMode::Stub);
+        // Explicit stub via DISK_CA_MODE does NOT imply acl_allow_unsigned
+        // (only DISK_USE_STUB_CA=1 historically implied it).
+        assert!(cfg.use_stub_ca);
+    }
+
+    #[test]
+    fn ca_mode_invalid_value_fails() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_env();
+        set_required();
+        std::env::set_var("DISK_CA_MODE", "bogus");
+        let err = ServerConfig::from_env().unwrap_err();
+        assert!(
+            matches!(err, ConfigError::InvalidValue("DISK_CA_MODE", _)),
+            "expected InvalidValue(DISK_CA_MODE, _), got {err:?}"
+        );
     }
 }

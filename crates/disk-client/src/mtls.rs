@@ -180,7 +180,7 @@ mod tests {
 
     fn ephemeral_cert_pair() -> (String, String) {
         let bundle = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
-        (bundle.cert.pem(), bundle.key_pair.serialize_pem())
+        (bundle.cert.pem(), bundle.signing_key.serialize_pem())
     }
 
     #[test]
@@ -289,6 +289,7 @@ mod tests {
             client_cert: cert,
             client_key: key,
             server_ca: Some(ca),
+            tls_domain: None,
         };
         let _ = build_client_tls_config(&server).expect("must build");
     }
@@ -306,6 +307,7 @@ mod tests {
             client_cert: cert,
             client_key: key,
             server_ca: None,
+            tls_domain: None,
         };
         let _ = build_client_tls_config(&server).expect("must build");
     }

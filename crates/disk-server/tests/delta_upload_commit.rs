@@ -36,8 +36,10 @@ async fn spawn_server_with_meta_db(
 ) -> (u16, AuthStore, String) {
     let store = AuthStore::new();
 
-    let CertifiedKey { cert, key_pair } =
-        generate_simple_self_signed(vec!["localhost".into(), "127.0.0.1".into()]).unwrap();
+    let CertifiedKey {
+        cert,
+        signing_key: key_pair,
+    } = generate_simple_self_signed(vec!["localhost".into(), "127.0.0.1".into()]).unwrap();
     let cert_pem = cert.pem();
     let key_pem = key_pair.serialize_pem();
 
@@ -323,6 +325,9 @@ async fn v_ac_5_pull_server_file_to_client() {
     let client = DiskClient::connect(ClientConfig {
         endpoint: format!("https://localhost:{port}"),
         tls_ca_cert_pem: Some(ca_pem_bytes),
+        tls_domain: None,
+        client_cert_pem: None,
+        client_key_pem: None,
         node_id: "pull-client".into(),
         api_key: None,
     })
@@ -337,6 +342,9 @@ async fn v_ac_5_pull_server_file_to_client() {
     let client = DiskClient::connect(ClientConfig {
         endpoint: format!("https://localhost:{port}"),
         tls_ca_cert_pem: Some(cert_pem.as_bytes().to_vec()),
+        tls_domain: None,
+        client_cert_pem: None,
+        client_key_pem: None,
         node_id: "pull-client".into(),
         api_key: Some(api_key),
     })
@@ -362,8 +370,9 @@ async fn v_ac_5_pull_server_file_to_client() {
     );
 
     // ── 5. Download the file via DiskClient::download_file ───────────────────
+    // DISK-0062: first argument is the share name (x-disk-share header).
     let downloaded = client
-        .download_file(relative_path)
+        .download_file("default", relative_path)
         .await
         .expect("download_file");
 

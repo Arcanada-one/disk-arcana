@@ -70,8 +70,10 @@ impl Respond for CaSigner {
             .as_str()
             .expect("CA POST body must carry csr_pem");
         let csr_params = CertificateSigningRequestParams::from_pem(csr_pem).expect("parse CSR PEM");
+        let issuer = rcgen::Issuer::from_ca_cert_pem(&self.ca_cert.pem(), &self.ca_key)
+            .expect("build issuer");
         let signed = csr_params
-            .signed_by(&self.ca_cert, &self.ca_key)
+            .signed_by(&issuer)
             .expect("sign CSR with test CA");
         ResponseTemplate::new(200).set_body_json(json!({
             "client_cert_pem": signed.pem(),
@@ -113,8 +115,9 @@ fn make_server_cert(ca_cert: &Certificate, ca_key: &KeyPair) -> (String, String)
     srv_params
         .extended_key_usages
         .push(ExtendedKeyUsagePurpose::ClientAuth);
+    let issuer = rcgen::Issuer::from_ca_cert_pem(&ca_cert.pem(), ca_key).expect("build issuer");
     let srv_cert = srv_params
-        .signed_by(&srv_key, ca_cert, ca_key)
+        .signed_by(&srv_key, &issuer)
         .expect("sign server cert");
     (srv_cert.pem(), srv_key.serialize_pem())
 }

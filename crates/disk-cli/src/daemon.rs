@@ -175,6 +175,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
     // where certs exist, the task builds its own client; if cert loading fails
     // the task logs a warning and exits (daemon stays alive for REST surface).
     let server_addr = format!("https://{}", cfg.server.address);
+    let server_tls_domain = cfg.server.tls_domain.clone();
     let ca_pem: Option<Vec<u8>> = cfg
         .server
         .server_ca
@@ -191,7 +192,11 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
     for share in cfg.shares.iter() {
         let share_name = share.name.clone();
         let share_path = share.path.clone();
+        let declared_direction = share
+            .effective_direction(cfg.node.default.intended_direction)
+            .unwrap_or(Direction::Bidirectional);
         let server_addr = server_addr.clone();
+        let server_tls_domain = server_tls_domain.clone();
         let ca_pem = ca_pem.clone();
         let client_cert_pem = client_cert_pem.clone();
         let client_key_pem = client_key_pem.clone();
@@ -199,32 +204,124 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
         let manual_sync_rx = Arc::clone(&manual_sync_rx);
         let meta_db = meta_db.clone();
         let blob_cache = Arc::clone(&blob_cache);
+        // Clone the DaemonState handle into the per-share task so it can
+        // write live loop state back via `update_share`.
+        let state_for_task = state.clone();
 
         let handle = tokio::spawn(async move {
-            // Build a DiskClient if TLS material is available.
-            let client = match build_disk_client(
-                server_addr,
-                ca_pem,
-                client_cert_pem,
-                client_key_pem,
-                node_id_for_loop.clone(),
-            )
-            .await
-            {
-                Ok(c) => c,
-                Err(e) => {
-                    tracing::warn!(
-                        share = %share_name,
-                        error = %e,
-                        "sync-loop: could not build DiskClient; share will not sync"
-                    );
-                    return;
+            // Build a DiskClient with bounded connect-retry.
+            //
+            // A transient connect failure (e.g. server starts after the client
+            // task is spawned) must not abort the sync task — the task retries
+            // with backoff up to MAX_CONNECT_ATTEMPTS before marking the share
+            // server_unreachable.
+            const MAX_CONNECT_ATTEMPTS: u32 = 8;
+            let mut connect_delay = Duration::from_secs(1);
+            const CONNECT_DELAY_CAP: Duration = Duration::from_secs(30);
+
+            let client = {
+                let mut attempt = 0u32;
+                loop {
+                    match build_disk_client(
+                        server_addr.clone(),
+                        ca_pem.clone(),
+                        server_tls_domain.clone(),
+                        client_cert_pem.clone(),
+                        client_key_pem.clone(),
+                        node_id_for_loop.clone(),
+                    )
+                    .await
+                    {
+                        Ok(c) => break c,
+                        Err(e) => {
+                            attempt += 1;
+                            if attempt >= MAX_CONNECT_ATTEMPTS {
+                                tracing::warn!(
+                                    share = %share_name,
+                                    error = %e,
+                                    attempts = attempt,
+                                    "sync-loop: could not connect after {MAX_CONNECT_ATTEMPTS} \
+                                     attempts; share will not sync"
+                                );
+                                let unreachable_snap = build_live_snapshot(
+                                    &share_name,
+                                    share_path.clone(),
+                                    declared_direction,
+                                    LoopState::ServerUnreachable,
+                                    None,
+                                    Some(e.to_string()),
+                                );
+                                state_for_task
+                                    .update_share(&share_name, unreachable_snap)
+                                    .await;
+                                return;
+                            }
+                            tracing::debug!(
+                                share = %share_name,
+                                attempt,
+                                delay_ms = connect_delay.as_millis(),
+                                error = %e,
+                                "sync-loop: connect failed; retrying"
+                            );
+                            // Write server_unreachable during the retry window so
+                            // /status does not stay frozen at idle.
+                            let retrying_snap = build_live_snapshot(
+                                &share_name,
+                                share_path.clone(),
+                                declared_direction,
+                                LoopState::ServerUnreachable,
+                                None,
+                                Some(e.to_string()),
+                            );
+                            state_for_task
+                                .update_share(&share_name, retrying_snap)
+                                .await;
+                            tokio::time::sleep(connect_delay).await;
+                            connect_delay = (connect_delay * 2).min(CONNECT_DELAY_CAP);
+                        }
+                    }
                 }
             };
 
+            // Authenticate with the server so ExchangeState and other
+            // session-gated RPCs succeed.  register_node is idempotent: the
+            // server returns a fresh API key on each call; authenticate() then
+            // exchanges it for a session token stored in the channel-local cache.
+            //
+            // A failure here is non-fatal: the loop proceeds; individual
+            // iterations surface Unauthenticated → TransportUnavailable →
+            // backoff → retry, which is the correct degraded behaviour.
+            let mut client = client; // make mutable so we can set api_key
+            if let Ok(api_key) = client.register_node(&node_id_for_loop, "disk-daemon").await {
+                client.api_key = Some(api_key);
+                match client.authenticate().await {
+                    Ok(_token) => {
+                        tracing::info!(
+                            share = %share_name,
+                            "sync-loop: authenticated with server"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            share = %share_name,
+                            error = %e,
+                            "sync-loop: authenticate() failed; iterations will retry"
+                        );
+                    }
+                }
+            } else {
+                tracing::warn!(
+                    share = %share_name,
+                    "sync-loop: register_node() failed; ExchangeState will be unauthenticated"
+                );
+            }
+
             let mut loop_sm = SyncLoop::new();
-            let mut rng = StdRng::from_entropy();
+            let mut rng = StdRng::from_os_rng();
             let mut interval = tokio::time::interval(POLL_INTERVAL);
+            // Track last_success_at locally so syncing→idle transitions can
+            // advance the timestamp only on a real success.
+            let mut last_success_at: Option<i64> = None;
 
             loop {
                 let trigger = tokio::select! {
@@ -234,6 +331,18 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
                         guard.recv().await
                     } => LoopTrigger::Manual,
                 };
+
+                // Write a syncing snapshot before run_iteration so a fast
+                // iteration still surfaces "syncing" to GET /status callers.
+                let syncing_snap = build_live_snapshot(
+                    &share_name,
+                    share_path.clone(),
+                    declared_direction,
+                    LoopState::Syncing,
+                    last_success_at,
+                    None,
+                );
+                state_for_task.update_share(&share_name, syncing_snap).await;
 
                 // Load per-share baselines from the MetaDb for this cycle.
                 // A fresh load each cycle picks up baselines written in the
@@ -251,9 +360,31 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
                     baselines,
                     meta_db.clone(),
                 );
-                let _ = loop_sm
+                let outcome = loop_sm
                     .run_iteration(&mut transport, trigger, &mut rng)
                     .await;
+
+                // Advance last_success_at only on a real success.
+                if matches!(outcome, Some(Ok(()))) {
+                    last_success_at = Some(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs() as i64,
+                    );
+                }
+
+                // Write the final snapshot (reflects idle/backoff/error state
+                // and the potentially-advanced last_success_at).
+                let final_snap = build_live_snapshot(
+                    &share_name,
+                    share_path.clone(),
+                    declared_direction,
+                    loop_sm.state(),
+                    last_success_at,
+                    loop_sm.last_error().map(|e| e.to_string()),
+                );
+                state_for_task.update_share(&share_name, final_snap).await;
             }
         });
         sync_task_handles.push(handle);
@@ -292,6 +423,44 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
         })
     });
 
+    // ── P2: Config-reload reconcile consumer ─────────────────────────────
+    //
+    // Whenever the ConfigWatcher commits a new config via `snapshot.swap`,
+    // the watch channel fires.  This task picks up the new config's share
+    // list and calls `reconcile_shares` — preserving live sync state for
+    // surviving shares while adding/removing entries to match the new config.
+    //
+    // This is the daemon-side consumer that makes V-AC-4's sub-assertion
+    // work: a reload that adds or removes a share is reflected in `/status`
+    // rather than leaving it frozen at the startup snapshot.
+    let cfg_for_reconcile = cfg.clone();
+    let snapshot_handle = watcher.snapshot.clone();
+    let state_for_reconcile = state.clone();
+    let reconcile_handle = tokio::spawn(async move {
+        let mut change_rx = snapshot_handle.subscribe();
+        // Mark the current value as seen so the first `changed()` fires on
+        // the next actual swap, not immediately.
+        change_rx.mark_unchanged();
+        loop {
+            match change_rx.changed().await {
+                Ok(()) => {
+                    let new_cfg = snapshot_handle.current();
+                    let new_snaps = build_share_snapshots_from_cfg(&new_cfg, &cfg_for_reconcile);
+                    tracing::info!(
+                        share_count = new_snaps.len(),
+                        "daemon: config reloaded — reconciling share list"
+                    );
+                    state_for_reconcile.reconcile_shares(new_snaps).await;
+                }
+                Err(_) => {
+                    // Sender dropped (watcher task exited / aborted).
+                    tracing::debug!("daemon: config-snapshot watch channel closed");
+                    break;
+                }
+            }
+        }
+    });
+
     let shutdown_fut = async move {
         let _ = shutdown_rx.await;
     };
@@ -304,6 +473,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
 
     let _ = signal_task.await;
     watcher.abort();
+    reconcile_handle.abort();
     for h in sync_task_handles {
         h.abort();
     }
@@ -395,6 +565,44 @@ pub(crate) fn build_remote_sync_for_share<'a>(
     }
 }
 
+/// Build idle `ShareSnapshot`s from a config for the reconcile consumer.
+///
+/// The `_old_cfg` parameter is unused at runtime (the new config is
+/// self-contained for direction resolution) but kept for future use.
+fn build_share_snapshots_from_cfg(
+    new_cfg: &DiskConfig,
+    _old_cfg: &DiskConfig,
+) -> Vec<ShareSnapshot> {
+    build_share_snapshots(new_cfg)
+}
+
+/// Build a `ShareSnapshot` with static descriptor fields and the provided
+/// live loop fields. Used by per-share sync tasks to emit `update_share`
+/// calls before and after `run_iteration`.
+///
+/// Byte counters are always 0 — `SyncLoop` exposes no stats API.
+fn build_live_snapshot(
+    name: &str,
+    path: std::path::PathBuf,
+    declared_direction: Direction,
+    state: LoopState,
+    last_success_at: Option<i64>,
+    last_error: Option<String>,
+) -> ShareSnapshot {
+    ShareSnapshot {
+        name: name.to_string(),
+        path: path.display().to_string(),
+        declared_direction,
+        server_confirmed_role: None,
+        state,
+        last_success_at,
+        last_error,
+        bytes_sent_session: 0,
+        bytes_received_session: 0,
+        pending_local_changes: 0,
+    }
+}
+
 fn build_share_snapshots(cfg: &DiskConfig) -> Vec<ShareSnapshot> {
     cfg.shares
         .iter()
@@ -448,16 +656,21 @@ async fn wait_for_terminate_signal(tx: tokio::sync::oneshot::Sender<()>) {
     let _ = tx.send(());
 }
 
-/// Build a `DiskClient` from explicit TLS material (DISK-0043).
+/// Build a `DiskClient` from explicit TLS material.
 ///
 /// Used by per-share sync-loop tasks spawned in `run_start`.  Returns an
 /// error when cert/key loading fails so the task can log a warning and exit
 /// gracefully rather than panicking.
+///
+/// When both `client_cert_pem` and `client_key_pem` are `Some`, the channel
+/// presents the client certificate during the mTLS handshake.  A partial pair
+/// degrades to one-way TLS (see `ClientConfig` docs).
 async fn build_disk_client(
     endpoint: String,
     ca_pem: Option<Vec<u8>>,
-    _client_cert_pem: Option<Vec<u8>>,
-    _client_key_pem: Option<Vec<u8>>,
+    tls_domain: Option<String>,
+    client_cert_pem: Option<Vec<u8>>,
+    client_key_pem: Option<Vec<u8>>,
     node_id: String,
 ) -> Result<DiskClient> {
     use disk_client::connection::ClientConfig;
@@ -465,6 +678,9 @@ async fn build_disk_client(
     let cfg = ClientConfig {
         endpoint,
         tls_ca_cert_pem: ca_pem,
+        tls_domain,
+        client_cert_pem,
+        client_key_pem,
         node_id,
         api_key: None,
     };
@@ -590,6 +806,9 @@ client_key  = "/b"
         let client = DiskClient::connect_lazy_for_test(ClientConfig {
             endpoint: "https://localhost:9999".into(),
             tls_ca_cert_pem: None,
+            tls_domain: None,
+            client_cert_pem: None,
+            client_key_pem: None,
             node_id: "arcana-ai".into(),
             api_key: None,
         })
@@ -715,6 +934,9 @@ client_key  = "/b"
         let client = DiskClient::connect_lazy_for_test(ClientConfig {
             endpoint: "https://localhost:9999".into(),
             tls_ca_cert_pem: None,
+            tls_domain: None,
+            client_cert_pem: None,
+            client_key_pem: None,
             node_id: "n1".into(),
             api_key: None,
         })

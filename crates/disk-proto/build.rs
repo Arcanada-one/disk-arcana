@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Build server + client traits.  Reflection descriptor is emitted only when
     // the `dev-reflect` feature is active (information-disclosure mitigation
     // per DISK-0004 § 6 T-Schema-Disclosure).
-    let mut config = tonic_build::configure()
+    let mut config = tonic_prost_build::configure()
         .build_server(true)
         .build_client(true);
 
