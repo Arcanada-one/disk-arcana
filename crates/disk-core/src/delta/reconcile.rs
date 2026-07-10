@@ -138,13 +138,15 @@ pub fn apply_plan(base: &[u8], plan: &DeltaPlan) -> Result<Vec<u8>, String> {
         match entry {
             DeltaEntry::Hit { server_offset, len } => {
                 let start = *server_offset as usize;
-                let end = start + len;
-                if end > base.len() {
-                    return Err(format!(
-                        "Hit out of bounds: offset={server_offset} len={len} base_len={}",
-                        base.len()
-                    ));
-                }
+                let end = match start.checked_add(*len) {
+                    Some(end) if end <= base.len() => end,
+                    _ => {
+                        return Err(format!(
+                            "Hit out of bounds: offset={server_offset} len={len} base_len={}",
+                            base.len()
+                        ));
+                    }
+                };
                 out.extend_from_slice(&base[start..end]);
             }
             DeltaEntry::Miss { data } => {
@@ -261,6 +263,26 @@ mod tests {
         let plan = build_plan_with_data(&[], &base);
         let reconstructed = apply_plan(&base, &plan).unwrap();
         assert!(reconstructed.is_empty());
+    }
+
+    #[test]
+    fn hit_with_overflowing_offset_len_returns_err_not_panic() {
+        // A malformed/adversarial DeltaEntry::Hit — server_offset near u64::MAX
+        // combined with any positive len overflows `start + len` in
+        // `apply_plan`. This must be rejected with `Err`, not panic: the
+        // reconciler's `apply_plan` docstring promises `Err` for any
+        // out-of-bounds Hit, and this plan shape is exactly what a malicious
+        // or buggy remote sync peer could send once the delta protocol is
+        // wired to the network (disk-server).
+        let base = b"hello world".to_vec();
+        let plan = DeltaPlan {
+            entries: vec![DeltaEntry::Hit {
+                server_offset: u64::MAX - 2,
+                len: 5,
+            }],
+        };
+        let result = apply_plan(&base, &plan);
+        assert!(result.is_err(), "expected Err, got {result:?}");
     }
 
     // -----------------------------------------------------------------------
