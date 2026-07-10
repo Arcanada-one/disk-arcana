@@ -1,0 +1,27 @@
+[package]
+name = "disk-core-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+# Detached from the parent workspace on purpose (DISK-0012): cargo-fuzz
+# targets require nightly + the `arbitrary`/`libfuzzer-sys` toolchain, which
+# the main workspace (pinned to stable in rust-toolchain.toml) does not need.
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+arbitrary = { version = "1", features = ["derive"] }
+libfuzzer-sys = "0.4"
+
+[dependencies.disk-core]
+path = "../crates/disk-core"
+
+[[bin]]
+name = "apply_plan"
+path = "fuzz_targets/apply_plan.rs"
+test = false
+doc = false
+bench = false

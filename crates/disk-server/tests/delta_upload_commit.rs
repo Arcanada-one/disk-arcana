@@ -36,8 +36,10 @@ async fn spawn_server_with_meta_db(
 ) -> (u16, AuthStore, String) {
     let store = AuthStore::new();
 
-    let CertifiedKey { cert, signing_key: key_pair } =
-        generate_simple_self_signed(vec!["localhost".into(), "127.0.0.1".into()]).unwrap();
+    let CertifiedKey {
+        cert,
+        signing_key: key_pair,
+    } = generate_simple_self_signed(vec!["localhost".into(), "127.0.0.1".into()]).unwrap();
     let cert_pem = cert.pem();
     let key_pem = key_pair.serialize_pem();
 
