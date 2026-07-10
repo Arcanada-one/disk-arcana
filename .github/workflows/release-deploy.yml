@@ -64,7 +64,7 @@ jobs:
           echo "artifact_name=${NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
           path: target/${{ env.BUILD_TARGET }}/release/${{ env.BINARY_NAME }}
