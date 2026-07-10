@@ -21,7 +21,7 @@ use tempfile::TempDir;
 /// we only need rustls-loadable PEM blocks.
 fn ephemeral_pem() -> (String, String) {
     let bundle = rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).expect("rcgen");
-    (bundle.cert.pem(), bundle.key_pair.serialize_pem())
+    (bundle.cert.pem(), bundle.signing_key.serialize_pem())
 }
 
 fn write_with_mode(dir: &TempDir, name: &str, contents: &str, mode: u32) -> PathBuf {

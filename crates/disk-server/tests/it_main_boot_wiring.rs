@@ -47,7 +47,7 @@ impl ServerFixture {
         // Self-signed cert used as both server identity and CA root — handshake
         // never runs in this test (no client connects), but ServerTlsConfig
         // validates PEM parsing at boot.
-        let CertifiedKey { cert, key_pair } =
+        let CertifiedKey { cert, signing_key: key_pair } =
             generate_simple_self_signed(vec!["localhost".into(), "127.0.0.1".into()]).unwrap();
         let cert_pem = cert.pem();
         let key_pem = key_pair.serialize_pem();

@@ -34,7 +34,7 @@ fn tls12_client_config(cert_der: &[u8]) -> Arc<ClientConfig> {
 #[test]
 fn server_config_rejects_tls12_client() {
     // Generate a fresh cert.
-    let CertifiedKey { cert, key_pair } =
+    let CertifiedKey { cert, signing_key: key_pair } =
         generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     let cert_pem = cert.pem();
     let key_pem = key_pair.serialize_pem();
