@@ -64,7 +64,7 @@ impl DevSelfSignedProvider {
     /// Generate a self-signed cert and return both the `ServerConfig` and
     /// the DER-encoded certificate bytes (for client pinning in tests).
     pub fn generate() -> Result<(Arc<ServerConfig>, Vec<u8>), TlsError> {
-        let CertifiedKey { cert, key_pair } =
+        let CertifiedKey { cert, signing_key: key_pair } =
             generate_simple_self_signed(vec!["localhost".into(), "127.0.0.1".into()])?;
 
         let cert_der = cert.der().to_vec();
@@ -176,7 +176,7 @@ pub struct DevSelfSignedMtlsProvider {
 impl DevSelfSignedMtlsProvider {
     /// Generate ephemeral server cert + return `(ServerConfig, server_cert_der)`.
     pub fn generate(ca_root_pem: Vec<u8>) -> Result<(Arc<ServerConfig>, Vec<u8>), TlsError> {
-        let rcgen::CertifiedKey { cert, key_pair } =
+        let rcgen::CertifiedKey { cert, signing_key: key_pair } =
             rcgen::generate_simple_self_signed(vec!["localhost".into(), "127.0.0.1".into()])?;
         let cert_der = cert.der().to_vec();
         let key_der = key_pair.serialize_der();
@@ -278,7 +278,7 @@ mod tests {
     fn static_pem_provider_roundtrip() {
         // Generate a cert with rcgen, export to PEM, then load via StaticPemProvider.
         use rcgen::generate_simple_self_signed;
-        let CertifiedKey { cert, key_pair } =
+        let CertifiedKey { cert, signing_key: key_pair } =
             generate_simple_self_signed(vec!["localhost".into()]).unwrap();
         let cert_pem = cert.pem().into_bytes();
         let key_pem = key_pair.serialize_pem().into_bytes();

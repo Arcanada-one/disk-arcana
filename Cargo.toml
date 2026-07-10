@@ -39,7 +39,7 @@ thiserror  = "2"
 anyhow     = "1"
 rustls      = { version = "0.23", default-features = false, features = ["ring", "std"] }
 rustls-acme = { version = "0.12", features = ["tokio"] }
-rcgen       = { version = "0.13", features = ["x509-parser"] }
+rcgen       = { version = "0.14", features = ["x509-parser"] }
 adler32     = "1"
 pem         = "3"
 base32      = "0.5"
