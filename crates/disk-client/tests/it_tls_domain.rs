@@ -105,8 +105,10 @@ async fn spawn_dns_san_only_server() -> Fixture {
     // Generate a cert with ONLY a DNS SAN — no IP SAN.  rcgen 0.13
     // `generate_simple_self_signed` puts each string as a DNS SAN entry.
     // Passing only the domain name guarantees no IP SAN leaks in.
-    let CertifiedKey { cert, signing_key: key_pair } =
-        generate_simple_self_signed(vec!["disk.arcanada.ai".into()]).unwrap();
+    let CertifiedKey {
+        cert,
+        signing_key: key_pair,
+    } = generate_simple_self_signed(vec!["disk.arcanada.ai".into()]).unwrap();
     let cert_pem = cert.pem();
     let key_pem = key_pair.serialize_pem();
     let ca_pem = cert_pem.clone().into_bytes();

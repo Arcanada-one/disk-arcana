@@ -114,8 +114,10 @@ fn mtls_server_rejects_client_without_cert() {
 
 #[test]
 fn mtls_server_config_alpn_is_h2() {
-    let CertifiedKey { cert, signing_key: key_pair } =
-        generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let CertifiedKey {
+        cert,
+        signing_key: key_pair,
+    } = generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     let cert_der = cert.der().to_vec();
     let ca_pem = cert.pem().into_bytes();
     let chain = vec![rustls::pki_types::CertificateDer::from(cert_der)];

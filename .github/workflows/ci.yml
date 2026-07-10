@@ -29,16 +29,34 @@ jobs:
         run: cargo fmt --all -- --check
       - name: cargo clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Install cargo-audit + cargo-deny
+        # Non-Docker install form. The previous EmbarkStudios/cargo-deny-action@v2
+        # and rustsec/audit-check@v2 both ran (or the deny action built) inside a
+        # Docker container; after infra-0308 rehomed CI to a non-root user the
+        # self-hosted runner has no docker.sock access, so the Docker action
+        # failed at "Build container for action" before any lint step ran. The
+        # cargo-installed binaries run natively and honour deny.toml / the ignore
+        # list below.
+        run: |
+          cargo install cargo-audit --locked
+          cargo install cargo-deny --locked
       - name: cargo audit
-        uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          # Rationale lives in .audit.toml at the repo root.
-          ignore: RUSTSEC-2023-0071
-      - name: Install cargo-deny
-        uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check licenses
+        # Advisory suppressions (rationale for each also documented in .audit.toml):
+        #   RUSTSEC-2023-0071  rsa Marvin — only via never-enabled sqlx-mysql.
+        #   RUSTSEC-2026-0194  quick-xml quadratic dup-attr scan (DoS).
+        #   RUSTSEC-2026-0195  quick-xml unbounded namespace-decl alloc (DoS).
+        # quick-xml is a *build-time* dep of wayland-scanner (egui/eframe GUI
+        # stack) that parses the trusted, fixed Wayland protocol XML shipped in
+        # the crate — never runtime/user input — and cannot be bumped to >=0.41
+        # without upgrading the whole egui 0.29 stack. crossbeam-epoch was bumped
+        # to 0.9.20 in Cargo.lock (RUSTSEC-2026-0204, real fix, not suppressed).
+        run: >
+          cargo audit
+          --ignore RUSTSEC-2023-0071
+          --ignore RUSTSEC-2026-0194
+          --ignore RUSTSEC-2026-0195
+      - name: cargo deny check licenses
+        run: cargo deny check licenses
       - name: ACL direction-spoofing lint (P4a Step 10)
         run: bash crates/disk-server/lints/no_branch_on_client_config.sh .
       - name: REST loopback-bind lint (R14)
