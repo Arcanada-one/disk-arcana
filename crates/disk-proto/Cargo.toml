@@ -15,9 +15,10 @@ dev-reflect = ["tonic-reflection"]
 
 [dependencies]
 tonic            = { workspace = true }
+tonic-prost      = { workspace = true }
 prost            = { workspace = true }
 prost-types      = { workspace = true }
-tonic-reflection = { version = "0.13", optional = true }
+tonic-reflection = { version = "0.14", optional = true }
 
 [build-dependencies]
-tonic-build = { workspace = true }
+tonic-prost-build = { workspace = true }
