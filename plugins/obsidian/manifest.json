@@ -1,0 +1,10 @@
+{
+  "id": "disk-arcana",
+  "name": "Disk Arcana",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Status and conflict resolution for the local Disk Arcana daemon.",
+  "author": "Arcanada",
+  "authorUrl": "https://arcanada.ai",
+  "isDesktopOnly": true
+}

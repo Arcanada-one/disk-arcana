@@ -133,16 +133,11 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
     // The file-operation path in the resolve handler also requires
     // `state.vault_root()` to know where the live and fork files reside.
     //
-    // Vault-root single-share assumption: the conflict REST surface uses
-    // the FIRST configured share's path as the vault root.  This matches the
-    // current single-share deployment model.  In a future multi-share REST
-    // surface the conflict record's `vault_id` field should be used to look
-    // up the correct share root; that extension is deferred and documented in
-    // the PRD.  Operators with more than one share who hit a conflict on a
-    // non-first share will get a file-not-found from the REST handler; the
-    // DB marking still succeeds (zero data loss, no panic).
-    let first_share_vault_root: Option<std::path::PathBuf> =
-        cfg.shares.first().map(|s| s.path.clone());
+    let share_roots: std::collections::HashMap<String, std::path::PathBuf> = cfg
+        .shares
+        .iter()
+        .map(|share| (share.name.clone(), share.path.clone()))
+        .collect();
 
     // Take ownership of `state` to chain `with_meta_db` / `with_vault_root`.
     // Both methods consume `Self` and return a new `Self`; the two `set_shares`
@@ -154,8 +149,8 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
     } else {
         state
     };
-    let state = if let Some(root) = first_share_vault_root {
-        state.with_vault_root(root)
+    let state = if !share_roots.is_empty() {
+        state.with_vault_roots(share_roots)
     } else {
         state
     };

@@ -6,8 +6,6 @@ use super::MetaDb;
 use crate::error::MetaDbError;
 use crate::types::ConflictRecord;
 
-const VAULT_DEFAULT: &str = "default";
-
 /// Default TTL for resolved conflicts: 30 days in seconds.
 ///
 /// Pass to [`MetaDb::cleanup_resolved_conflicts`] from the daemon's periodic
@@ -28,7 +26,7 @@ impl MetaDb {
             RETURNING id
             "#,
         )
-        .bind(VAULT_DEFAULT)
+        .bind(&c.vault_id)
         .bind(&c.path)
         .bind(&c.conflict_type)
         .bind(c.local_hash.map(|h| h.to_vec()))
@@ -49,14 +47,13 @@ impl MetaDb {
     pub async fn list_unresolved_conflicts(&self) -> Result<Vec<ConflictRecord>, MetaDbError> {
         let rows = sqlx::query(
             r#"
-            SELECT id, path, conflict_type, local_hash, remote_hash, base_hash,
+            SELECT id, vault_id, path, conflict_type, local_hash, remote_hash, base_hash,
                    resolution, fork_path, resolved, created_at, resolved_at
             FROM conflicts
-            WHERE vault_id = ?1 AND resolved = 0
+            WHERE resolved = 0
             ORDER BY created_at ASC
             "#,
         )
-        .bind(VAULT_DEFAULT)
         .fetch_all(&self.pool)
         .await?;
 
@@ -136,7 +133,7 @@ fn row_to_conflict(row: sqlx::sqlite::SqliteRow) -> Result<ConflictRecord, MetaD
 
     Ok(ConflictRecord {
         id,
-        vault_id: VAULT_DEFAULT.into(),
+        vault_id: row.try_get("vault_id")?,
         path: row.try_get("path")?,
         conflict_type: row.try_get("conflict_type")?,
         local_hash: opt_hash(local_hash)?,
@@ -199,6 +196,24 @@ mod tests {
         assert_eq!(list.len(), 1, "one unresolved conflict expected");
         assert_eq!(list[0].path, "notes/todo.md");
         assert!(!list[0].resolved);
+    }
+
+    #[tokio::test]
+    async fn conflicts_preserve_vault_identity_for_same_path() {
+        let (db, _dir) = open_temp_db().await;
+        let mut wiki = sample_record("notes/todo.md");
+        wiki.vault_id = "wiki".into();
+        let mut docs = sample_record("notes/todo.md");
+        docs.vault_id = "docs".into();
+
+        db.create_conflict(&wiki).await.unwrap();
+        db.create_conflict(&docs).await.unwrap();
+
+        let rows = db.list_unresolved_conflicts().await.unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].vault_id, "wiki");
+        assert_eq!(rows[1].vault_id, "docs");
+        assert_eq!(rows[0].path, rows[1].path);
     }
 
     /// resolve_conflict → row disappears from list_unresolved_conflicts.

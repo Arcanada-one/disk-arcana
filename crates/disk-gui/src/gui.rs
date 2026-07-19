@@ -84,8 +84,8 @@ pub struct DiskGuiApp {
     conflicts_error: Option<String>,
     /// Pending async conflicts-list fetch.
     conflicts_rx: Option<tokio::sync::oneshot::Receiver<Result<Vec<ConflictListItem>>>>,
-    /// Pending async conflict-resolve call: (path, result).
-    resolve_rx: Option<tokio::sync::oneshot::Receiver<(String, Result<()>)>>,
+    /// Pending async conflict-resolve call: ((vault, path), result).
+    resolve_rx: Option<tokio::sync::oneshot::Receiver<((String, String), Result<()>)>>,
     /// Tokio runtime for spawning async tasks inside the sync eframe callback.
     rt: tokio::runtime::Handle,
 }
@@ -151,7 +151,13 @@ impl DiskGuiApp {
     }
 
     /// Kick off an async resolve call for `path` with `action`.
-    fn start_resolve_conflict(&mut self, ctx: &egui::Context, path: String, action: &'static str) {
+    fn start_resolve_conflict(
+        &mut self,
+        ctx: &egui::Context,
+        vault_id: String,
+        path: String,
+        action: &'static str,
+    ) {
         if self.resolve_rx.is_some() {
             // A resolve is already in flight — ignore extra clicks until it lands.
             return;
@@ -160,11 +166,12 @@ impl DiskGuiApp {
         let host = self.settings.daemon_host.clone();
         let port = self.settings.daemon_port;
         let ctx2 = ctx.clone();
+        let vault2 = vault_id.clone();
         let path2 = path.clone();
 
         self.rt.spawn(async move {
-            let result = disk_gui::resolve_conflict(&host, port, &path2, action).await;
-            let _ = tx.send((path2, result));
+            let result = disk_gui::resolve_conflict(&host, port, &vault2, &path2, action).await;
+            let _ = tx.send(((vault2, path2), result));
             ctx2.request_repaint();
         });
 
@@ -179,8 +186,9 @@ impl DiskGuiApp {
     fn drain_resolve(&mut self, ctx: &egui::Context) {
         if let Some(rx) = &mut self.resolve_rx {
             match rx.try_recv() {
-                Ok((path, Ok(()))) => {
-                    self.conflicts.retain(|c| c.path != path);
+                Ok(((vault_id, path), Ok(()))) => {
+                    self.conflicts
+                        .retain(|c| c.vault_id != vault_id || c.path != path);
                     self.conflicts_error = None;
                     self.resolve_rx = None;
                     self.refresh_conflicts(ctx);
@@ -389,7 +397,7 @@ impl eframe::App for DiskGuiApp {
         // Conflicts modal window.
         // We collect the requested (path, action) into a local to avoid
         // mutating `self` while `self.conflicts` is borrowed by the closure.
-        let mut do_resolve: Option<(String, &'static str)> = None;
+        let mut do_resolve: Option<(String, String, &'static str)> = None;
         if self.conflicts_open {
             let mut open = self.conflicts_open;
             egui::Window::new("Conflicts")
@@ -409,7 +417,13 @@ impl eframe::App for DiskGuiApp {
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             for item in &self.conflicts {
                                 egui::Frame::group(ui.style()).show(ui, |ui| {
-                                    ui.label(egui::RichText::new(&item.path).strong());
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{}: {}",
+                                            item.vault_id, item.path
+                                        ))
+                                        .strong(),
+                                    );
                                     ui.label(format!("Type: {}", item.conflict_type));
                                     if let Some(fork) = &item.fork_path {
                                         ui.label(format!("Fork: {fork}"));
@@ -417,7 +431,11 @@ impl eframe::App for DiskGuiApp {
                                     ui.horizontal(|ui| {
                                         for (label, action) in CONFLICT_ACTIONS {
                                             if ui.button(*label).clicked() {
-                                                do_resolve = Some((item.path.clone(), *action));
+                                                do_resolve = Some((
+                                                    item.vault_id.clone(),
+                                                    item.path.clone(),
+                                                    *action,
+                                                ));
                                             }
                                         }
                                     });
@@ -429,8 +447,8 @@ impl eframe::App for DiskGuiApp {
                 });
             self.conflicts_open = open;
         }
-        if let Some((path, action)) = do_resolve {
-            self.start_resolve_conflict(ctx, path, action);
+        if let Some((vault_id, path, action)) = do_resolve {
+            self.start_resolve_conflict(ctx, vault_id, path, action);
         }
 
         // Main central panel.

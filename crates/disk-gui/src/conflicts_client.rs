@@ -27,14 +27,21 @@ pub async fn fetch_conflicts(host: &str, port: u16) -> Result<Vec<ConflictListIt
     parse_conflicts_json(&raw)
 }
 
-/// Resolve a single conflict via `POST http://{host}:{port}/conflicts/{path}`.
+/// Resolve a single conflict via the share-qualified conflict endpoint.
 ///
 /// `path` is the vault-relative conflict path exactly as returned by
 /// [`fetch_conflicts`] (unencoded); it is percent-encoded internally before
 /// being placed in the URL.
-pub async fn resolve_conflict(host: &str, port: u16, path: &str, action: &str) -> Result<()> {
+pub async fn resolve_conflict(
+    host: &str,
+    port: u16,
+    vault_id: &str,
+    path: &str,
+    action: &str,
+) -> Result<()> {
+    let encoded_vault = percent_encode_path(vault_id);
     let encoded = percent_encode_path(path);
-    let url = format!("http://{host}:{port}/conflicts/{encoded}");
+    let url = format!("http://{host}:{port}/conflicts/{encoded_vault}/{encoded}");
     let body = ResolveRequest {
         action: action.to_string(),
     };
@@ -97,6 +104,7 @@ mod tests {
     fn parse_single_conflict() {
         let json = r#"[{
             "id": 1,
+            "vault_id": "wiki",
             "path": "notes/todo.md",
             "conflict_type": "Concurrent",
             "fork_path": "notes/todo.md.sync-conflict-abc",
@@ -104,6 +112,7 @@ mod tests {
         }]"#;
         let items = parse_conflicts_json(json).expect("should parse");
         assert_eq!(items.len(), 1);
+        assert_eq!(items[0].vault_id, "wiki");
         assert_eq!(items[0].path, "notes/todo.md");
         assert_eq!(items[0].conflict_type, "Concurrent");
         assert_eq!(
@@ -116,6 +125,7 @@ mod tests {
     fn parse_conflict_without_fork_path() {
         let json = r#"[{
             "id": 2,
+            "vault_id": "docs",
             "path": "a.md",
             "conflict_type": "DeleteRemoteModifyLocal",
             "fork_path": null,
@@ -133,8 +143,7 @@ mod tests {
     #[test]
     fn parse_missing_required_field_returns_err() {
         // Missing "path" field.
-        let raw =
-            r#"[{"id": 1, "conflict_type": "Concurrent", "fork_path": null, "created_at": 0}]"#;
+        let raw = r#"[{"id": 1, "vault_id": "wiki", "conflict_type": "Concurrent", "fork_path": null, "created_at": 0}]"#;
         assert!(parse_conflicts_json(raw).is_err());
     }
 
