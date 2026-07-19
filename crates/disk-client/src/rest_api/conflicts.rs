@@ -48,6 +48,7 @@ use crate::conflict_writer::{apply_conflict, write_fork};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConflictListItem {
     pub id: i64,
+    pub vault_id: String,
     pub path: String,
     pub conflict_type: String,
     pub fork_path: Option<String>,
@@ -81,6 +82,7 @@ pub async fn get_conflicts(State(state): State<DaemonState>) -> impl IntoRespons
                 .into_iter()
                 .map(|c| ConflictListItem {
                     id: c.id.unwrap_or(0),
+                    vault_id: c.vault_id,
                     path: c.path,
                     conflict_type: c.conflict_type,
                     fork_path: c.fork_path,
@@ -106,6 +108,24 @@ pub async fn post_resolve_conflict(
     AxumPath(raw_path): AxumPath<String>,
     Json(body): Json<ResolveRequest>,
 ) -> impl IntoResponse {
+    resolve_conflict(state, None, raw_path, body).await
+}
+
+/// Share-qualified conflict resolution used by the Obsidian plugin.
+pub async fn post_resolve_qualified_conflict(
+    State(state): State<DaemonState>,
+    AxumPath((vault_id, raw_path)): AxumPath<(String, String)>,
+    Json(body): Json<ResolveRequest>,
+) -> impl IntoResponse {
+    resolve_conflict(state, Some(vault_id), raw_path, body).await
+}
+
+async fn resolve_conflict(
+    state: DaemonState,
+    vault_id: Option<String>,
+    raw_path: String,
+    body: ResolveRequest,
+) -> axum::response::Response {
     // Security: validate the path before touching the database.
     if let Err(e) = validate_conflict_path(&raw_path) {
         return (
@@ -149,7 +169,24 @@ pub async fn post_resolve_conflict(
         }
     };
 
-    let row = conflicts.into_iter().find(|c| c.path == raw_path);
+    let matching: Vec<_> = conflicts
+        .into_iter()
+        .filter(|c| {
+            c.path == raw_path
+                && vault_id
+                    .as_ref()
+                    .map(|expected| &c.vault_id == expected)
+                    .unwrap_or(true)
+        })
+        .collect();
+    if vault_id.is_none() && matching.len() > 1 {
+        return (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({"error": "conflict path is ambiguous across shares; use the share-qualified route"})),
+        )
+            .into_response();
+    }
+    let row = matching.into_iter().next();
     let row = match row {
         Some(r) => r,
         None => {
@@ -172,8 +209,10 @@ pub async fn post_resolve_conflict(
         }
     };
 
-    // Perform the file operation for the requested action, then mark resolved.
-    if let Some(vault_root) = state.vault_root() {
+    // Actions that mutate files require the matching share root. Database-only
+    // actions preserve compatibility with CLI/test callers that attach only a
+    // MetaDb handle.
+    if let Some(vault_root) = state.vault_root_for(&row.vault_id) {
         match perform_file_op(
             vault_root.as_path(),
             &raw_path,
@@ -199,14 +238,18 @@ pub async fn post_resolve_conflict(
                     .into_response();
             }
         }
+    } else if matches!(body.action.as_str(), "keep-remote" | "fork-local" | "merge") {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": format!("storage root unavailable for share '{}'", row.vault_id)})),
+        )
+            .into_response();
     }
-    // When vault_root is absent (e.g. in unit tests without a real filesystem),
-    // skip the file operation but still mark the DB row resolved.
 
     match db.resolve_conflict(id, &body.action).await {
         Ok(()) => (
             StatusCode::OK,
-            Json(serde_json::json!({"resolved": true, "path": raw_path, "action": body.action})),
+            Json(serde_json::json!({"resolved": true, "vault_id": row.vault_id, "path": raw_path, "action": body.action})),
         )
             .into_response(),
         Err(e) => (
@@ -426,6 +469,22 @@ pub async fn get_conflict_diff(
     State(state): State<DaemonState>,
     AxumPath(raw_path): AxumPath<String>,
 ) -> impl IntoResponse {
+    conflict_diff(state, None, raw_path).await
+}
+
+/// Share-qualified diff used by the Obsidian plugin.
+pub async fn get_qualified_conflict_diff(
+    State(state): State<DaemonState>,
+    AxumPath((vault_id, raw_path)): AxumPath<(String, String)>,
+) -> impl IntoResponse {
+    conflict_diff(state, Some(vault_id), raw_path).await
+}
+
+async fn conflict_diff(
+    state: DaemonState,
+    vault_id: Option<String>,
+    raw_path: String,
+) -> axum::response::Response {
     if let Err(e) = validate_conflict_path(&raw_path) {
         return (
             StatusCode::BAD_REQUEST,
@@ -456,7 +515,24 @@ pub async fn get_conflict_diff(
         }
     };
 
-    let row = match conflicts.into_iter().find(|c| c.path == raw_path) {
+    let matching: Vec<_> = conflicts
+        .into_iter()
+        .filter(|c| {
+            c.path == raw_path
+                && vault_id
+                    .as_ref()
+                    .map(|expected| &c.vault_id == expected)
+                    .unwrap_or(true)
+        })
+        .collect();
+    if vault_id.is_none() && matching.len() > 1 {
+        return (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({"error": "conflict path is ambiguous across shares; use the share-qualified route"})),
+        )
+            .into_response();
+    }
+    let row = match matching.into_iter().next() {
         Some(r) => r,
         None => {
             return (
@@ -469,7 +545,7 @@ pub async fn get_conflict_diff(
         }
     };
 
-    let (local_content, fork_content) = if let Some(root) = state.vault_root() {
+    let (local_content, fork_content) = if let Some(root) = state.vault_root_for(&row.vault_id) {
         let live_path = root.join(&raw_path);
         let local = std::fs::read_to_string(&live_path)
             .map_err(|e| format!("cannot read local file '{}': {}", live_path.display(), e));
@@ -490,6 +566,7 @@ pub async fn get_conflict_diff(
     };
 
     let json = serde_json::json!({
+        "vault_id": row.vault_id,
         "path": raw_path,
         "fork_path": row.fork_path,
         "local_content": local_content.as_deref().unwrap_or(""),
@@ -522,7 +599,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = MetaDb::open(&dir.path().join("meta.db")).await.unwrap();
         let (state, _, _) = DaemonState::new("test-node", "v0");
-        let state = state.with_meta_db(db);
+        let state = state
+            .with_meta_db(db)
+            .with_vault_root(dir.path().to_path_buf());
         (state, dir)
     }
 
@@ -608,6 +687,54 @@ mod tests {
         let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
         let items: Vec<ConflictListItem> = serde_json::from_slice(&body).unwrap();
         assert!(items.is_empty(), "conflict must be gone after resolve");
+    }
+
+    #[tokio::test]
+    async fn qualified_resolution_uses_matching_share_root() {
+        let db_dir = tempfile::tempdir().unwrap();
+        let wiki = tempfile::tempdir().unwrap();
+        let docs = tempfile::tempdir().unwrap();
+        let db = MetaDb::open(&db_dir.path().join("meta.db")).await.unwrap();
+        let (state, _, _) = DaemonState::new("test-node", "v0");
+        let roots = std::collections::HashMap::from([
+            ("wiki".to_string(), wiki.path().to_path_buf()),
+            ("docs".to_string(), docs.path().to_path_buf()),
+        ]);
+        let state = state.with_meta_db(db).with_vault_roots(roots);
+
+        for root in [wiki.path(), docs.path()] {
+            std::fs::create_dir_all(root.join("notes")).unwrap();
+            std::fs::write(root.join("notes/todo.md"), b"local").unwrap();
+            std::fs::write(root.join("notes/todo.remote.md"), b"remote").unwrap();
+        }
+
+        let mut rec = sample_conflict_record("notes/todo.md");
+        rec.vault_id = "docs".into();
+        rec.fork_path = Some("notes/todo.remote.md".into());
+        state
+            .meta_db()
+            .unwrap()
+            .create_conflict(&rec)
+            .await
+            .unwrap();
+
+        let app = super::super::router(state);
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/conflicts/docs/notes%2Ftodo.md")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"action":"keep-remote"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            std::fs::read(docs.path().join("notes/todo.md")).unwrap(),
+            b"remote"
+        );
+        assert_eq!(
+            std::fs::read(wiki.path().join("notes/todo.md")).unwrap(),
+            b"local"
+        );
     }
 
     /// `POST /conflicts/{path}` returns 409 + `{"resolved":false,...}`
