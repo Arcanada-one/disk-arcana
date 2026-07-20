@@ -32,6 +32,9 @@ jobs:
         run: cargo test --workspace --all-features --target ${{ matrix.target }}
       - name: Build
         run: cargo build --workspace --release --target ${{ matrix.target }}
+      - name: Windows smoke (no admin)
+        shell: pwsh
+        run: ./scripts/test-windows-smoke.ps1 -Binary target/${{ matrix.target }}/release/disk.exe
       - name: Bundle portable zip
         shell: pwsh
         run: |

@@ -82,6 +82,49 @@ jobs:
           fail_on_unmatched_files: true
 
   # ──────────────────────────────────────────────────────────────────────────
+  # 1b. Build Windows client portable zip on tag push (GitHub-hosted).
+  #     Server binary stays Linux/self-hosted above; this job ships disk.exe.
+  # ──────────────────────────────────────────────────────────────────────────
+  build-windows-client:
+    name: Build Windows client (portable zip)
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: x86_64-pc-windows-msvc
+
+      - name: Install protoc
+        shell: pwsh
+        run: |
+          if (-not (Get-Command protoc -ErrorAction SilentlyContinue)) {
+            choco install protoc -y --no-progress
+          }
+
+      - name: Build disk CLI release
+        run: cargo build --release -p disk-cli --target x86_64-pc-windows-msvc
+
+      - name: Smoke test
+        shell: pwsh
+        run: ./scripts/test-windows-smoke.ps1 -Binary target/x86_64-pc-windows-msvc/release/disk.exe
+
+      - name: Bundle portable zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $ver = "${{ github.ref_name }}"
+          ./scripts/bundle-windows.ps1 -Binary target/x86_64-pc-windows-msvc/release/disk.exe -OutDir dist -Version $ver
+
+      - name: Attach Windows zip to GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/disk-arcana-windows-x86_64.zip
+          fail_on_unmatched_files: true
+
+  # ──────────────────────────────────────────────────────────────────────────
   # 2. Deploy to arcana-dev — explicit workflow_dispatch target=dev ONLY.
   #    A tag push builds + attaches the release artifact but does NOT auto-deploy
   #    anywhere: deploys (dev or prod) are always an explicit operator action so
