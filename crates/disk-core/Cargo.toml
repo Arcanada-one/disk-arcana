@@ -32,3 +32,8 @@ file-id     = "0.2"
 [dev-dependencies]
 tempfile = "3"
 proptest = { workspace = true }
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "hardening"
+harness = false

@@ -15,13 +15,39 @@ cargo-fuzz = true
 [dependencies]
 arbitrary = { version = "1", features = ["derive"] }
 libfuzzer-sys = "0.4"
+prost = "0.14"
+tempfile = "3"
 
 [dependencies.disk-core]
 path = "../crates/disk-core"
 
+[dependencies.disk-proto]
+path = "../crates/disk-proto"
+
 [[bin]]
 name = "apply_plan"
 path = "fuzz_targets/apply_plan.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "path_validate"
+path = "fuzz_targets/path_validate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "proto_decode"
+path = "fuzz_targets/proto_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "reconcile"
+path = "fuzz_targets/reconcile.rs"
 test = false
 doc = false
 bench = false
