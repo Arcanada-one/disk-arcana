@@ -695,6 +695,7 @@ mod tests {
     use super::*;
     use std::str::FromStr;
 
+    #[cfg(not(windows))]
     const MINIMAL: &str = r#"
 [node]
 id = "arcana-ai"
@@ -711,6 +712,21 @@ name = "wiki"
 path = "/data/wiki"
 "#;
 
+    #[cfg(windows)]
+    const MINIMAL: &str = r#"
+[node]
+id = "arcana-ai"
+[node.default]
+intended_direction = "bidirectional"
+[server]
+address = "host:9443"
+client_cert = "C:\\disk-arcana\\client.crt"
+client_key  = "C:\\disk-arcana\\client.key"
+[[share]]
+name = "wiki"
+path = "C:\\data\\wiki"
+"#;
+
     #[test]
     fn build_share_snapshots_resolves_inherited_direction() {
         let cfg = DiskConfig::from_str(MINIMAL).unwrap();
@@ -718,7 +734,14 @@ path = "/data/wiki"
         assert_eq!(snaps.len(), 1);
         assert_eq!(snaps[0].name, "wiki");
         assert_eq!(snaps[0].declared_direction, Direction::Bidirectional);
-        assert_eq!(snaps[0].path, "/data/wiki");
+        assert_eq!(
+            snaps[0].path,
+            if cfg!(windows) {
+                r"C:\data\wiki"
+            } else {
+                "/data/wiki"
+            }
+        );
         assert_eq!(snaps[0].state, LoopState::Idle);
     }
 

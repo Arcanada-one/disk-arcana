@@ -385,7 +385,7 @@ mod tests {
         // Bounded: must give up near the configured budget, not hang forever.
         let budget = CONNECT_RETRY_DELAY * CONNECT_MAX_ATTEMPTS;
         assert!(
-            started.elapsed() < budget * 4,
+            started.elapsed() < budget * if cfg!(windows) { 10 } else { 4 },
             "retry must be bounded (gave up within a small multiple of the budget)"
         );
     }

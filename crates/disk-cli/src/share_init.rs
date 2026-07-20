@@ -270,7 +270,11 @@ client_key  = "/etc/disk-arcana/client.key"
             &p,
             Preset::Collaborate,
             "wiki",
-            Path::new("/data/wiki"),
+            Path::new(if cfg!(windows) {
+                r"C:\data\wiki"
+            } else {
+                "/data/wiki"
+            }),
             None,
         )
         .unwrap();
@@ -288,7 +292,11 @@ client_key  = "/etc/disk-arcana/client.key"
             &p,
             Preset::Publish,
             "hermes",
-            Path::new("/var/disk-arcana/hermes"),
+            Path::new(if cfg!(windows) {
+                r"C:\disk-arcana\hermes"
+            } else {
+                "/var/disk-arcana/hermes"
+            }),
             Some("vault:transit/keys/hermes-publisher"),
         )
         .unwrap();
@@ -308,9 +316,22 @@ client_key  = "/etc/disk-arcana/client.key"
     fn append_rejects_duplicate_share_name() {
         let dir = tempfile::tempdir().unwrap();
         let p = write_base(dir.path());
-        append_share(&p, Preset::Backup, "vault", Path::new("/v1"), None).unwrap();
-        let err =
-            append_share(&p, Preset::Distribute, "vault", Path::new("/v2"), None).unwrap_err();
+        append_share(
+            &p,
+            Preset::Backup,
+            "vault",
+            Path::new(if cfg!(windows) { r"C:\v1" } else { "/v1" }),
+            None,
+        )
+        .unwrap();
+        let err = append_share(
+            &p,
+            Preset::Distribute,
+            "vault",
+            Path::new(if cfg!(windows) { r"C:\v2" } else { "/v2" }),
+            None,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("already declared"));
     }
 
