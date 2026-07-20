@@ -18,6 +18,7 @@
 //! reload signal into the live `notify` watcher, R8 wires the manual
 //! trigger into the running loop iteration scheduler.
 
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -96,6 +97,8 @@ struct DaemonStateInner {
     /// Absolute vault root used by the conflict REST endpoints to perform
     /// file operations.  Populated via `with_vault_root` after construction.
     vault_root: Option<PathBuf>,
+    /// Share-qualified roots used by Obsidian/plugin conflict operations.
+    vault_roots: HashMap<String, PathBuf>,
 }
 
 impl DaemonState {
@@ -117,6 +120,7 @@ impl DaemonState {
             reload_tx,
             meta_db: None,
             vault_root: None,
+            vault_roots: HashMap::new(),
         };
         (
             Self {
@@ -263,8 +267,11 @@ impl DaemonState {
                 Arc::strong_count(&arc)
             );
         });
+        let mut vault_roots = inner.vault_roots.clone();
+        vault_roots.insert("default".to_string(), root.clone());
         let new_inner = DaemonStateInner {
             vault_root: Some(root),
+            vault_roots,
             ..inner
         };
         Self {
@@ -275,6 +282,35 @@ impl DaemonState {
     /// Access the vault root path, if one was attached.
     pub fn vault_root(&self) -> Option<&PathBuf> {
         self.inner.vault_root.as_ref()
+    }
+
+    /// Attach every configured share root while retaining the first share as
+    /// the backward-compatible root for legacy unqualified CLI routes.
+    pub fn with_vault_roots(self, roots: HashMap<String, PathBuf>) -> Self {
+        let inner = Arc::try_unwrap(self.inner).unwrap_or_else(|arc| {
+            panic!(
+                "DaemonState::with_vault_roots called after clone: Arc has {} refs",
+                Arc::strong_count(&arc)
+            );
+        });
+        let legacy_root = roots.values().next().cloned();
+        let new_inner = DaemonStateInner {
+            vault_root: legacy_root,
+            vault_roots: roots,
+            ..inner
+        };
+        Self {
+            inner: Arc::new(new_inner),
+        }
+    }
+
+    /// Resolve the filesystem root for one persisted conflict vault ID.
+    pub fn vault_root_for(&self, vault_id: &str) -> Option<&PathBuf> {
+        self.inner.vault_roots.get(vault_id).or_else(|| {
+            (vault_id == "default")
+                .then_some(self.inner.vault_root.as_ref())
+                .flatten()
+        })
     }
 }
 
@@ -292,6 +328,14 @@ pub fn router(state: DaemonState) -> Router {
         .route("/sync", post(sync::post_sync))
         .route("/config/reload", post(sync::post_config_reload))
         .route("/conflicts", get(conflicts::get_conflicts))
+        .route(
+            "/conflicts/:vault_id/:path/diff",
+            get(conflicts::get_qualified_conflict_diff),
+        )
+        .route(
+            "/conflicts/:vault_id/:path",
+            post(conflicts::post_resolve_qualified_conflict),
+        )
         .route("/conflicts/:path/diff", get(conflicts::get_conflict_diff))
         .route("/conflicts/:path", post(conflicts::post_resolve_conflict))
         .with_state(state)

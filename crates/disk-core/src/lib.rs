@@ -13,6 +13,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod archive;
 pub mod config;
 pub mod conflict;
 pub mod delta;

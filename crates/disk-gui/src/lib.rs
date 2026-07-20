@@ -114,6 +114,7 @@ fn format_share(s: &StatusShare) -> ShareDisplay {
 /// for UI labels.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConflictDisplay {
+    pub vault_id: String,
     pub path: String,
     pub conflict_type: String,
     pub fork_path: Option<String>,
@@ -125,6 +126,7 @@ pub fn format_conflicts(items: &[ConflictListItem]) -> Vec<ConflictDisplay> {
     items
         .iter()
         .map(|c| ConflictDisplay {
+            vault_id: c.vault_id.clone(),
             path: c.path.clone(),
             conflict_type: c.conflict_type.clone(),
             fork_path: c.fork_path.clone(),
@@ -310,6 +312,7 @@ mod tests {
     fn format_conflicts_maps_fields_and_formats_timestamp() {
         let items = vec![ConflictListItem {
             id: 1,
+            vault_id: "wiki".to_string(),
             path: "notes/todo.md".to_string(),
             conflict_type: "Concurrent".to_string(),
             fork_path: Some("notes/todo.md.sync-conflict-abc".to_string()),
@@ -317,6 +320,7 @@ mod tests {
         }];
         let display = format_conflicts(&items);
         assert_eq!(display.len(), 1);
+        assert_eq!(display[0].vault_id, "wiki");
         assert_eq!(display[0].path, "notes/todo.md");
         assert_eq!(display[0].conflict_type, "Concurrent");
         assert_eq!(
@@ -330,6 +334,7 @@ mod tests {
     fn format_conflicts_no_fork_path() {
         let items = vec![ConflictListItem {
             id: 2,
+            vault_id: "docs".to_string(),
             path: "a.md".to_string(),
             conflict_type: "DeleteRemoteModifyLocal".to_string(),
             fork_path: None,
