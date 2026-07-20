@@ -25,6 +25,9 @@ const CONFLICT_ACTIONS: &[(&str, &str)] = &[
     ("Keep Both (fork)", "fork-local"),
 ];
 
+type ConflictResolveKey = (String, String);
+type ConflictResolveRx = tokio::sync::oneshot::Receiver<(ConflictResolveKey, Result<()>)>;
+
 /// Internal state of the settings panel during editing.
 #[derive(Clone)]
 struct SettingsEdit {
@@ -85,7 +88,7 @@ pub struct DiskGuiApp {
     /// Pending async conflicts-list fetch.
     conflicts_rx: Option<tokio::sync::oneshot::Receiver<Result<Vec<ConflictListItem>>>>,
     /// Pending async conflict-resolve call: ((vault, path), result).
-    resolve_rx: Option<tokio::sync::oneshot::Receiver<((String, String), Result<()>)>>,
+    resolve_rx: Option<ConflictResolveRx>,
     /// Tokio runtime for spawning async tasks inside the sync eframe callback.
     rt: tokio::runtime::Handle,
 }
