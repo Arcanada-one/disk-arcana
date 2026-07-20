@@ -45,7 +45,7 @@ use rand::{rngs::StdRng, SeedableRng};
 #[derive(clap::Args, Debug)]
 pub struct DaemonStartArgs {
     /// Path to `disk.toml`.
-    #[arg(long, default_value = "/etc/disk-arcana/disk.toml")]
+    #[arg(long, default_value = crate::paths::DEFAULT_CONFIG)]
     pub config: PathBuf,
 
     /// Bind address for the loopback REST surface (PRD §4.13 Tier 1).
@@ -62,7 +62,7 @@ pub struct DaemonStartArgs {
     /// Directory used for persistent client state: the shared SQLite
     /// `MetaDb` (`meta.db`) and the content-addressed blob cache (`blob-cache/`)
     /// used by the auto-3-way-merge path.  Must survive daemon restarts.
-    #[arg(long, default_value = "/var/lib/disk-arcana")]
+    #[arg(long, default_value = crate::paths::DEFAULT_STATE_DIR)]
     pub state_dir: PathBuf,
 }
 

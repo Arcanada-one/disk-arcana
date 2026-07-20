@@ -32,3 +32,14 @@ jobs:
         run: cargo test --workspace --all-features --target ${{ matrix.target }}
       - name: Build
         run: cargo build --workspace --release --target ${{ matrix.target }}
+      - name: Bundle portable zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          ./scripts/bundle-windows.ps1 -Binary target/${{ matrix.target }}/release/disk.exe -OutDir dist -Version ci
+      - name: Upload portable bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: disk-windows-portable-${{ matrix.target }}
+          path: dist/disk-arcana-windows-x86_64.zip
+          retention-days: 14

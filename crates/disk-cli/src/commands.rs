@@ -114,7 +114,7 @@ fn print_status(s: &StatusResponse) {
 /// surfaced verbatim and the process exits non-zero (the `?` propagation in
 /// `main`).
 pub fn run_config_validate(file: Option<PathBuf>) -> Result<()> {
-    let path = file.unwrap_or_else(|| PathBuf::from("/etc/disk-arcana/disk.toml"));
+    let path = file.unwrap_or_else(|| PathBuf::from(crate::paths::DEFAULT_CONFIG));
     let cfg = DiskConfig::load(&path).with_context(|| format!("validate {}", path.display()))?;
     println!(
         "{} is valid ({} share(s))",
