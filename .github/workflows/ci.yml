@@ -123,7 +123,7 @@ jobs:
         run: cargo llvm-cov --workspace --all-features --fail-under-lines 80
 
   fuzz-smoke:
-    name: Fuzz smoke (apply_plan, 60s)
+    name: Fuzz smoke (DISK-0012, 80s)
     runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v6
@@ -153,11 +153,14 @@ jobs:
           /tmp/protoc/bin/protoc --version
       - name: Install cargo-fuzz
         run: cargo +nightly install cargo-fuzz --locked --quiet
-      - name: cargo fuzz run apply_plan (bounded smoke run, DISK-0012)
-        # Coverage-guided smoke run, not exhaustive fuzzing — catches panics
-        # in disk-core::delta::apply_plan on every PR without slowing CI down.
-        # Long-running/scheduled deep fuzzing is a separate future workflow.
-        run: cargo +nightly fuzz run apply_plan -- -max_total_time=60
+      - name: cargo fuzz smoke (all targets, DISK-0012)
+        working-directory: fuzz
+        run: |
+          set -euo pipefail
+          for target in apply_plan path_validate proto_decode reconcile; do
+            echo "==> fuzz $target (20s)"
+            cargo +nightly fuzz run "$target" -- -max_total_time=20
+          done
 
   build:
     name: Build (${{ matrix.target }})
