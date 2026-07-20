@@ -83,10 +83,15 @@ jobs:
         # Run gitleaks directly via the upstream binary — gitleaks/gitleaks-action
         # requires a paid licence for organisation accounts.
         run: |
+          set -euo pipefail
           GITLEAKS_VERSION=8.21.2
-          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
-            | tar -xz -C /tmp gitleaks
-          /tmp/gitleaks detect --source . --no-banner --redact --verbose --config .gitleaks.toml
+          GITLEAKS_BIN="${RUNNER_TEMP:-/tmp}/gitleaks-${GITLEAKS_VERSION}"
+          if [ ! -x "$GITLEAKS_BIN" ]; then
+            curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+              | tar -xz -C "${RUNNER_TEMP:-/tmp}" gitleaks
+            mv "${RUNNER_TEMP:-/tmp}/gitleaks" "$GITLEAKS_BIN"
+          fi
+          "$GITLEAKS_BIN" detect --source . --no-banner --redact --verbose --config .gitleaks.toml
 
   test:
     name: Test (linux)
