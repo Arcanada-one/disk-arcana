@@ -57,9 +57,13 @@ mod tests {
     use super::*;
 
     /// Map Unix-style absolute paths in fixtures to Windows drive paths for CI.
+    /// Doubles backslashes so paths stay valid inside TOML double-quoted strings.
     fn abs_path(unix: &str) -> String {
         if cfg!(windows) {
-            format!("C:{}", unix.replace('/', "\\"))
+            format!(
+                "C:\\\\{}",
+                unix.trim_start_matches('/').replace('/', "\\\\")
+            )
         } else {
             unix.to_owned()
         }
