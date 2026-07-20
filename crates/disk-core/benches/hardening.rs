@@ -4,8 +4,8 @@ use std::io::Cursor;
 use std::path::PathBuf;
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use disk_core::delta::{apply_plan, build_plan_with_data, chunks};
 use disk_core::delta::strong::hash as blake3_hash;
+use disk_core::delta::{apply_plan, build_plan_with_data, chunks};
 use disk_core::filter::{Filter, FilterRules};
 use disk_core::reconciler::ReconciliationEngine;
 use disk_core::scanner::scan_root;
@@ -31,9 +31,7 @@ fn bench_delta_roundtrip(c: &mut Criterion) {
     let mut client = base.clone();
     client[4096..4106].copy_from_slice(b"EDITED!!!!");
 
-    let client_chunks: Vec<_> = chunks(Cursor::new(&client))
-        .map(|r| r.unwrap())
-        .collect();
+    let client_chunks: Vec<_> = chunks(Cursor::new(&client)).map(|r| r.unwrap()).collect();
     let plan = build_plan_with_data(&client_chunks, &base);
 
     c.bench_function("delta_build_plan_256k", |b| {
@@ -61,9 +59,7 @@ fn make_meta(i: usize, deleted: bool) -> FileMeta {
 fn bench_reconcile(c: &mut Criterion) {
     let engine = ReconciliationEngine::new("bench-node".into());
     let local: Vec<FileMeta> = (0..200).map(|i| make_meta(i, false)).collect();
-    let remote: Vec<FileMeta> = (0..200)
-        .map(|i| make_meta(i, i % 17 == 0))
-        .collect();
+    let remote: Vec<FileMeta> = (0..200).map(|i| make_meta(i, i % 17 == 0)).collect();
     let indexed = local.clone();
 
     c.bench_function("reconcile_200_paths", |b| {
@@ -81,14 +77,15 @@ fn bench_scan(c: &mut Criterion) {
     let filter = Filter::from_config(&FilterRules::default()).expect("filter");
 
     c.bench_function("scan_root_500_md", |b| {
-        b.iter(|| {
-            black_box(
-                scan_root(dir.path(), filter.clone(), "bench".into())
-                    .expect("scan"),
-            )
-        });
+        b.iter(|| black_box(scan_root(dir.path(), filter.clone(), "bench".into()).expect("scan")));
     });
 }
 
-criterion_group!(benches, bench_hash, bench_delta_roundtrip, bench_reconcile, bench_scan);
+criterion_group!(
+    benches,
+    bench_hash,
+    bench_delta_roundtrip,
+    bench_reconcile,
+    bench_scan
+);
 criterion_main!(benches);

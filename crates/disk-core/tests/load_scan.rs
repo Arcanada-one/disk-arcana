@@ -13,8 +13,7 @@ fn load_scan_1000_markdown_files() {
     let notes = dir.path().join("notes");
     std::fs::create_dir_all(&notes).expect("mkdir");
     for i in 0..1000 {
-        std::fs::write(notes.join(format!("note_{i:04}.md")), b"# load\n")
-            .expect("write");
+        std::fs::write(notes.join(format!("note_{i:04}.md")), b"# load\n").expect("write");
     }
     let filter = Filter::from_config(&FilterRules::default()).expect("filter");
     let started = Instant::now();
