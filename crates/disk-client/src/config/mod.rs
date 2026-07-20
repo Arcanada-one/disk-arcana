@@ -56,6 +56,16 @@ impl DiskConfig {
 mod tests {
     use super::*;
 
+    /// Map Unix-style absolute paths in fixtures to Windows drive paths for CI.
+    fn abs_path(unix: &str) -> String {
+        if cfg!(windows) {
+            format!("C:{}", unix.replace('/', "\\"))
+        } else {
+            unix.to_owned()
+        }
+    }
+
+    #[cfg(not(windows))]
     const MINIMAL: &str = r#"
 [node]
 id = "dev-server"
@@ -68,6 +78,20 @@ client_cert = "/etc/disk-arcana/client.crt"
 client_key  = "/etc/disk-arcana/client.key"
 "#;
 
+    #[cfg(windows)]
+    const MINIMAL: &str = r#"
+[node]
+id = "dev-server"
+[node.default]
+intended_direction = "receive_only"
+
+[server]
+address = "disk.arcanada.ai:9443"
+client_cert = "C:\\etc\\disk-arcana\\client.crt"
+client_key  = "C:\\etc\\disk-arcana\\client.key"
+"#;
+
+    #[cfg(not(windows))]
     const FULL: &str = r#"
 [node]
 id = "arcana-ai"
@@ -98,6 +122,42 @@ quarantine_on_failure = true
 [[share]]
 name = "wiki"
 path = "/home/operator/wiki"
+[share.filter]
+mode = "whitelist"
+extensions = ["md", "txt", "json"]
+"#;
+
+    #[cfg(windows)]
+    const FULL: &str = r#"
+[node]
+id = "arcana-ai"
+display_name = "Arcana AI server"
+[node.default]
+intended_direction = "bidirectional"
+
+[server]
+address = "disk.arcanada.ai:9443"
+tls = "auto"
+client_cert = "C:\\etc\\disk-arcana\\client.crt"
+client_key  = "C:\\etc\\disk-arcana\\client.key"
+server_ca   = "C:\\etc\\disk-arcana\\server-ca.crt"
+
+[[share]]
+name = "hermes-artefacts"
+path = "C:\\home\\hermes\\.hermes\\cache"
+intended_direction = "publisher"
+[share.filter]
+mode = "whitelist"
+extensions = ["png", "jpg", "pdf", "md"]
+include = ["images/**", "documents/**"]
+exclude = [".env", "logs/**"]
+[share.publisher]
+sign_key_ref = "vault:transit/disk-arcana/arcana-ai-publisher"
+quarantine_on_failure = true
+
+[[share]]
+name = "wiki"
+path = "C:\\home\\operator\\wiki"
 [share.filter]
 mode = "whitelist"
 extensions = ["md", "txt", "json"]
@@ -157,7 +217,7 @@ address = "host:9443"
 client_cert = "/a"
 client_key = "/b"
 "#;
-        let err = DiskConfig::from_str(bad).unwrap_err();
+        let err = DiskConfig::from_str(&bad).unwrap_err();
         assert!(matches!(err, ConfigError::Toml(_)));
     }
 
@@ -173,7 +233,7 @@ address = "host:9443"
 client_cert = "/a"
 client_key = "/b"
 "#;
-        let err = DiskConfig::from_str(bad).unwrap_err();
+        let err = DiskConfig::from_str(&bad).unwrap_err();
         assert!(matches!(err, ConfigError::Toml(_)));
     }
 
@@ -187,7 +247,7 @@ address = "host:9443"
 client_cert = "/a"
 client_key = "/b"
 "#;
-        let err = DiskConfig::from_str(bad).unwrap_err();
+        let err = DiskConfig::from_str(&bad).unwrap_err();
         match err {
             ConfigError::Validation(msg) => assert!(msg.contains("lowercase")),
             other => panic!("expected Validation, got {other:?}"),
@@ -209,7 +269,7 @@ client_key = "/b"
 name = "rel"
 path = "relative/path"
 "#;
-        let err = DiskConfig::from_str(bad).unwrap_err();
+        let err = DiskConfig::from_str(&bad).unwrap_err();
         match err {
             ConfigError::Validation(msg) => assert!(msg.contains("absolute")),
             other => panic!("expected Validation, got {other:?}"),
@@ -218,7 +278,8 @@ path = "relative/path"
 
     #[test]
     fn rejects_publisher_without_section() {
-        let bad = r#"
+        let bad = format!(
+            r#"
 [node]
 id = "x"
 [server]
@@ -227,10 +288,12 @@ client_cert = "/a"
 client_key = "/b"
 [[share]]
 name = "no-pub"
-path = "/data"
+path = "{}"
 intended_direction = "publisher"
-"#;
-        let err = DiskConfig::from_str(bad).unwrap_err();
+"#,
+            abs_path("/data")
+        );
+        let err = DiskConfig::from_str(&bad).unwrap_err();
         match err {
             ConfigError::Validation(msg) => assert!(msg.contains("publisher")),
             other => panic!("expected Validation, got {other:?}"),
@@ -239,7 +302,8 @@ intended_direction = "publisher"
 
     #[test]
     fn rejects_publisher_section_without_direction_publisher() {
-        let bad = r#"
+        let bad = format!(
+            r#"
 [node]
 id = "x"
 [server]
@@ -248,12 +312,14 @@ client_cert = "/a"
 client_key = "/b"
 [[share]]
 name = "stray"
-path = "/data"
+path = "{}"
 intended_direction = "bidirectional"
 [share.publisher]
 sign_key_ref = "vault:foo"
-"#;
-        let err = DiskConfig::from_str(bad).unwrap_err();
+"#,
+            abs_path("/data")
+        );
+        let err = DiskConfig::from_str(&bad).unwrap_err();
         match err {
             ConfigError::Validation(msg) => {
                 assert!(msg.contains("publisher") && msg.contains("not publisher"))
@@ -264,7 +330,8 @@ sign_key_ref = "vault:foo"
 
     #[test]
     fn rejects_whitelist_with_no_patterns() {
-        let bad = r#"
+        let bad = format!(
+            r#"
 [node]
 id = "x"
 [node.default]
@@ -275,11 +342,13 @@ client_cert = "/a"
 client_key = "/b"
 [[share]]
 name = "empty-filter"
-path = "/data"
+path = "{}"
 [share.filter]
 mode = "whitelist"
-"#;
-        let err = DiskConfig::from_str(bad).unwrap_err();
+"#,
+            abs_path("/data")
+        );
+        let err = DiskConfig::from_str(&bad).unwrap_err();
         match err {
             ConfigError::Validation(msg) => assert!(msg.contains("whitelist")),
             other => panic!("expected Validation, got {other:?}"),
@@ -304,7 +373,7 @@ path = "/a"
 name = "dup"
 path = "/b"
 "#;
-        let err = DiskConfig::from_str(bad).unwrap_err();
+        let err = DiskConfig::from_str(&bad).unwrap_err();
         match err {
             ConfigError::Validation(msg) => assert!(msg.contains("dup") && msg.contains("twice")),
             other => panic!("expected Validation, got {other:?}"),
@@ -313,7 +382,8 @@ path = "/b"
 
     #[test]
     fn rejects_share_without_any_direction() {
-        let bad = r#"
+        let bad = format!(
+            r#"
 [node]
 id = "x"
 [server]
@@ -322,9 +392,11 @@ client_cert = "/a"
 client_key = "/b"
 [[share]]
 name = "orphan"
-path = "/data"
-"#;
-        let err = DiskConfig::from_str(bad).unwrap_err();
+path = "{}"
+"#,
+            abs_path("/data")
+        );
+        let err = DiskConfig::from_str(&bad).unwrap_err();
         match err {
             ConfigError::Validation(msg) => assert!(msg.contains("intended_direction")),
             other => panic!("expected Validation, got {other:?}"),
