@@ -1,8 +1,8 @@
 //! Platform-specific filesystem identity and path helpers.
 //!
 //! `FileMeta::inode` remains the wire/database-compatible field for now. On
-//! Unix it contains the inode; on Windows the scanner stores the stable file
-//! identifier exposed by `MetadataExt::file_id`. This module gives callers a
+//! Unix it contains the inode; on Windows the scanner stores a temporary
+//! creation-time identity until the watcher adds `FILE_ID_INFO`. This module gives callers a
 //! platform-neutral identity type while the richer Windows `FILE_ID_INFO`
 //! representation is introduced in a later DISK-0013 phase.
 

@@ -121,7 +121,9 @@ fn inode_of(m: &std::fs::Metadata) -> Option<u64> {
 #[cfg(windows)]
 fn inode_of(m: &std::fs::Metadata) -> Option<u64> {
     use std::os::windows::fs::MetadataExt;
-    Some(m.file_id())
+    // The stable `std` API does not expose FILE_ID_INFO yet. Creation time is
+    // a temporary identity fallback until the Windows watcher phase adds it.
+    Some(m.creation_time())
 }
 
 #[cfg(not(any(unix, windows)))]
