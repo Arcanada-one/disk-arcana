@@ -25,6 +25,29 @@ foundation.
            sync_queue, conflicts)
 ```
 
+## Obsidian plugin
+
+The desktop-only plugin under `plugins/obsidian/` is a thin UI over the local
+daemon. It accepts only an unauthenticated HTTP loopback URL (default
+`http://127.0.0.1:9444`); it never opens the SQLite database or performs sync
+itself.
+
+```bash
+cd plugins/obsidian
+npm install
+npm test
+npm run typecheck
+npm run build
+
+# Exact-port integration with a disposable real daemon, production SQLite
+# MetaDb, and temporary filesystem shares. Refuses to run if :9444 is occupied.
+cd ../..
+bash scripts/test-obsidian-integration.sh
+```
+
+Install `manifest.json`, `main.js`, and `styles.css` into an Obsidian vault's
+`.obsidian/plugins/disk-arcana/` directory for a local desktop smoke test.
+
 Crates:
 
 - `disk-proto`   — generated tonic bindings, single source of truth for the wire format.

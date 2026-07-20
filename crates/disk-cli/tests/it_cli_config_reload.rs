@@ -9,7 +9,7 @@
 use std::process::Stdio;
 use std::time::Duration;
 
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
 
 const CONFIG: &str = r#"
@@ -38,6 +38,7 @@ async fn config_reload_command_queues_reload() {
     let bin = env!("CARGO_BIN_EXE_disk");
     let dir = tempfile::tempdir().unwrap();
     let cfg = dir.path().join("disk.toml");
+    let state_dir = dir.path().join("state");
     std::fs::write(&cfg, CONFIG).unwrap();
 
     let mut daemon = Command::new(bin)
@@ -47,8 +48,10 @@ async fn config_reload_command_queues_reload() {
             "--foreground",
             "--status-bind",
             "127.0.0.1:0",
-            "--config",
+            "--state-dir",
         ])
+        .arg(&state_dir)
+        .args(["--config"])
         .arg(&cfg)
         .env("RUST_LOG", "info")
         .stdout(Stdio::piped())
@@ -58,6 +61,7 @@ async fn config_reload_command_queues_reload() {
         .expect("spawn disk daemon");
 
     let stdout = daemon.stdout.take().expect("stdout pipe");
+    let mut stderr = daemon.stderr.take().expect("stderr pipe");
     let read_port = async {
         let mut reader = BufReader::new(stdout).lines();
         while let Some(line) = reader.next_line().await.ok().flatten() {
@@ -67,10 +71,17 @@ async fn config_reload_command_queues_reload() {
         }
         None
     };
-    let port = tokio::time::timeout(Duration::from_secs(30), read_port)
+    let maybe_port = tokio::time::timeout(Duration::from_secs(30), read_port)
         .await
-        .expect("daemon must emit listening line within 30 s")
-        .expect("listening line absent before stdout closed");
+        .expect("daemon must emit listening line within 30 s");
+    let port = match maybe_port {
+        Some(port) => port,
+        None => {
+            let mut error = String::new();
+            stderr.read_to_string(&mut error).await.unwrap();
+            panic!("listening line absent before stdout closed; stderr={error}");
+        }
+    };
 
     let addr = format!("127.0.0.1:{port}");
     let out = Command::new(bin)
