@@ -217,7 +217,7 @@ address = "host:9443"
 client_cert = "/a"
 client_key = "/b"
 "#;
-        let err = DiskConfig::from_str(&bad).unwrap_err();
+        let err = DiskConfig::from_str(bad).unwrap_err();
         assert!(matches!(err, ConfigError::Toml(_)));
     }
 
@@ -233,7 +233,7 @@ address = "host:9443"
 client_cert = "/a"
 client_key = "/b"
 "#;
-        let err = DiskConfig::from_str(&bad).unwrap_err();
+        let err = DiskConfig::from_str(bad).unwrap_err();
         assert!(matches!(err, ConfigError::Toml(_)));
     }
 
@@ -247,7 +247,7 @@ address = "host:9443"
 client_cert = "/a"
 client_key = "/b"
 "#;
-        let err = DiskConfig::from_str(&bad).unwrap_err();
+        let err = DiskConfig::from_str(bad).unwrap_err();
         match err {
             ConfigError::Validation(msg) => assert!(msg.contains("lowercase")),
             other => panic!("expected Validation, got {other:?}"),
@@ -269,7 +269,7 @@ client_key = "/b"
 name = "rel"
 path = "relative/path"
 "#;
-        let err = DiskConfig::from_str(&bad).unwrap_err();
+        let err = DiskConfig::from_str(bad).unwrap_err();
         match err {
             ConfigError::Validation(msg) => assert!(msg.contains("absolute")),
             other => panic!("expected Validation, got {other:?}"),
@@ -373,7 +373,7 @@ path = "/a"
 name = "dup"
 path = "/b"
 "#;
-        let err = DiskConfig::from_str(&bad).unwrap_err();
+        let err = DiskConfig::from_str(bad).unwrap_err();
         match err {
             ConfigError::Validation(msg) => assert!(msg.contains("dup") && msg.contains("twice")),
             other => panic!("expected Validation, got {other:?}"),
