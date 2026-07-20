@@ -372,6 +372,7 @@ mod tests {
     /// A non-connect failure path: a fully-absent daemon (port that nothing will
     /// ever claim) must still exhaust the bounded retries and return an error
     /// rather than hanging — the absent-daemon contract.
+    #[cfg(not(windows))]
     #[tokio::test]
     async fn send_with_retry_gives_up_on_permanently_absent_daemon() {
         let addr = reserve_port(); // released, nothing will re-bind it
