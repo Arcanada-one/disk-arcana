@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Disk Arcana — Self-hosted file sync for knowledge bases</title>
+  <meta name="description" content="Git-aware, conflict-safe file synchronization for Obsidian vaults and AI agent knowledge bases. Self-hosted Rust engine.">
+  <meta property="og:title" content="Disk Arcana">
+  <meta property="og:description" content="Self-hosted file sync for Obsidian vaults and AI knowledge bases.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://disk.arcanada.ai/">
+  <link rel="canonical" href="https://disk.arcanada.ai/">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' }</script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
+  <main class="max-w-3xl mx-auto px-6 py-16">
+    <p class="text-sm text-emerald-400 font-medium mb-2">Arcanada Ecosystem</p>
+    <h1 class="text-4xl font-bold tracking-tight mb-4">Disk Arcana</h1>
+    <p class="text-lg text-slate-300 mb-8">
+      Self-hosted, git-aware file synchronization for Obsidian vaults and AI knowledge bases.
+      Stable rename identity, directional ACLs, and a loopback REST status API.
+    </p>
+
+    <section class="mb-10">
+      <h2 class="text-xl font-semibold mb-3">Install (Linux)</h2>
+      <pre class="bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm overflow-x-auto"><code>curl -fsSL https://disk.arcanada.ai/install.sh | sh</code></pre>
+      <p class="text-sm text-slate-400 mt-2">Inspect first: <code class="text-slate-300">curl -fsSL … -o install.sh &amp;&amp; less install.sh</code></p>
+    </section>
+
+    <section class="mb-10 grid gap-4 sm:grid-cols-2">
+      <div class="border border-slate-800 rounded-lg p-4">
+        <h3 class="font-medium mb-1">Source</h3>
+        <a class="text-emerald-400 hover:underline" href="https://github.com/Arcanada-one/disk-arcana">github.com/Arcanada-one/disk-arcana</a>
+      </div>
+      <div class="border border-slate-800 rounded-lg p-4">
+        <h3 class="font-medium mb-1">Documentation</h3>
+        <a class="text-emerald-400 hover:underline" href="https://github.com/Arcanada-one/disk-arcana/blob/main/docs/installation.md">Installation guide</a>
+      </div>
+    </section>
+
+    <footer class="pt-8 border-t border-slate-800 text-sm text-slate-500">
+      <p class="italic opacity-60 mb-2">One human life matters</p>
+      <p>
+        <a class="hover:text-slate-300" href="https://arcanada.ai/en/ecosystem">Arcanada Ecosystem</a>
+        · MIT License
+      </p>
+    </footer>
+  </main>
+</body>
+</html>
