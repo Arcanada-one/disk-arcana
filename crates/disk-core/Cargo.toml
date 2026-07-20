@@ -27,6 +27,7 @@ ignore      = "0.4"
 globset     = "0.4"
 diffy       = "0.5"
 zstd        = { workspace = true }
+file-id     = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

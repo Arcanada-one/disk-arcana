@@ -10,10 +10,15 @@ use std::path::PathBuf;
 use disk_client::config::{ConfigError, Direction, DiskConfig};
 
 fn fixture(name: &str) -> PathBuf {
+    let file = if cfg!(windows) {
+        format!("{}.windows.toml", name.trim_end_matches(".toml"))
+    } else {
+        name.to_string()
+    };
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
-        .join(name)
+        .join(file)
 }
 
 #[test]

@@ -25,6 +25,18 @@ fn gpg_available() -> bool {
         .unwrap_or(false)
 }
 
+/// GPG integration tests use a temp GNUPGHOME; MSYS gpg on windows-latest
+/// mishandles mixed path formats, so skip there (same soft-skip as absent gpg).
+fn gpg_integration_supported() -> bool {
+    if cfg!(windows) {
+        eprintln!(
+            "[acl_gpg_verifier] gpg integration tests skipped on Windows (GNUPGHOME path mismatch)"
+        );
+        return false;
+    }
+    gpg_available()
+}
+
 /// Generate an ephemeral Ed25519 key in a temporary GNUPGHOME.
 /// Returns the key fingerprint as a hex string.
 fn gen_ephemeral_key(gnupghome: &std::path::Path) -> String {
@@ -110,8 +122,7 @@ nodes: []\n";
 
 #[test]
 fn gpg_verifier_happy_path() {
-    if !gpg_available() {
-        eprintln!("[acl_gpg_verifier] gpg not on PATH — soft-skip happy path test");
+    if !gpg_integration_supported() {
         return;
     }
 
@@ -127,8 +138,7 @@ fn gpg_verifier_happy_path() {
 
 #[test]
 fn gpg_verifier_tampered_content() {
-    if !gpg_available() {
-        eprintln!("[acl_gpg_verifier] gpg not on PATH — soft-skip tampered content test");
+    if !gpg_integration_supported() {
         return;
     }
 

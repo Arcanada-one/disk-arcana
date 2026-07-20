@@ -45,7 +45,7 @@ use rand::{rngs::StdRng, SeedableRng};
 #[derive(clap::Args, Debug)]
 pub struct DaemonStartArgs {
     /// Path to `disk.toml`.
-    #[arg(long, default_value = "/etc/disk-arcana/disk.toml")]
+    #[arg(long, default_value = crate::paths::DEFAULT_CONFIG)]
     pub config: PathBuf,
 
     /// Bind address for the loopback REST surface (PRD §4.13 Tier 1).
@@ -62,7 +62,7 @@ pub struct DaemonStartArgs {
     /// Directory used for persistent client state: the shared SQLite
     /// `MetaDb` (`meta.db`) and the content-addressed blob cache (`blob-cache/`)
     /// used by the auto-3-way-merge path.  Must survive daemon restarts.
-    #[arg(long, default_value = "/var/lib/disk-arcana")]
+    #[arg(long, default_value = crate::paths::DEFAULT_STATE_DIR)]
     pub state_dir: PathBuf,
 }
 
@@ -695,6 +695,7 @@ mod tests {
     use super::*;
     use std::str::FromStr;
 
+    #[cfg(not(windows))]
     const MINIMAL: &str = r#"
 [node]
 id = "arcana-ai"
@@ -711,6 +712,21 @@ name = "wiki"
 path = "/data/wiki"
 "#;
 
+    #[cfg(windows)]
+    const MINIMAL: &str = r#"
+[node]
+id = "arcana-ai"
+[node.default]
+intended_direction = "bidirectional"
+[server]
+address = "host:9443"
+client_cert = "C:\\disk-arcana\\client.crt"
+client_key  = "C:\\disk-arcana\\client.key"
+[[share]]
+name = "wiki"
+path = "C:\\data\\wiki"
+"#;
+
     #[test]
     fn build_share_snapshots_resolves_inherited_direction() {
         let cfg = DiskConfig::from_str(MINIMAL).unwrap();
@@ -718,7 +734,14 @@ path = "/data/wiki"
         assert_eq!(snaps.len(), 1);
         assert_eq!(snaps[0].name, "wiki");
         assert_eq!(snaps[0].declared_direction, Direction::Bidirectional);
-        assert_eq!(snaps[0].path, "/data/wiki");
+        assert_eq!(
+            snaps[0].path,
+            if cfg!(windows) {
+                r"C:\data\wiki"
+            } else {
+                "/data/wiki"
+            }
+        );
         assert_eq!(snaps[0].state, LoopState::Idle);
     }
 

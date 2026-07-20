@@ -2,6 +2,7 @@
 
 mod commands;
 mod daemon;
+mod paths;
 mod share_init;
 
 use std::net::SocketAddr;
@@ -239,8 +240,8 @@ pub struct ShareInitArgs {
     #[arg(long)]
     pub sign_key_ref: Option<String>,
 
-    /// Path to the `disk.toml` to extend. Defaults to `/etc/disk-arcana/disk.toml`.
-    #[arg(long, default_value = "/etc/disk-arcana/disk.toml")]
+    /// Path to the `disk.toml` to extend.
+    #[arg(long, default_value = crate::paths::DEFAULT_CONFIG)]
     pub config: PathBuf,
 }
 
@@ -256,7 +257,7 @@ pub struct ImportStateArgs {
     pub as_share: String,
 
     /// Path to the SQLite metadata database the daemon will use.
-    #[arg(long, default_value = "/var/lib/disk-arcana/meta.db")]
+    #[arg(long, default_value = crate::paths::DEFAULT_META_DB)]
     pub db_path: PathBuf,
 
     /// Node ID recorded as the writer of every seeded row. Defaults to
@@ -319,11 +320,11 @@ pub struct EnrollArgs {
     pub insecure_localhost: bool,
 
     /// Output path for the signed client cert (PEM).
-    #[arg(long, default_value = "/etc/disk-arcana/client.crt")]
+    #[arg(long, default_value = crate::paths::DEFAULT_CLIENT_CERT)]
     pub cert_out: PathBuf,
 
     /// Output path for the private key (PEM, mode 0600).
-    #[arg(long, default_value = "/etc/disk-arcana/client.key")]
+    #[arg(long, default_value = crate::paths::DEFAULT_CLIENT_KEY)]
     pub key_out: PathBuf,
 }
 

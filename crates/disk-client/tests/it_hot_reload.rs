@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 
 use disk_client::config::{spawn_config_watcher, DiskConfig};
 
+#[cfg(not(windows))]
 const INITIAL: &str = r#"
 [node]
 id = "dev"
@@ -30,6 +31,20 @@ client_cert = "/etc/disk-arcana/client.crt"
 client_key  = "/etc/disk-arcana/client.key"
 "#;
 
+#[cfg(windows)]
+const INITIAL: &str = r#"
+[node]
+id = "dev"
+[node.default]
+intended_direction = "receive_only"
+
+[server]
+address = "host:9443"
+client_cert = "C:\\ProgramData\\disk-arcana\\client.crt"
+client_key  = "C:\\ProgramData\\disk-arcana\\client.key"
+"#;
+
+#[cfg(not(windows))]
 const ADDED_SHARE: &str = r#"
 [node]
 id = "dev"
@@ -44,6 +59,24 @@ client_key  = "/etc/disk-arcana/client.key"
 [[share]]
 name = "hermes-artefacts"
 path = "/var/disk-arcana/hermes"
+intended_direction = "bidirectional"
+"#;
+
+#[cfg(windows)]
+const ADDED_SHARE: &str = r#"
+[node]
+id = "dev"
+[node.default]
+intended_direction = "receive_only"
+
+[server]
+address = "host:9443"
+client_cert = "C:\\ProgramData\\disk-arcana\\client.crt"
+client_key  = "C:\\ProgramData\\disk-arcana\\client.key"
+
+[[share]]
+name = "hermes-artefacts"
+path = "C:\\var\\disk-arcana\\hermes"
 intended_direction = "bidirectional"
 "#;
 

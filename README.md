@@ -81,6 +81,24 @@ cargo build --workspace --all-features
 cargo test  --workspace --all-features
 ```
 
+### Windows (DISK-0013)
+
+Cross-compile target: `x86_64-pc-windows-msvc`. CI runs on every PR via
+`.github/workflows/windows.yml`.
+
+```powershell
+# Local smoke (no admin)
+cargo build --release -p disk-cli
+.\scripts\test-windows-smoke.ps1 -Binary .\target\release\disk.exe
+
+# Portable zip (operator)
+.\scripts\bundle-windows.ps1 -Binary .\target\release\disk.exe
+```
+
+- Install (admin): `scripts/install-windows.ps1`
+- VM validation playbook: `docs/runbooks/DISK-RB-008-windows-vm-e2e.md`
+- Platform notes: `docs/windows-platform-notes.md`
+
 The Phase 1 binaries are stubs that print their version and exit:
 
 ```sh

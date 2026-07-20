@@ -1,0 +1,51 @@
+name: Windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: windows-${{ matrix.target }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-pc-windows-msvc]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          components: rustfmt, clippy
+      - name: Install protoc
+        shell: pwsh
+        run: |
+          if (-not (Get-Command protoc -ErrorAction SilentlyContinue)) { choco install protoc -y --no-progress }
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features --target ${{ matrix.target }} -- -D warnings
+      - name: Test
+        run: cargo test --workspace --all-features --target ${{ matrix.target }}
+      - name: Build
+        run: cargo build --workspace --release --target ${{ matrix.target }}
+      - name: Windows smoke (no admin)
+        shell: pwsh
+        run: ./scripts/test-windows-smoke.ps1 -Binary target/${{ matrix.target }}/release/disk.exe
+      - name: Validate WiX scaffold XML
+        shell: pwsh
+        run: ./scripts/validate-wix-scaffold.ps1
+      - name: Bundle portable zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          ./scripts/bundle-windows.ps1 -Binary target/${{ matrix.target }}/release/disk.exe -OutDir dist -Version ci
+      - name: Upload portable bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: disk-windows-portable-${{ matrix.target }}
+          path: dist/disk-arcana-windows-x86_64.zip
+          retention-days: 14

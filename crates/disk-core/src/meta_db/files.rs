@@ -162,7 +162,7 @@ fn row_to_meta(row: sqlx::sqlite::SqliteRow) -> Result<FileMeta, MetaDbError> {
 
 fn path_as_str(path: &std::path::Path) -> Result<String, MetaDbError> {
     path.to_str()
-        .map(|s| s.to_string())
+        .map(|s| s.replace('\\', "/"))
         .ok_or_else(|| MetaDbError::Invalid("path contains non-UTF-8 bytes".into()))
 }
 

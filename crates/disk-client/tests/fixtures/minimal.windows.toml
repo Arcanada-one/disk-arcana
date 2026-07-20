@@ -1,0 +1,10 @@
+[node]
+id = "dev-server"
+
+[node.default]
+intended_direction = "receive_only"
+
+[server]
+address = "disk.arcanada.ai:9443"
+client_cert = "C:\\ProgramData\\disk-arcana\\client.crt"
+client_key  = "C:\\ProgramData\\disk-arcana\\client.key"
