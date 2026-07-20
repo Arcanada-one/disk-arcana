@@ -118,7 +118,13 @@ fn inode_of(m: &std::fs::Metadata) -> Option<u64> {
     Some(m.ino())
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn inode_of(m: &std::fs::Metadata) -> Option<u64> {
+    use std::os::windows::fs::MetadataExt;
+    Some(m.file_id())
+}
+
+#[cfg(not(any(unix, windows)))]
 fn inode_of(_: &std::fs::Metadata) -> Option<u64> {
     None
 }
