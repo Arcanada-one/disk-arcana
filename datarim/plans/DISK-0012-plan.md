@@ -1,8 +1,11 @@
 ---
 taskId: DISK-0012
 title: Hardening (fuzz, benches, load test)
-status: in_progress
+status: done
 created: 2026-07-20
+merged: 2026-07-20
+merge_commit: 40c3cd0
+pr: 40
 complexity: L2
 prefix: DISK
 parent: DISK-0001
@@ -12,7 +15,7 @@ branch: DISK-0012-hardening
 
 # DISK-0012 — Hardening Implementation Plan (tail)
 
-**Parent:** DISK-0001 §Phase 11. **Branch:** `DISK-0012-hardening`.
+**Parent:** DISK-0001 §Phase 11. **Merged:** PR #40 → `40c3cd0` on `main`.
 
 Prior work on `main`: `apply_plan` fuzz (#28), `cargo audit` + `gitleaks` in CI,
 coverage gate (DISK-0032), cross-compile build job, fuzz-smoke 60s.
