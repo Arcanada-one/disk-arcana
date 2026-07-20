@@ -6,6 +6,7 @@
 
 use std::process::Command;
 
+#[cfg(not(windows))]
 const VALID: &str = r#"
 [node]
 id = "validate-host"
@@ -20,6 +21,23 @@ client_key  = "/etc/disk-arcana/client.key"
 [[share]]
 name = "wiki"
 path = "/data/wiki"
+"#;
+
+#[cfg(windows)]
+const VALID: &str = r#"
+[node]
+id = "validate-host"
+[node.default]
+intended_direction = "bidirectional"
+
+[server]
+address = "host:9443"
+client_cert = "C:\\ProgramData\\disk-arcana\\client.crt"
+client_key  = "C:\\ProgramData\\disk-arcana\\client.key"
+
+[[share]]
+name = "wiki"
+path = "C:\\data\\wiki"
 "#;
 
 // Invalid: share path is relative (validator requires absolute).
