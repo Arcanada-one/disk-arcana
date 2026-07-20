@@ -31,7 +31,7 @@ validation on Windows.
 | **1** | `windows-latest` CI matrix; `platform.rs` groundwork; `\\?\` path normalize; Windows IT fixture paths | **Done** | `5017b6d` |
 | **2** | `FILE_ID_INFO` rename identity via `file-id` crate; scanner wired; Windows rename IT | **Done** | `7a5bb5e` |
 | **3** | `paths.rs` ProgramData defaults; `install-windows.ps1`; `bundle-windows.ps1`; CI portable zip artifact | **Done** | `f7e5111` |
-| **4** | `test-windows-smoke.ps1` in CI; Windows client job on tag release; formalize this plan; document VM e2e gap | **In progress** | TBD |
+| **4** | `test-windows-smoke.ps1` in CI; Windows client job on tag release; formalize this plan; document VM e2e gap | **Done** | `1bddd8f` |
 
 ---
 
