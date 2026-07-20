@@ -30,7 +30,7 @@ $ConfigFile = Join-Path $ConfigDir "disk.toml"
 $StateDir   = Join-Path $ConfigDir "state"
 $LogDir     = Join-Path $ConfigDir "logs"
 $ServiceName = "DiskArcana"
-$RepoRoot   = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$RepoRoot = Split-Path -Parent $PSScriptRoot
 
 if (-not (Test-Path -LiteralPath $Binary)) {
     throw "Binary not found or not executable: $Binary"

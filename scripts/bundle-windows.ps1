@@ -26,7 +26,7 @@ if (-not (Test-Path -LiteralPath $Binary)) {
     throw "Binary not found: $Binary"
 }
 
-$RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$RepoRoot = Split-Path -Parent $PSScriptRoot
 $StageName = "disk-arcana-windows-x86_64-$Version"
 $StageDir = Join-Path ([System.IO.Path]::GetTempPath()) $StageName
 $ZipPath = Join-Path $OutDir "disk-arcana-windows-x86_64.zip"
