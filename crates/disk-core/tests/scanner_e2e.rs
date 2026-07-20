@@ -230,3 +230,43 @@ fn fast_path_rehashes_when_mtime_advances() {
     assert_ne!(second[0].content_hash, initial[0].content_hash);
     assert_eq!(second[0].size, b"v2-different-content".len() as u64);
 }
+
+#[cfg(windows)]
+#[test]
+fn scan_preserves_file_id_across_rename() {
+    use disk_core::scanner::detect_renames;
+
+    let root = tempdir().unwrap();
+    let from = root.path().join("a.md");
+    fs::write(&from, b"rename-me").unwrap();
+
+    let first = FileScanner::new(
+        root.path().to_path_buf(),
+        default_filter(),
+        HashMap::new(),
+        "node-A".into(),
+    )
+    .scan()
+    .unwrap();
+    assert_eq!(first.len(), 1);
+    assert!(first[0].inode.is_some());
+
+    let to = root.path().join("b.md");
+    fs::rename(&from, &to).unwrap();
+
+    let second = FileScanner::new(
+        root.path().to_path_buf(),
+        default_filter(),
+        HashMap::new(),
+        "node-A".into(),
+    )
+    .scan()
+    .unwrap();
+    assert_eq!(second.len(), 1);
+    assert_eq!(second[0].inode, first[0].inode);
+
+    let renames = detect_renames(&first, &second);
+    assert_eq!(renames.len(), 1);
+    assert_eq!(renames[0].from, PathBuf::from("a.md"));
+    assert_eq!(renames[0].to, PathBuf::from("b.md"));
+}

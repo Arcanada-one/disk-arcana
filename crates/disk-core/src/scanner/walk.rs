@@ -69,7 +69,7 @@ impl FileScanner {
                 .map_err(|e| ScannerError::Walk(e.to_string()))?;
             let size = meta.len();
             let mtime_ns = mtime_nanos(&meta);
-            let inode = inode_of(&meta);
+            let inode = crate::platform::inode_from_path(abs);
 
             let prior = self.last_known.get(&rel);
             let content_hash = match fast_path_hash(prior, size, mtime_ns) {
@@ -110,25 +110,6 @@ fn mtime_nanos(m: &std::fs::Metadata) -> i64 {
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_nanos() as i64)
         .unwrap_or(0)
-}
-
-#[cfg(unix)]
-fn inode_of(m: &std::fs::Metadata) -> Option<u64> {
-    use std::os::unix::fs::MetadataExt;
-    Some(m.ino())
-}
-
-#[cfg(windows)]
-fn inode_of(m: &std::fs::Metadata) -> Option<u64> {
-    use std::os::windows::fs::MetadataExt;
-    // The stable `std` API does not expose FILE_ID_INFO yet. Creation time is
-    // a temporary identity fallback until the Windows watcher phase adds it.
-    Some(m.creation_time())
-}
-
-#[cfg(not(any(unix, windows)))]
-fn inode_of(_: &std::fs::Metadata) -> Option<u64> {
-    None
 }
 
 /// One-shot helper: instantiate a [`FileScanner`] with no prior cache and

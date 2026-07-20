@@ -1,12 +1,12 @@
 //! Platform-specific filesystem identity and path helpers.
 //!
-//! `FileMeta::inode` remains the wire/database-compatible field for now. On
-//! Unix it contains the inode; on Windows the scanner stores a temporary
-//! creation-time identity until the watcher adds `FILE_ID_INFO`. This module gives callers a
-//! platform-neutral identity type while the richer Windows `FILE_ID_INFO`
-//! representation is introduced in a later DISK-0013 phase.
+//! `FileMeta::inode` remains the wire/database-compatible `u64` field. On
+//! Unix it stores the inode number; on Windows it stores a stable file identity
+//! derived from `FILE_ID_INFO` (via the `file-id` crate) for rename detection.
 
 use std::path::{Path, PathBuf};
+
+use file_id::FileId;
 
 use crate::types::FileMeta;
 
@@ -17,6 +17,24 @@ pub struct FileIdentity(pub u64);
 /// Extract the identity captured in a metadata snapshot.
 pub fn identity(meta: &FileMeta) -> Option<FileIdentity> {
     meta.inode.map(FileIdentity)
+}
+
+/// Read the platform file identity for `path` and encode it into the `inode`
+/// wire field.
+pub fn inode_from_path(path: &Path) -> Option<u64> {
+    file_id::get_file_id(path).ok().map(|id| encode_file_id(&id))
+}
+
+/// Collapse a platform [`FileId`] into the single `u64` stored on [`FileMeta`].
+pub fn encode_file_id(id: &FileId) -> u64 {
+    match id {
+        FileId::Inode { inode_number, .. } => *inode_number,
+        FileId::LowRes {
+            volume_serial_number,
+            file_index,
+        } => ((*volume_serial_number as u64) << 32) | *file_index,
+        FileId::HighRes { file_id, .. } => *file_id as u64,
+    }
 }
 
 /// Normalize a path for Windows APIs without changing Unix semantics.
@@ -55,6 +73,41 @@ mod tests {
             node_id: "n".into(),
         };
         assert_eq!(identity(&meta), Some(FileIdentity(42)));
+    }
+
+    #[test]
+    fn encode_file_id_maps_unix_inode() {
+        let id = FileId::Inode {
+            device_id: 7,
+            inode_number: 42,
+        };
+        assert_eq!(encode_file_id(&id), 42);
+    }
+
+    #[test]
+    fn encode_file_id_maps_windows_low_res() {
+        let id = FileId::LowRes {
+            volume_serial_number: 0xABCD,
+            file_index: 0x1234_5678,
+        };
+        assert_eq!(encode_file_id(&id), ((0xABCD_u64) << 32) | 0x1234_5678);
+    }
+
+    #[test]
+    fn encode_file_id_maps_windows_high_res_low_qword() {
+        let id = FileId::HighRes {
+            volume_serial_number: 99,
+            file_id: 0x0123_4567_89AB_CDEF_0123_4567_89AB_CDEF,
+        };
+        assert_eq!(encode_file_id(&id), 0x0123_4567_89AB_CDEF);
+    }
+
+    #[test]
+    fn inode_from_path_reads_live_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("probe.md");
+        std::fs::write(&path, b"x").unwrap();
+        assert!(inode_from_path(&path).is_some());
     }
 
     #[cfg(windows)]
