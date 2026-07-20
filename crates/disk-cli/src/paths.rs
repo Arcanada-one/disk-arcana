@@ -62,5 +62,4 @@ mod tests {
         assert!(DEFAULT_STATE_DIR.starts_with(r"C:\ProgramData\disk-arcana"));
         assert_eq!(DEFAULT_INSTALL_DIR, r"C:\Program Files\Disk Arcana");
     }
-
 }
