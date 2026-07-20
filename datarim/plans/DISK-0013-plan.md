@@ -31,7 +31,7 @@ merge PR, tag release, Windows VM e2e (DISK-RB-008), MSI build/sign on Windows h
 | **2** | `FILE_ID_INFO` rename identity via `file-id` crate; scanner wired; Windows rename IT | **Done** | `7a5bb5e` |
 | **3** | `paths.rs` ProgramData defaults; `install-windows.ps1`; `bundle-windows.ps1`; CI portable zip artifact | **Done** | `f7e5111` |
 | **4** | `test-windows-smoke.ps1` in CI; Windows client job on tag release; formalize this plan; document VM e2e gap | **Done** | `1bddd8f` |
-| **5** | VM e2e playbook (DISK-RB-008); MSI WiX scaffold; `uninstall-windows.ps1`; plan status | **Done** | TBD |
+| **5** | VM e2e playbook (DISK-RB-008); MSI WiX scaffold; `uninstall-windows.ps1`; plan status | **Done** | `4662cfd` |
 
 ---
 
