@@ -1,7 +1,7 @@
 ---
 taskId: DISK-0013
 title: Windows Support (v2.0 prep)
-status: in_progress
+status: pending_operator_gates
 created: 2026-07-20
 complexity: L2
 prefix: DISK
@@ -13,14 +13,13 @@ phase: implementation
 
 **Goal:** Ship a Windows-capable Disk Arcana **client** (`disk` CLI + daemon) with CI
 coverage, stable rename identity, operator install path, portable release artifact,
-and documented gaps for live VM sync e2e.
+documented VM validation playbook, and MSI scaffold for a future signed release.
 
 **Parent:** `DISK-0001` §Phase 12 (Windows Support). **Branch:**
 `DISK-0013-phase1`. **PR:** #39 (do not merge until operator lifts hard-gate).
 
-**Out of scope (this task):** MSI (`cargo-wix`), in-process `windows-service`
-crate, full client↔server sync cycle on a dedicated Windows VM, Obsidian desktop
-validation on Windows.
+**Agent-autonomous work complete through Phase 5.** Remaining items require operator:
+merge PR, tag release, Windows VM e2e (DISK-RB-008), MSI build/sign on Windows host.
 
 ---
 
@@ -32,6 +31,7 @@ validation on Windows.
 | **2** | `FILE_ID_INFO` rename identity via `file-id` crate; scanner wired; Windows rename IT | **Done** | `7a5bb5e` |
 | **3** | `paths.rs` ProgramData defaults; `install-windows.ps1`; `bundle-windows.ps1`; CI portable zip artifact | **Done** | `f7e5111` |
 | **4** | `test-windows-smoke.ps1` in CI; Windows client job on tag release; formalize this plan; document VM e2e gap | **Done** | `1bddd8f` |
+| **5** | VM e2e playbook (DISK-RB-008); MSI WiX scaffold; `uninstall-windows.ps1`; plan status | **Done** | TBD |
 
 ---
 
@@ -68,41 +68,50 @@ validation on Windows.
 
 ---
 
-## Phase 4 — E2E smoke prep + release (this phase)
+## Phase 4 — E2E smoke prep + release (done)
 
 ### 4.1 CI smoke (`scripts/test-windows-smoke.ps1`)
 
-Runs on `windows-latest` **without** admin / Windows Service:
-
-1. `disk --help`
-2. Write temp `disk.toml` with Windows-absolute share + cert paths
-3. `disk config validate --file …`
-4. Spawn `disk daemon start --foreground --status-bind 127.0.0.1:0`, parse
-   listening port from stdout, `GET /status`, assert node id in JSON
-5. Stop daemon process
-
-Wired into `.github/workflows/windows.yml` after release build.
+Runs on `windows-latest` **without** admin / Windows Service.
 
 ### 4.2 Release workflow Windows job
 
-Add `build-windows-client` job to `.github/workflows/release-deploy.yml` on
-`refs/tags/v*.*.*`:
+`build-windows-client` in `release-deploy.yml` on tag `v*.*.*`.
 
-- Build `disk` release binary on `windows-latest`
-- Run `bundle-windows.ps1` with tag version label
-- Attach `disk-arcana-windows-x86_64.zip` to GitHub Release (alongside Linux server binary)
+---
 
-**Note:** Linux server build remains on self-hosted runner; Windows client build uses
-GitHub-hosted `windows-latest` (no cross-compile from DEVS required).
+## Phase 5 — Docs + MSI scaffold (done, no operator)
 
-### 4.3 Documentation / gaps
+### 5.1 VM e2e playbook
 
-| Gap | Reason | Follow-up |
-|-----|--------|-----------|
-| Live Windows VM full sync e2e | No managed Windows VM on DEVS fleet; `windows-latest` covers compile + smoke only | Operator-run on vika-pc or dedicated VM; extend smoke to enrolled node |
-| `install-windows.ps1` in CI | Requires elevation (`#Requires -RunAsAdministrator`) | Manual / operator VM checklist in plan |
-| MSI installer | Deferred; portable zip satisfies v2.0 prep | Optional DISK-0013-FU or Phase 5 |
-| `windows-service` in-process | External `sc.exe` matches Linux systemd / macOS launchd pattern | Revisit only if service control needs Rust API |
+`docs/runbooks/DISK-RB-008-windows-vm-e2e.md` — operator checklist for install,
+enroll, share, sync, rename validation on a Windows VM. **Not executed on DEVS.**
+
+### 5.2 MSI scaffold (build deferred)
+
+| Asset | Purpose |
+|-------|---------|
+| `deploy/windows/wix/Product.wxs` | WiX template (service custom action stub) |
+| `scripts/build-msi.ps1` | Build on Windows when WiX Toolset installed |
+| `scripts/validate-wix-scaffold.ps1` | XML well-formed check in CI (no WiX required) |
+| `deploy/windows/README.md` | Operator notes |
+
+### 5.3 Uninstall helper
+
+`scripts/uninstall-windows.ps1` — stop/delete service, remove Program Files;
+optional `-PurgeConfig` for ProgramData.
+
+---
+
+## Operator gates (STOP — agent cannot proceed)
+
+| Gate | Action | Owner |
+|------|--------|-------|
+| **Merge PR #39** | Land Windows work to `main` | Operator |
+| **Merge PR #38** | Queue integration (separate) | Operator |
+| **Tag `v*.*.*`** | Trigger release zip attach | Operator |
+| **DISK-RB-008 VM e2e** | Full enroll + sync on Windows host | Operator |
+| **MSI build + sign** | Run `build-msi.ps1` on Windows + code signing | Operator |
 
 ---
 
@@ -114,23 +123,24 @@ GitHub-hosted `windows-latest` (no cross-compile from DEVS required).
 | `scan_preserves_file_id_across_rename` | windows.yml test | 2 |
 | Portable zip artifact | windows.yml upload | 3 |
 | `test-windows-smoke.ps1` | windows.yml | 4 |
+| `validate-wix-scaffold.ps1` | windows.yml | 5 |
 | Release zip on tag | release-deploy.yml | 4 |
-| VM install + sync cycle | **Manual / blocked** | — |
+| VM install + sync cycle | **DISK-RB-008 (operator)** | 5 |
+| MSI `.msi` artifact | **Windows host (operator)** | 5 scaffold |
 
 ---
 
-## Operator checklist (post-merge, on Windows host)
+## Operator checklist (post-merge)
 
-1. Download `disk-arcana-windows-x86_64.zip` from Release or CI artifact.
-2. `.\disk.exe config validate --file disk.toml.example` (after editing paths).
-3. Admin PowerShell: `.\install-windows.ps1 -Binary .\disk.exe`
-4. `Invoke-WebRequest http://127.0.0.1:9444/status`
-5. Enroll + share init per `DISK-RB-001`; verify sync against dev server (manual).
+1. Merge PR #39 (after review).
+2. Download zip from CI artifact or post-tag Release.
+3. Follow **DISK-RB-008** on a Windows VM.
+4. Optional: build MSI via `scripts/build-msi.ps1` when WiX is available.
 
 ---
 
 ## References
 
 - Parent plan: `datarim/plans/DISK-0001-plan.md` §Phase 12
-- PRD: `datarim/prd/PRD-DISK-0001-disk-arcana.md`
+- VM playbook: `docs/runbooks/DISK-RB-008-windows-vm-e2e.md`
 - Linux install parity: `scripts/install-linux.sh`, `deploy/linux/disk-arcana.service`
