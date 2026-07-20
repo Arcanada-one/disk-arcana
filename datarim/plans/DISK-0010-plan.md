@@ -1,8 +1,10 @@
 ---
 taskId: DISK-0010
 title: Landing Page + docs + install script
-status: in_progress
-created: 2026-07-20
+status: done
+merged: 2026-07-20
+merge_commit: 0ed1445
+pr: 42
 complexity: L2
 prefix: DISK
 parent: DISK-0001
