@@ -13,6 +13,7 @@
 use std::fs;
 use std::process::Command;
 
+#[cfg(not(windows))]
 const BASE: &str = r#"
 [node]
 id = "arcana-ai"
@@ -24,6 +25,35 @@ address = "host:9443"
 client_cert = "/etc/disk-arcana/client.crt"
 client_key  = "/etc/disk-arcana/client.key"
 "#;
+
+#[cfg(windows)]
+const BASE: &str = r#"
+[node]
+id = "arcana-ai"
+[node.default]
+intended_direction = "bidirectional"
+
+[server]
+address = "host:9443"
+client_cert = "C:\\ProgramData\\disk-arcana\\client.crt"
+client_key  = "C:\\ProgramData\\disk-arcana\\client.key"
+"#;
+
+fn hermes_share_path() -> &'static str {
+    if cfg!(windows) {
+        r"C:\var\disk-arcana\hermes"
+    } else {
+        "/var/disk-arcana/hermes"
+    }
+}
+
+fn temp_share_path() -> &'static str {
+    if cfg!(windows) {
+        r"C:\temp\x"
+    } else {
+        "/tmp/x"
+    }
+}
 
 #[test]
 fn share_init_publish_appends_publisher_block_end_to_end() {
@@ -41,7 +71,7 @@ fn share_init_publish_appends_publisher_block_end_to_end() {
             "--name",
             "hermes-artefacts",
             "--path",
-            "/var/disk-arcana/hermes",
+            hermes_share_path(),
             "--sign-key-ref",
             "vault:transit/keys/hermes-publisher",
             "--config",
@@ -79,7 +109,15 @@ fn share_init_publish_missing_sign_key_ref_exits_nonzero() {
 
     let output = Command::new(bin)
         .args([
-            "share", "init", "--preset", "publish", "--name", "x", "--path", "/tmp/x", "--config",
+            "share",
+            "init",
+            "--preset",
+            "publish",
+            "--name",
+            "x",
+            "--path",
+            temp_share_path(),
+            "--config",
         ])
         .arg(&cfg)
         .output()
