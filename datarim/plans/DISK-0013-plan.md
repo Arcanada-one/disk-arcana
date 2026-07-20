@@ -142,5 +142,22 @@ optional `-PurgeConfig` for ProgramData.
 ## References
 
 - Parent plan: `datarim/plans/DISK-0001-plan.md` §Phase 12
+- Platform decisions: `docs/windows-platform-notes.md`
 - VM playbook: `docs/runbooks/DISK-RB-008-windows-vm-e2e.md`
 - Linux install parity: `scripts/install-linux.sh`, `deploy/linux/disk-arcana.service`
+
+---
+
+## DISK-0001 Phase 12 traceability
+
+See `docs/windows-platform-notes.md` for the full matrix. Summary:
+
+| §12 item | Status |
+|----------|--------|
+| Cross-compile + CI | Done (Phases 1, 4) |
+| `notify` watcher | Done — verified via `it_watcher_debounce` on `windows-latest` |
+| FILE_ID rename | Done (Phase 2) |
+| `\\?\` long paths | Done (Phase 1 `platform.rs`) |
+| Installer | Done — portable zip + WiX scaffold (Phases 3, 5) |
+| Windows Service | Done — `sc.exe` install script; `windows-service` crate deferred |
+| VM full sync e2e | **Operator** — DISK-RB-008 |

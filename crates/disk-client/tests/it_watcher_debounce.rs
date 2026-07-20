@@ -28,9 +28,10 @@ async fn rapid_writes_to_one_file_debounce_to_single_event() {
     let share_root = dir.path().canonicalize().expect("canonical share root");
     let mut watcher = FsWatcher::watch(&share_root).expect("watch must succeed");
 
-    // Slight delay so the platform-native watcher arms its inotify /
-    // FSEvents subscription before the first write. Without this the
-    // initial create can race ahead of the subscription on Linux.
+    // Slight delay so the platform-native watcher arms its subscription before
+    // the first write. Backends: inotify (Linux), FSEvents (macOS),
+    // ReadDirectoryChangesW (Windows via notify). Without this delay the
+    // initial create can race ahead of the subscription on Linux/Windows CI.
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let target = share_root.join("rapid.md");
