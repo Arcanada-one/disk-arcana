@@ -22,7 +22,9 @@ pub fn identity(meta: &FileMeta) -> Option<FileIdentity> {
 /// Read the platform file identity for `path` and encode it into the `inode`
 /// wire field.
 pub fn inode_from_path(path: &Path) -> Option<u64> {
-    file_id::get_file_id(path).ok().map(|id| encode_file_id(&id))
+    file_id::get_file_id(path)
+        .ok()
+        .map(|id| encode_file_id(&id))
 }
 
 /// Collapse a platform [`FileId`] into the single `u64` stored on [`FileMeta`].
