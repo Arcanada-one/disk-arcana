@@ -37,12 +37,14 @@ jobs:
             exit 0
           fi
           PROTOC_VERSION=25.3
-          curl -sSL -o /tmp/protoc.zip \
+          PROTOC_DIR=$(mktemp -d "${RUNNER_TEMP:-/tmp}/protoc.XXXXXX")
+          curl -sSL -o "$PROTOC_DIR/protoc.zip" \
             "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
-          python3 -c "import zipfile; zipfile.ZipFile('/tmp/protoc.zip').extractall('/tmp/protoc')"
-          chmod +x /tmp/protoc/bin/protoc
-          echo "/tmp/protoc/bin" >> "$GITHUB_PATH"
-          /tmp/protoc/bin/protoc --version
+          python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' \
+            "$PROTOC_DIR/protoc.zip" "$PROTOC_DIR"
+          chmod +x "$PROTOC_DIR/bin/protoc"
+          echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
+          "$PROTOC_DIR/bin/protoc" --version
       - name: cargo fmt
         run: cargo fmt --all -- --check
       - name: cargo clippy
@@ -109,12 +111,14 @@ jobs:
             exit 0
           fi
           PROTOC_VERSION=25.3
-          curl -sSL -o /tmp/protoc.zip \
+          PROTOC_DIR=$(mktemp -d "${RUNNER_TEMP:-/tmp}/protoc.XXXXXX")
+          curl -sSL -o "$PROTOC_DIR/protoc.zip" \
             "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
-          python3 -c "import zipfile; zipfile.ZipFile('/tmp/protoc.zip').extractall('/tmp/protoc')"
-          chmod +x /tmp/protoc/bin/protoc
-          echo "/tmp/protoc/bin" >> "$GITHUB_PATH"
-          /tmp/protoc/bin/protoc --version
+          python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' \
+            "$PROTOC_DIR/protoc.zip" "$PROTOC_DIR"
+          chmod +x "$PROTOC_DIR/bin/protoc"
+          echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
+          "$PROTOC_DIR/bin/protoc" --version
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov --locked --quiet
       - name: cargo test
@@ -145,12 +149,14 @@ jobs:
             exit 0
           fi
           PROTOC_VERSION=25.3
-          curl -sSL -o /tmp/protoc.zip \
+          PROTOC_DIR=$(mktemp -d "${RUNNER_TEMP:-/tmp}/protoc.XXXXXX")
+          curl -sSL -o "$PROTOC_DIR/protoc.zip" \
             "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
-          python3 -c "import zipfile; zipfile.ZipFile('/tmp/protoc.zip').extractall('/tmp/protoc')"
-          chmod +x /tmp/protoc/bin/protoc
-          echo "/tmp/protoc/bin" >> "$GITHUB_PATH"
-          /tmp/protoc/bin/protoc --version
+          python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' \
+            "$PROTOC_DIR/protoc.zip" "$PROTOC_DIR"
+          chmod +x "$PROTOC_DIR/bin/protoc"
+          echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
+          "$PROTOC_DIR/bin/protoc" --version
       - name: Install cargo-fuzz
         run: cargo +nightly install cargo-fuzz --locked --quiet
       - name: cargo fuzz run apply_plan (bounded smoke run, DISK-0012)
@@ -192,12 +198,14 @@ jobs:
             exit 0
           fi
           PROTOC_VERSION=25.3
-          curl -sSL -o /tmp/protoc.zip \
+          PROTOC_DIR=$(mktemp -d "${RUNNER_TEMP:-/tmp}/protoc.XXXXXX")
+          curl -sSL -o "$PROTOC_DIR/protoc.zip" \
             "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
-          python3 -c "import zipfile; zipfile.ZipFile('/tmp/protoc.zip').extractall('/tmp/protoc')"
-          chmod +x /tmp/protoc/bin/protoc
-          echo "/tmp/protoc/bin" >> "$GITHUB_PATH"
-          /tmp/protoc/bin/protoc --version
+          python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' \
+            "$PROTOC_DIR/protoc.zip" "$PROTOC_DIR"
+          chmod +x "$PROTOC_DIR/bin/protoc"
+          echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
+          "$PROTOC_DIR/bin/protoc" --version
       - name: Install cross
         if: matrix.use_cross
         run: cargo install cross --locked
