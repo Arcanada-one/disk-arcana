@@ -38,9 +38,11 @@ use disk_client::connection::DiskClient;
 use disk_client::resolve_vault_key;
 use disk_client::rest_api::{serve, DaemonState, ShareSnapshot};
 use disk_client::sync_loop::{LoopState, LoopTrigger, RemoteSync, SyncLoop, POLL_INTERVAL};
+use disk_client::telemetry::{sync_outcome_label, ClientTelemetry};
 use disk_client::BlobCache;
 use disk_core::{MetaDb, DEFAULT_CONFLICT_TTL_SECS};
 use rand::{rngs::StdRng, SeedableRng};
+use serde_json::json;
 
 /// CLI arguments for `disk daemon start`.
 #[derive(clap::Args, Debug)]
@@ -83,6 +85,21 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
     let cfg = Arc::new(cfg);
     let node_id = cfg.node.id.clone();
     let config_version = "1.1"; // matches PRD-DISK-0001 schema version.
+
+    let telemetry = ClientTelemetry::open(
+        &args.state_dir,
+        &cfg.telemetry,
+        &cfg.server.address,
+        &node_id,
+    );
+    if let Some(t) = &telemetry {
+        t.capture(
+            "client_daemon_started",
+            json!({
+                "share_count": cfg.shares.len(),
+            }),
+        );
+    }
 
     let (state, manual_sync_rx, reload_rx) = DaemonState::new(&node_id, config_version);
     state.set_shares(build_share_snapshots(&cfg)).await;
@@ -229,6 +246,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
         let meta_db = meta_db.clone();
         let blob_cache = Arc::clone(&blob_cache);
         let e2ee_key = e2ee_key.clone();
+        let telemetry_for_task = telemetry.clone();
         // Clone the DaemonState handle into the per-share task so it can
         // write live loop state back via `update_share`.
         let state_for_task = state.clone();
@@ -357,6 +375,11 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
                         guard.recv().await
                     } => LoopTrigger::Manual,
                 };
+                let trigger_label = match trigger {
+                    LoopTrigger::Tick => "tick",
+                    LoopTrigger::Manual => "manual",
+                    LoopTrigger::FsEventBatch => "fs_event",
+                };
 
                 // Write a syncing snapshot before run_iteration so a fast
                 // iteration still surfaces "syncing" to GET /status callers.
@@ -414,6 +437,19 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
                     loop_sm.last_error().map(|e| e.to_string()),
                 );
                 state_for_task.update_share(&share_name, final_snap).await;
+
+                if let Some(t) = telemetry_for_task.as_ref() {
+                    let outcome =
+                        sync_outcome_label(loop_sm.state(), loop_sm.last_error().is_some());
+                    t.capture(
+                        "client_sync_cycle",
+                        json!({
+                            "share": share_name,
+                            "outcome": outcome,
+                            "trigger": trigger_label,
+                        }),
+                    );
+                }
             }
         });
         sync_task_handles.push(handle);
