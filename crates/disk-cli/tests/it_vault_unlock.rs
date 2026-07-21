@@ -63,7 +63,11 @@ fn vault_unlock_lock_status_round_trip() {
         ])
         .output()
         .expect("vault status");
-    assert!(status_locked.status.success());
+    assert!(
+        status_locked.status.success(),
+        "vault status failed: {}",
+        String::from_utf8_lossy(&status_locked.stderr)
+    );
     assert!(String::from_utf8_lossy(&status_locked.stdout).contains("locked"));
 
     let unlock = Command::new(&bin)
