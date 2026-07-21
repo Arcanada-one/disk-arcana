@@ -4,6 +4,7 @@ use std::process::Command;
 
 use tempfile::tempdir;
 
+#[cfg(not(windows))]
 const CONFIG: &str = r#"
 [node]
 id = "vault-test-node"
@@ -18,6 +19,23 @@ client_key  = "/etc/disk-arcana/client.key"
 [[share]]
 name = "wiki"
 path = "/data/wiki"
+"#;
+
+#[cfg(windows)]
+const CONFIG: &str = r#"
+[node]
+id = "vault-test-node"
+[node.default]
+intended_direction = "bidirectional"
+
+[server]
+address = "host:9443"
+client_cert = "C:\\ProgramData\\disk-arcana\\client.crt"
+client_key  = "C:\\ProgramData\\disk-arcana\\client.key"
+
+[[share]]
+name = "wiki"
+path = "C:\\data\\wiki"
 "#;
 
 fn disk_bin() -> String {
