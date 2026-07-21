@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sub-processors — Disk Arcana</title>
+  <meta name="robots" content="index, follow">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' }</script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
+  <article class="max-w-3xl mx-auto px-6 py-12">
+    <p class="text-sm text-emerald-400"><a href="index.html">Legal</a> · Sub-processors</p>
+    <h1 class="text-3xl font-bold tracking-tight mt-2">Sub-processor registry</h1>
+    <p class="text-sm text-slate-400 mt-2">Last updated: 2026-07-21</p>
+
+    <p class="mt-6 text-sm text-slate-300 leading-relaxed">
+      Arcanada uses the following infrastructure providers to operate Disk Arcana cloud.
+      Material changes are announced via the <a href="privacy.html" class="text-emerald-400 hover:underline">Privacy Policy</a>.
+    </p>
+
+    <div class="mt-8 space-y-4" id="processor-list">
+      <p class="text-sm text-slate-400">Loading registry…</p>
+    </div>
+
+    <p class="mt-8 text-sm text-slate-400">
+      Machine-readable registry: <code class="text-slate-300">GET /compliance/sub-processors</code> on the health API.
+    </p>
+
+    <footer class="mt-12 pt-6 border-t border-slate-800 text-xs text-slate-500">
+      <p class="italic opacity-60">One human life matters</p>
+    </footer>
+  </article>
+  <script>
+    const apiBase = (localStorage.getItem('diskApiBase') || location.origin).replace(/\/$/, '');
+    (async () => {
+      const list = document.getElementById('processor-list');
+      try {
+        const res = await fetch(apiBase + '/compliance/sub-processors');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        list.innerHTML = data.processors.map(p =>
+          '<div class="border border-slate-800 rounded-lg p-4">' +
+          '<h2 class="font-medium text-slate-100">' + escapeHtml(p.name) + '</h2>' +
+          '<p class="text-sm text-slate-400 mt-1">' + escapeHtml(p.purpose) + '</p>' +
+          '<p class="text-sm text-slate-500 mt-2">' + escapeHtml(p.location) + '</p>' +
+          '<a class="text-sm text-emerald-400 hover:underline mt-2 inline-block" href="' +
+            escapeHtml(p.website) + '" rel="noopener noreferrer">' + escapeHtml(p.website) + '</a>' +
+          '</div>'
+        ).join('');
+      } catch (e) {
+        list.innerHTML = '<p class="text-sm text-red-400">Could not load registry: ' + escapeHtml(e.message) + '</p>';
+      }
+    })();
+    function escapeHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+  </script>
+</body>
+</html>

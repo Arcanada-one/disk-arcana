@@ -2,4 +2,4 @@
 
 pub mod routes;
 
-pub use routes::{delete_account, export_data};
+pub use routes::{delete_account, export_data, list_consents, sub_processors};

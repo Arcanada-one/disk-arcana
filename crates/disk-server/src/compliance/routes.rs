@@ -165,6 +165,12 @@ async fn delete_account_inner(
     let tenant_id = user.tenant_id.clone();
     let user_id = user.id.clone();
 
+    state
+        .meta_db
+        .delete_consent_events_for_user(&user_id)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
+
     let removed = state
         .meta_db
         .delete_user_by_id(&user_id)
@@ -195,6 +201,91 @@ async fn delete_account_inner(
         deleted: true,
         user_id,
         tenant_purged,
+    })
+}
+
+#[derive(Debug, Serialize)]
+pub struct SubProcessorEntry {
+    pub name: &'static str,
+    pub purpose: &'static str,
+    pub location: &'static str,
+    pub website: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SubProcessorsResponse {
+    pub updated_at: &'static str,
+    pub processors: &'static [SubProcessorEntry],
+}
+
+pub async fn sub_processors() -> Json<SubProcessorsResponse> {
+    Json(sub_processors_payload())
+}
+
+fn sub_processors_payload() -> SubProcessorsResponse {
+    SubProcessorsResponse {
+        updated_at: "2026-07-21",
+        processors: &[
+            SubProcessorEntry {
+                name: "Hetzner Online GmbH",
+                purpose: "Cloud infrastructure hosting",
+                location: "Germany (EU/EEA)",
+                website: "https://www.hetzner.com",
+            },
+            SubProcessorEntry {
+                name: "Cloudflare, Inc.",
+                purpose: "CDN, DNS, and DDoS protection",
+                location: "United States (Standard Contractual Clauses)",
+                website: "https://www.cloudflare.com",
+            },
+        ],
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ConsentEventResponse {
+    pub consent_type: String,
+    pub policy_version: String,
+    pub recorded_at: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ConsentsListResponse {
+    pub events: Vec<ConsentEventResponse>,
+}
+
+pub async fn list_consents(
+    State(state): State<Arc<AuthHttpState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    match list_consents_inner(&state, &headers).await {
+        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Err((code, msg)) => (code, Json(json!({ "error": msg }))).into_response(),
+    }
+}
+
+async fn list_consents_inner(
+    state: &AuthHttpState,
+    headers: &HeaderMap,
+) -> Result<ConsentsListResponse, (StatusCode, &'static str)> {
+    let claims = verify_bearer(state, headers).await?;
+    let user = resolve_user_from_access(state, &claims).await?;
+
+    let rows = state
+        .meta_db
+        .list_consent_events_for_user(&user.id)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
+
+    Ok(ConsentsListResponse {
+        events: rows
+            .into_iter()
+            .map(|r| ConsentEventResponse {
+                consent_type: r.consent_type,
+                policy_version: r.policy_version,
+                recorded_at: r.recorded_at,
+            })
+            .collect(),
     })
 }
 
@@ -475,6 +566,76 @@ mod integration_tests {
                 .await
                 .unwrap();
             assert_eq!(resp.status(), 400);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn compliance_sub_processors_is_public() {
+        let dir = tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("subproc.sqlite"))
+            .await
+            .unwrap();
+        with_compliance_server(db, |addr| async move {
+            let body: Value = reqwest::Client::new()
+                .get(format!("http://{addr}/compliance/sub-processors"))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert!(body["processors"].as_array().unwrap().len() >= 2);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn compliance_consents_recorded_on_signup() {
+        let dir = tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("consents.sqlite"))
+            .await
+            .unwrap();
+
+        with_compliance_server(db, |addr| async move {
+            let base = format!("http://{addr}");
+            let client = reqwest::Client::new();
+
+            let signup: Value = client
+                .post(format!("{base}/auth/signup"))
+                .json(&serde_json::json!({
+                    "email": "consent@example.com",
+                    "password": "secure-pass",
+                    "tenant_id": "consent-corp"
+                }))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            let token = signup["access_token"].as_str().unwrap();
+
+            let consents: Value = client
+                .get(format!("{base}/compliance/consents"))
+                .bearer_auth(token)
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+
+            let events = consents["events"].as_array().unwrap();
+            assert_eq!(events.len(), 2);
+            assert_eq!(events[0]["consent_type"], "terms_of_service");
+            assert_eq!(events[1]["consent_type"], "privacy_policy");
         })
         .await;
     }

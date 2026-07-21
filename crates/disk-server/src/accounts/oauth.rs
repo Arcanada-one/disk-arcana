@@ -403,6 +403,11 @@ async fn login_or_create_oauth_user(
         .set_plan_tier(Some(&tenant_id), PlanTier::Free)
         .await;
 
+    let _ = state
+        .meta_db
+        .record_signup_policy_consents(&user_id, &tenant_id)
+        .await;
+
     finish_oauth_login(
         state,
         &user_id,

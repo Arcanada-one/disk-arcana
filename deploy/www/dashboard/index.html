@@ -166,6 +166,7 @@
           class="text-sm border border-slate-700 rounded px-3 py-1.5 hover:border-emerald-500">
           Export my data
         </button>
+        <ul id="consent-list" class="mt-4 text-xs text-slate-500 space-y-1 hidden"></ul>
       </div>
 
       <div class="border border-red-900/50 rounded-lg p-4">
@@ -186,6 +187,7 @@
         <a href="../legal/privacy.html" class="hover:text-slate-300">Privacy</a>
         <a href="../legal/terms.html" class="hover:text-slate-300">Terms</a>
         <a href="../legal/dpa.html" class="hover:text-slate-300">DPA</a>
+        <a href="../legal/sub-processors.html" class="hover:text-slate-300">Sub-processors</a>
         <span class="italic opacity-60">One human life matters</span>
       </footer>
     </section>
@@ -459,12 +461,31 @@
         .replace(/"/g, '&quot;');
     }
 
+    async function loadConsents() {
+      const list = document.getElementById('consent-list');
+      try {
+        const data = await api('/compliance/consents');
+        if (!data.events.length) {
+          list.classList.add('hidden');
+          return;
+        }
+        list.classList.remove('hidden');
+        list.innerHTML = data.events.map(e =>
+          '<li>Consented to <code>' + escapeHtml(e.consent_type) + '</code> v' +
+            escapeHtml(e.policy_version) + ' · ' + formatDate(e.recorded_at) + '</li>'
+        ).join('');
+      } catch {
+        list.classList.add('hidden');
+      }
+    }
+
     async function loadDashboard() {
       dashLoading.classList.remove('hidden');
       clearDashError();
       try {
         const data = await api('/dashboard/summary');
         showDashboard(data);
+        await loadConsents();
       } finally {
         dashLoading.classList.add('hidden');
       }
