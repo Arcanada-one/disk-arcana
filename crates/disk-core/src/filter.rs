@@ -16,7 +16,9 @@ use serde::{Deserialize, Serialize};
 use crate::error::FilterError;
 
 /// Folder / file segments that are *always* excluded.
-const HARDCODED_DENY_SEGMENTS: &[&str] = &[".git", ".disk-archive"];
+///
+/// `.dreamer` — Agent Dreamer runtime state (DISK-0011 / ADR-0001 workflow exclusion).
+const HARDCODED_DENY_SEGMENTS: &[&str] = &[".git", ".disk-archive", ".dreamer"];
 
 /// User-tunable filter rules.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -117,6 +119,13 @@ mod tests {
             deny_segments: vec![],
             ignore_globs: vec![],
         }
+    }
+
+    #[test]
+    fn hardcoded_deny_excludes_dot_dreamer() {
+        let f = Filter::from_config(&FilterRules::default()).unwrap();
+        assert!(f.is_excluded(Path::new("wiki/.dreamer/state.json")));
+        assert!(f.is_excluded(Path::new(".dreamer/cache/images/x.png")));
     }
 
     #[test]
