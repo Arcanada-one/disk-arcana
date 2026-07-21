@@ -54,7 +54,8 @@ pub use e2ee::{
     UploadPayload, VaultKey, KEY_LEN, NONCE_LEN, SALT_LEN,
 };
 pub use embeddings::{
-    is_co_storage_path, scan_share_embeddings, ShareEmbeddingsReport, SidecarManifest, Staleness,
+    is_co_storage_path, normalize_source_rel, scan_share_embeddings, write_sidecar,
+    ShareEmbeddingsReport, SidecarManifest, Staleness, WriteSidecarError, WriteSidecarResult,
     CO_STORAGE_ROOT, EMBEDDINGS_SCHEMA_VERSION,
 };
 pub use error::{
