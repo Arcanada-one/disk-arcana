@@ -24,7 +24,7 @@ Operator walkthrough: `docs/runbooks/DISK-RB-010-owasp-grpc-audit.md`.
 | Asset | Port | Exposure | AuthN | AuthZ |
 |-------|------|----------|-------|-------|
 | Sync gRPC | `:9443` | Internet (mTLS) | Client cert | ACL per share |
-| Enrollment gRPC | `:9445` (design) / shared listener (today) | Internet (TLS) | Opaque token + admin bearer | EnrollmentService scope |
+| Enrollment gRPC | `:9445` (public TLS) + `:9443` (mTLS admin) | Internet (TLS / mTLS) | Opaque token + admin bearer | EnrollmentService scope |
 | REST daemon | `:9444` | **Loopback only** | None (by design) | N/A |
 | Admin enrollment RPCs | Same as enrollment | Internet | `DISK_ADMIN_TOKEN` bearer | Admin-only methods |
 
@@ -56,7 +56,7 @@ See also `SECURITY.md` § Phase 3 threat model (V-7 … V-14).
 | T2.5 | API key brute-force rate limiting | verified | `auth/rate_limit.rs`; `auth/storage.rs`; `tests/auth_rate_limit.rs`; default 5 failures / 60s per `node_id` → `ResourceExhausted` |
 | T2.6 | Enrollment token TTL enforced | verified | `crates/disk-server/tests/enrollment_expired_token.rs` |
 | T2.7 | Enrollment token single-use (replay blocked) | verified | `crates/disk-server/tests/enrollment_token_replay.rs` |
-| T2.8 | Cold-boot enroll without cert (DISK-0044) | gap | Operator-issued internal CA today; design options in backlog `DISK-0044` |
+| T2.8 | Cold-boot enroll without cert (DISK-0044) | verified | Dual listener DISK-0037: `main.rs` `build_tls_public_only` + `:9445`; `it_enrollment_real_binary.rs`; design `docs/design/DISK-0044-enrollment-bootstrap.md` |
 
 ### T3 — Authorization (ACL)
 
@@ -132,7 +132,6 @@ Source of truth: `proto/disk.proto`.
 
 | ID | Item | Tracking |
 |----|------|----------|
-| G2 | DISK-0044 cert-less bootstrap | `datarim/backlog.md` DISK-0044 |
 | G3 | 10K load / soak | Staging operator gate |
 | G4 | External pentest before SaaS | DISK-0017+ |
 

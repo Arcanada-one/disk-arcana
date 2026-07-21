@@ -35,7 +35,7 @@ mitigations:
   - Application-layer ACL enforcer (default-deny on cold boot, signed YAML reload)
   - Operator firewall MUST restrict to fleet IP set; mTLS is not a DoS gate
 review_owner: Pavel Valentov
-related_task: DISK-0037
+related_task: DISK-0037, DISK-0044
 ```
 
 ### `disk-arcana-server` — TLS-only public enrollment listener
@@ -55,7 +55,7 @@ mitigations:
   - Operator firewall MAY remain open for `:9445` (acceptable risk); rate-limit ticket tracked separately
   - No `ServerTlsConfig::client_ca_root` — client-cert absence is the contract, not a gap
 review_owner: Pavel Valentov
-related_task: DISK-0037
+related_task: DISK-0037, DISK-0044
 ```
 
 ### `disk-cli daemon` — local status HTTP

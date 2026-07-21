@@ -12,14 +12,10 @@
 //!
 //! ## Transport
 //!
-//! Production EnrollmentService is a public-RPC endpoint (TLS but **not**
-//! mTLS — proto §DISK-0005 v1.1). Pre-enrollment clients have no client
-//! certificate yet, so the server must expose the EnrollmentService on a
-//! listener without `client_ca_root`. The current production `main.rs`
-//! binds a single mTLS-only listener; the TLS-only enrollment listener
-//! split is deferred (see `datarim/backlog.md` — enrollment listener split).
-//! For R2 the client supports both `tls_ca_cert_pem` (real CA pin) and
-//! `insecure_localhost` (test scaffolding only).
+//! Production `EnrollmentService.Enroll` is exposed on the **TLS-only public
+//! listener** (`DISK_ENROLLMENT_BIND_ADDR`, default `:9445`) — no client
+//! certificate required (DISK-0037 / DISK-0044). Admin RPCs and post-enroll
+//! sync use the mTLS listener (`:9443`). See `docs/design/DISK-0044-enrollment-bootstrap.md`.
 //!
 //! ## CSR
 //!
