@@ -22,6 +22,7 @@ pub mod conflict;
 pub mod content_store;
 pub mod delta;
 pub mod e2ee;
+pub mod embeddings;
 pub mod error;
 pub mod filter;
 pub mod meta_db;
@@ -51,6 +52,10 @@ pub use content_store::{ContentBlobStore, ContentStoreError};
 pub use e2ee::{
     decrypt, encrypt, overlay_scanned_meta, random_salt, E2eeCachedWire, E2eeError, EncryptedBlob,
     UploadPayload, VaultKey, KEY_LEN, NONCE_LEN, SALT_LEN,
+};
+pub use embeddings::{
+    is_co_storage_path, scan_share_embeddings, ShareEmbeddingsReport, SidecarManifest, Staleness,
+    CO_STORAGE_ROOT, EMBEDDINGS_SCHEMA_VERSION,
 };
 pub use error::{
     ConfigError, FilterError, MetaDbError, PathGuardError, ReconcileError, ScannerError,

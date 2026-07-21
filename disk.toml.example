@@ -74,3 +74,9 @@ ttl_days = 30
 [telemetry]
 # Anonymous usage telemetry (off by default).
 opt_in = false
+
+[embeddings]
+# Co-store vector sidecars under `.disk-embeddings/` (DISK-0029).
+enabled = false
+model_id = "bge-m3"
+dimensions = 1024

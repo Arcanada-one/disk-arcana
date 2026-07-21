@@ -4,6 +4,7 @@ mod agents_cmd;
 mod archive_cmd;
 mod commands;
 mod daemon;
+mod embeddings_cmd;
 mod paths;
 mod selective_sync_cmd;
 mod share_init;
@@ -98,6 +99,9 @@ enum Command {
 
     /// LAN peer discovery for P2P sync acceleration (DISK-0027).
     Lan(LanArgs),
+
+    /// Embedding sidecar co-storage diagnostics (DISK-0029).
+    Embeddings(EmbeddingsArgs),
 }
 
 /// `disk daemon <subcmd>` — wrapper.
@@ -664,6 +668,29 @@ pub struct LanPeersArgs {
     pub addr: Option<SocketAddr>,
 }
 
+/// `disk embeddings <subcmd>` — vector sidecar co-storage (DISK-0029).
+#[derive(clap::Args, Debug)]
+pub struct EmbeddingsArgs {
+    #[command(subcommand)]
+    pub command: EmbeddingsCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum EmbeddingsCommand {
+    /// Report fresh/stale/missing embedding sidecars for configured shares.
+    Status(EmbeddingsStatusArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct EmbeddingsStatusArgs {
+    /// Share name from `disk.toml`. Defaults to all shares.
+    #[arg(long)]
+    pub share: Option<String>,
+    /// Path to `disk.toml`. Defaults to platform install path.
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+}
+
 /// `disk agents <subcmd>` — AI Agents API CLI (DISK-0028 slice 3).
 #[derive(clap::Args, Debug)]
 pub struct AgentsArgs {
@@ -1151,6 +1178,15 @@ async fn main() -> Result<()> {
         },
         Some(Command::Lan(args)) => match args.command {
             LanCommand::Peers(p) => commands::run_lan_peers(p.addr).await,
+        },
+        Some(Command::Embeddings(args)) => match args.command {
+            EmbeddingsCommand::Status(s) => {
+                let config = s
+                    .config
+                    .clone()
+                    .unwrap_or_else(|| PathBuf::from(paths::DEFAULT_CONFIG));
+                embeddings_cmd::run_embeddings_status(&config, s.share.as_deref())
+            }
         },
         Some(Command::Agents(args)) => match args.command {
             AgentsCommand::Webhooks(w) => match w.command {
@@ -1907,6 +1943,20 @@ node_id_hint = "from-bf"
                 assert!(p.addr.is_none());
             }
             other => panic!("expected lan peers, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_embeddings_status() {
+        let cli = Cli::try_parse_from(["disk", "embeddings", "status", "--share", "wiki"]).unwrap();
+        match cli.command {
+            Some(Command::Embeddings(EmbeddingsArgs {
+                command: EmbeddingsCommand::Status(s),
+            })) => {
+                assert_eq!(s.share.as_deref(), Some("wiki"));
+                assert!(s.config.is_none());
+            }
+            other => panic!("expected embeddings status, got {other:?}"),
         }
     }
 

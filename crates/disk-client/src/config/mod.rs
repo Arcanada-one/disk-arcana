@@ -17,8 +17,9 @@ use std::str::FromStr;
 
 pub use reload::{spawn_config_watcher, ConfigSnapshot, ConfigWatcher, ReloadStatus};
 pub use schema::{
-    Direction, DiskConfig, FilterMode, FilterSection, LanSyncSection, NodeDefault, NodeSection,
-    PublisherSection, ServerSection, ShareSection, TelemetrySection, VaultSection,
+    Direction, DiskConfig, EmbeddingsSection, FilterMode, FilterSection, LanSyncSection,
+    NodeDefault, NodeSection, PublisherSection, ServerSection, ShareSection, TelemetrySection,
+    VaultSection,
 };
 pub use validate::{validate, ConfigError};
 
@@ -427,5 +428,30 @@ advertise_port = 9555
         let cfg = DiskConfig::from_str(&toml).unwrap();
         assert!(cfg.lan_sync.enabled);
         assert_eq!(cfg.lan_sync.advertise_port, 9555);
+    }
+
+    #[test]
+    fn embeddings_section_defaults_disabled() {
+        let cfg = DiskConfig::from_str(MINIMAL).unwrap();
+        assert!(!cfg.embeddings.enabled);
+        assert_eq!(cfg.embeddings.model_id, "bge-m3");
+        assert_eq!(cfg.embeddings.dimensions, 1024);
+    }
+
+    #[test]
+    fn embeddings_section_parses_enabled() {
+        let mut toml = MINIMAL.to_string();
+        toml.push_str(
+            r#"
+[embeddings]
+enabled = true
+model_id = "text-embedding-3-small"
+dimensions = 1536
+"#,
+        );
+        let cfg = DiskConfig::from_str(&toml).unwrap();
+        assert!(cfg.embeddings.enabled);
+        assert_eq!(cfg.embeddings.model_id, "text-embedding-3-small");
+        assert_eq!(cfg.embeddings.dimensions, 1536);
     }
 }

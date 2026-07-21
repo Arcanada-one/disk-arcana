@@ -44,6 +44,8 @@ pub struct DiskConfig {
     pub telemetry: TelemetrySection,
     #[serde(default)]
     pub lan_sync: LanSyncSection,
+    #[serde(default)]
+    pub embeddings: EmbeddingsSection,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -186,6 +188,35 @@ impl Default for LanSyncSection {
 
 fn default_lan_advertise_port() -> u16 {
     9447
+}
+
+/// `[embeddings]` section — co-stored vector sidecars (DISK-0029).
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct EmbeddingsSection {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_embeddings_model")]
+    pub model_id: String,
+    #[serde(default = "default_embeddings_dimensions")]
+    pub dimensions: u32,
+}
+
+impl Default for EmbeddingsSection {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model_id: default_embeddings_model(),
+            dimensions: default_embeddings_dimensions(),
+        }
+    }
+}
+
+fn default_embeddings_model() -> String {
+    "bge-m3".to_owned()
+}
+
+fn default_embeddings_dimensions() -> u32 {
+    1024
 }
 
 fn default_true() -> bool {
