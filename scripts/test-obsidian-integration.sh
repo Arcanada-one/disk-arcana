@@ -45,6 +45,7 @@ if [ "$ready" -ne 1 ]; then
     exit 1
 fi
 
+(cd "$PLUGIN_DIR" && npm ci --silent)
 (cd "$PLUGIN_DIR" && npm run test:integration)
 
 test "$(cat "$FIXTURE_ROOT/docs/notes/todo.md")" = "remote version"
