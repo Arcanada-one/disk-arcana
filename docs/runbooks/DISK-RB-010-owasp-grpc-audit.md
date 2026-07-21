@@ -58,9 +58,10 @@ Document cold-boot path: `docs/runbooks/DISK-RB-011-cold-boot-enroll.md` (DISK-0
 
 - Confirm Cloudflare / firewall rate limits on `:9443` documented in infra runbook.
 
-### 6. Load deferral (T6.2)
+### 6. Load harness (T6.2)
 
-- Record: 10K-file harness not run — staging capacity / operator schedule.
+- **CI/local (agent):** `bash scripts/load-test-harness.sh smoke` (1K) and `scale` (10K) — see `docs/load-test-harness.md`.
+- **Staging (operator):** multi-node gRPC soak not run — schedule when staging capacity available.
 
 ## Sign-off
 

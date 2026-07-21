@@ -85,6 +85,8 @@ jobs:
         run: sh -n scripts/install.sh
       - name: OWASP evidence paths (DISK-0012)
         run: bash scripts/validate-owasp-evidence.sh
+      - name: load-test-harness.sh syntax (DISK-0012 G3)
+        run: sh -n scripts/load-test-harness.sh
       - name: Obsidian plugin unit tests (DISK-0008)
         run: |
           set -euo pipefail
@@ -139,6 +141,8 @@ jobs:
         run: cargo install cargo-llvm-cov --locked --quiet
       - name: cargo test
         run: cargo test --workspace --all-features
+      - name: Scanner load harness (1K + 10K, DISK-0012 G3)
+        run: bash scripts/load-test-harness.sh all
       - name: Coverage gate (≥80 % lines, DISK-0032)
         run: cargo llvm-cov --workspace --all-features --fail-under-lines 80
       - name: Obsidian plugin integration (DISK-0008)

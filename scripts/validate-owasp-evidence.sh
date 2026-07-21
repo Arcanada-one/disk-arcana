@@ -55,6 +55,13 @@ check fuzz/fuzz_targets/reconcile.rs
 # T5 Logging
 check crates/disk-server/tests/log_redaction.rs
 
+# T6 Load (partial scaffold)
+check crates/disk-core/tests/load_scan.rs
+check scripts/load-test-harness.sh
+check scripts/load-test-scanner-smoke.sh
+check scripts/load-test-scanner-10k.sh
+check docs/load-test-harness.md
+
 # Meta
 check docs/security/OWASP-gRPC-audit.md
 check docs/runbooks/DISK-RB-010-owasp-grpc-audit.md
@@ -64,4 +71,4 @@ if [ "$missing" -ne 0 ]; then
     exit 1
 fi
 
-printf 'OWASP evidence validation OK (%s paths)\n' 29
+printf 'OWASP evidence validation OK (%s paths)\n' 35
