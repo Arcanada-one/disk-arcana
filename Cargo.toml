@@ -52,6 +52,8 @@ ed25519-dalek = { version = "2", features = ["rand_core"] }
 keyring     = "3"
 time        = { version = "0.3", default-features = false, features = ["std", "formatting", "macros"] }
 walkdir     = "2.5"
+argon2          = "0.5"
+chacha20poly1305 = "0.10"
 
 [profile.release]
 lto             = "fat"

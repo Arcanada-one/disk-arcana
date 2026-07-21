@@ -36,7 +36,9 @@ This branch completes the **tail** deliverables solvable on DEVS without operato
 | Fuzz: `reconcile` | **Done** | This branch |
 | `cargo audit` + gitleaks | **Done** (main) | lint job |
 | Security audit (OWASP) | **Done** | PR DISK-0012-owasp-audit — checklist v1.0 + RB-010 + CI evidence gate |
-| Load test 10K / 3 nodes | **Partial** | 1K scanner smoke script; multi-node deferred |
+| Load test 10K / 3 nodes | **Done** | PR #54–#55 — `load-test-harness.sh` tiers smoke/scale/sync |
+| Auth / Enroll rate-limit (G1) | **Done** | PR #50, #53 |
+| `RegisterNode` production gate (T2.10) | **Done** | PR #56 — `DISK_REGISTER_NODE_MODE` |
 | Criterion benchmarks | **Done** | `benches/hardening.rs` |
 | Scheduled deep fuzz | **Done** | `fuzz-deep.yml` weekly |
 
@@ -77,9 +79,10 @@ cargo test --workspace --all-features
 ## Deferred (operator / future)
 
 - OWASP operator walkthrough rows (T1.5, T1.6, T5.3, T6.3) — `DISK-RB-010`
-- Auth API-key rate limiting (gap G1 in OWASP doc)
-- 10K-file / 3-node load test harness (needs staging server)
+- G3 staging soak / prod binary load — operator gate
+- G4 external pentest before SaaS
 - macOS/aarch64 release matrix expansion
+- DISK-0015+ commercial MVP (E2EE wire integration, auth, billing)
 
 ---
 
