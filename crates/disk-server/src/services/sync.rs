@@ -585,7 +585,9 @@ impl SyncService for SyncServiceImpl {
                 };
                 // Upsert failure is non-fatal: bytes are durable; next sync
                 // rebuilds the row from disk (convergent recovery).
-                let _ = db.upsert_file(&meta).await;
+                let _ = db
+                    .upsert_file_scoped(tenant.as_deref(), &share, &meta)
+                    .await;
             }
         }
 
@@ -1042,7 +1044,7 @@ mod tests {
         // Create a valid session.
         let key = svc
             .store
-            .register_node("n1", "N", "linux")
+            .register_node("n1", "N", "linux", None)
             .expect("register");
         let (token, _) = svc.store.authenticate("n1", key.as_str()).expect("auth");
 
@@ -1078,7 +1080,7 @@ mod tests {
 
         let key = svc
             .store
-            .register_node("n2", "N", "linux")
+            .register_node("n2", "N", "linux", None)
             .expect("register");
         let (token, _) = svc.store.authenticate("n2", key.as_str()).expect("auth");
 
@@ -1102,7 +1104,7 @@ mod tests {
         std::fs::write(&file_path, &content).unwrap();
 
         let svc = make_service_with_root(root.path().to_path_buf());
-        let key = svc.store.register_node("n3", "N", "linux").unwrap();
+        let key = svc.store.register_node("n3", "N", "linux", None).unwrap();
         let (token, _) = svc.store.authenticate("n3", key.as_str()).unwrap();
 
         let mut req = Request::new(DeltaDownloadRequest {
@@ -1171,7 +1173,7 @@ mod tests {
         db.upsert_file(&meta).await.unwrap();
 
         let store = AuthStore::new();
-        let key = store.register_node("es-node", "N", "linux").unwrap();
+        let key = store.register_node("es-node", "N", "linux", None).unwrap();
         let (token, _) = store.authenticate("es-node", key.as_str()).unwrap();
 
         let svc = SyncServiceImpl::new(store, root.path().to_path_buf()).with_meta_db(db, "server");
@@ -1211,7 +1213,7 @@ mod tests {
             .unwrap();
 
         let store = AuthStore::new();
-        let key = store.register_node("eu-node", "N", "linux").unwrap();
+        let key = store.register_node("eu-node", "N", "linux", None).unwrap();
         let (token, _) = store.authenticate("eu-node", key.as_str()).unwrap();
 
         let svc = SyncServiceImpl::new(store, root.path().to_path_buf()).with_meta_db(db, "server");
@@ -1266,7 +1268,7 @@ mod tests {
             .await
             .unwrap();
         let store = AuthStore::new();
-        let key = store.register_node(node_label, "N", "linux").unwrap();
+        let key = store.register_node(node_label, "N", "linux", None).unwrap();
         let (token, _) = store.authenticate(node_label, key.as_str()).unwrap();
         let svc = SyncServiceImpl::new(store, root.path().to_path_buf()).with_meta_db(db, "server");
         (svc, token.as_str().to_string(), root, db_dir)
@@ -1600,12 +1602,12 @@ mod tests {
         let store = AuthStore::new();
 
         // Register node A.
-        let key_a = store.register_node("fan-a", "N", "linux").unwrap();
+        let key_a = store.register_node("fan-a", "N", "linux", None).unwrap();
         let (tok_a, _) = store.authenticate("fan-a", key_a.as_str()).unwrap();
         let tok_a = tok_a.as_str().to_string();
 
         // Register node B on the SAME service (shared store + db).
-        let key_b = store.register_node("fan-b", "N", "linux").unwrap();
+        let key_b = store.register_node("fan-b", "N", "linux", None).unwrap();
         let (tok_b, _) = store.authenticate("fan-b", key_b.as_str()).unwrap();
         let tok_b = tok_b.as_str().to_string();
 
@@ -1699,7 +1701,7 @@ mod tests {
             .unwrap();
         let store = AuthStore::new();
 
-        let key = store.register_node("ack-node", "N", "linux").unwrap();
+        let key = store.register_node("ack-node", "N", "linux", None).unwrap();
         let (tok, _) = store.authenticate("ack-node", key.as_str()).unwrap();
         let tok = tok.as_str().to_string();
 
@@ -1869,7 +1871,7 @@ mod tests {
             .unwrap();
         let store = AuthStore::new();
 
-        let key_c = store.register_node("rec-c", "N", "linux").unwrap();
+        let key_c = store.register_node("rec-c", "N", "linux", None).unwrap();
         let (tok_c, _) = store.authenticate("rec-c", key_c.as_str()).unwrap();
         let tok_c = tok_c.as_str().to_string();
 
@@ -1964,7 +1966,7 @@ mod tests {
             .unwrap();
         let store = AuthStore::new();
 
-        let key_c = store.register_node("loss-c", "N", "linux").unwrap();
+        let key_c = store.register_node("loss-c", "N", "linux", None).unwrap();
         let (tok_c, _) = store.authenticate("loss-c", key_c.as_str()).unwrap();
         let tok_c = tok_c.as_str().to_string();
 

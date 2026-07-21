@@ -23,6 +23,8 @@ pub struct NodeEntry {
     pub display_name: String,
     pub platform: String,
     pub registered_at: i64,
+    /// SaaS tenant binding (DISK-0017). `None` = single-tenant.
+    pub tenant_id: Option<String>,
 }
 
 /// Live session entry.
@@ -75,6 +77,7 @@ impl AuthStore {
         node_id: &str,
         display_name: &str,
         platform: &str,
+        tenant_id: Option<&str>,
     ) -> Result<ApiKey, AuthError> {
         if self.inner.nodes.contains_key(node_id) {
             return Err(AuthError::AlreadyExists);
@@ -86,6 +89,7 @@ impl AuthStore {
             display_name: display_name.to_owned(),
             platform: platform.to_owned(),
             registered_at: unix_now_secs() as i64,
+            tenant_id: tenant_id.map(str::to_owned),
         };
         self.inner.nodes.insert(node_id.to_owned(), entry);
         Ok(key)
@@ -211,7 +215,7 @@ mod tests {
     fn register_and_authenticate_ok() {
         let store = AuthStore::new();
         let key = store
-            .register_node("node-1", "My Node", "darwin")
+            .register_node("node-1", "My Node", "darwin", None)
             .expect("register");
         let (token, expires_at) = store
             .authenticate("node-1", key.as_str())
@@ -224,7 +228,7 @@ mod tests {
     fn wrong_key_unauthenticated() {
         let store = AuthStore::new();
         store
-            .register_node("node-2", "N", "linux")
+            .register_node("node-2", "N", "linux", None)
             .expect("register");
         let err = store
             .authenticate("node-2", "arc_disk_WRONGKEY")
@@ -245,9 +249,11 @@ mod tests {
     fn double_register_same_node_id_fails() {
         let store = AuthStore::new();
         store
-            .register_node("node-3", "N", "linux")
+            .register_node("node-3", "N", "linux", None)
             .expect("first register");
-        let err = store.register_node("node-3", "N", "linux").unwrap_err();
+        let err = store
+            .register_node("node-3", "N", "linux", None)
+            .unwrap_err();
         assert_eq!(err, AuthError::AlreadyExists);
     }
 
@@ -255,7 +261,7 @@ mod tests {
     fn validate_session_ok() {
         let store = AuthStore::new();
         let key = store
-            .register_node("node-4", "N", "linux")
+            .register_node("node-4", "N", "linux", None)
             .expect("register");
         let (token, _) = store.authenticate("node-4", key.as_str()).expect("auth");
         let node_id = store.validate_session(&token).expect("validate");
@@ -287,7 +293,7 @@ mod tests {
         let limiter = Arc::new(AuthAttemptLimiter::new(3, Duration::from_secs(60)));
         let store = AuthStore::with_rate_limiter(Some(limiter));
         store
-            .register_node("node-rl", "N", "linux")
+            .register_node("node-rl", "N", "linux", None)
             .expect("register");
 
         for _ in 0..3 {
@@ -308,7 +314,7 @@ mod tests {
         let limiter = Arc::new(AuthAttemptLimiter::new(2, Duration::from_secs(60)));
         let store = AuthStore::with_rate_limiter(Some(limiter));
         let key = store
-            .register_node("node-rl2", "N", "linux")
+            .register_node("node-rl2", "N", "linux", None)
             .expect("register");
 
         store
@@ -337,7 +343,7 @@ mod tests {
         assert_eq!(store.node_count(), 0);
         assert_eq!(store.session_count(), 0);
         let key = store
-            .register_node("node-5", "N", "linux")
+            .register_node("node-5", "N", "linux", None)
             .expect("register");
         assert_eq!(store.node_count(), 1);
         store.authenticate("node-5", key.as_str()).expect("auth");

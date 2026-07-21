@@ -71,7 +71,7 @@ async fn acl_role_mismatch_returns_permission_denied_and_writes_audit_row() {
     let svc = SyncServiceImpl::with_acl(store.clone(), root.path().to_path_buf(), enforcer, audit);
 
     // Register + auth to get a session token (legacy auth still runs first).
-    let key = store.register_node("node1", "N", "test").unwrap();
+    let key = store.register_node("node1", "N", "test", None).unwrap();
     let (token, _) = store.authenticate("node1", key.as_str()).unwrap();
 
     // ---- Build request with cert extension + bearer token ----
@@ -135,7 +135,7 @@ async fn acl_receive_only_can_download_but_not_upload() {
 
     let store = AuthStore::new();
     let svc = SyncServiceImpl::with_acl(store.clone(), root.path().to_path_buf(), enforcer, audit);
-    let key = store.register_node("node2", "N", "test").unwrap();
+    let key = store.register_node("node2", "N", "test", None).unwrap();
     let (token, _) = store.authenticate("node2", key.as_str()).unwrap();
 
     let cert = CertificateDer::from(der);

@@ -92,7 +92,7 @@ pub async fn stripe_webhook(
         }
     };
 
-    // Single-tenant SaaS default until DISK-0017 wires tenant_id from metadata.
+    // Tenant from webhook metadata / Stripe customer mapping (slice 2+).
     if let Err(e) = state
         .meta_db
         .apply_stripe_subscription(

@@ -184,6 +184,7 @@ async fn main() -> anyhow::Result<()> {
         if let Some(ref enforcer) = quota_enforcer {
             auth_impl = auth_impl.with_quota_enforcer(enforcer.clone());
         }
+        auth_impl = auth_impl.with_meta_db(meta_db.clone());
         auth_impl
     });
     let sync_svc = SyncServiceServer::new({
