@@ -26,8 +26,8 @@ pub mod path_guard;
 pub mod platform;
 pub mod reconciler;
 pub mod scanner;
+pub mod tenant;
 pub mod tombstone;
-pub mod traits;
 pub mod types;
 pub mod vector_clock;
 
@@ -52,6 +52,7 @@ pub use path_guard::validate as validate_path;
 pub use platform::FileIdentity;
 pub use reconciler::ReconciliationEngine;
 pub use scanner::FileScanner;
+pub use tenant::resolve_tenant_id;
 pub use tombstone::{Tombstone, DEFAULT_TTL_SECS};
 pub use types::{
     ActionType, ConflictKind, ConflictRecord, ConflictReport, FileMeta, NodeId, RenamePair,

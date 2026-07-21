@@ -107,7 +107,7 @@ impl QuotaEnforcer {
 
         let old_size = self
             .meta_db
-            .get_file(path)
+            .get_file_scoped(tenant_id, share, path)
             .await
             .map_err(|e| Status::internal(format!("file lookup: {e}")))?
             .map(|m| m.size)

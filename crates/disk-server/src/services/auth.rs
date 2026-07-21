@@ -3,6 +3,8 @@
 //! - `RegisterNode`: issues a fresh `ApiKey` (one-time; stored blake3-hashed).
 //! - `Authenticate`: validates `ApiKey`, returns a 24h `SessionToken`.
 
+use disk_core::meta_db::MetaDb;
+use disk_core::tenant::resolve_tenant_id;
 use tonic::{Request, Response, Status};
 
 use disk_proto::disk::{
@@ -23,6 +25,7 @@ pub struct AuthServiceImpl {
     pool: Option<SqlitePool>,
     admin_token: Option<String>,
     quota_enforcer: Option<QuotaEnforcer>,
+    meta_db: Option<MetaDb>,
 }
 
 impl AuthServiceImpl {
@@ -33,7 +36,14 @@ impl AuthServiceImpl {
             pool: None,
             admin_token: None,
             quota_enforcer: None,
+            meta_db: None,
         }
+    }
+
+    /// Attach MetaDb for node tenant persistence (DISK-0017).
+    pub fn with_meta_db(mut self, meta_db: MetaDb) -> Self {
+        self.meta_db = Some(meta_db);
+        self
     }
 
     /// Attach storage/node quota enforcement (DISK-0018).
@@ -76,16 +86,18 @@ impl AuthService for AuthServiceImpl {
         )
         .await?;
 
-        let tenant = request
-            .metadata()
-            .get("x-disk-tenant")
-            .and_then(|v| v.to_str().ok())
-            .filter(|s| !s.is_empty());
+        let tenant = resolve_tenant_id(
+            request
+                .metadata()
+                .get("x-disk-tenant")
+                .and_then(|v| v.to_str().ok()),
+            &request.get_ref().tenant_id,
+        );
 
         if let Some(enforcer) = &self.quota_enforcer {
             if !self.store.has_node(&node_id) {
                 enforcer
-                    .check_register_node(tenant, self.store.node_count() as u32)
+                    .check_register_node(tenant.as_deref(), self.store.node_count() as u32)
                     .await?;
             }
         }
@@ -94,8 +106,22 @@ impl AuthService for AuthServiceImpl {
         let display_name = req.display_name.trim();
         let platform = req.platform.trim();
 
-        match self.store.register_node(&node_id, display_name, platform) {
+        match self
+            .store
+            .register_node(&node_id, display_name, platform, tenant.as_deref())
+        {
             Ok(api_key) => {
+                if let Some(db) = &self.meta_db {
+                    db.upsert_node_tenant(
+                        &node_id,
+                        tenant.as_deref(),
+                        &api_key.hash(),
+                        display_name,
+                        platform,
+                    )
+                    .await
+                    .map_err(|e| Status::internal(format!("persist node tenant: {e}")))?;
+                }
                 let registered_at = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
