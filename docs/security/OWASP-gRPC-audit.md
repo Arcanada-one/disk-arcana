@@ -58,6 +58,7 @@ See also `SECURITY.md` § Phase 3 threat model (V-7 … V-14).
 | T2.7 | Enrollment token single-use (replay blocked) | verified | `crates/disk-server/tests/enrollment_token_replay.rs` |
 | T2.8 | Cold-boot enroll without cert (DISK-0044) | verified | Dual listener DISK-0037: `main.rs` `build_tls_public_only` + `:9445`; `it_enrollment_real_binary.rs`; design `docs/design/DISK-0044-enrollment-bootstrap.md` |
 | T2.9 | Public `Enroll` brute-force rate limiting (`:9445`) | verified | `auth/rate_limit.rs` `DEFAULT_ENROLL_MAX_FAILURES`; `enrollment/mod.rs`; `tests/enrollment_rate_limit.rs` |
+| T2.10 | `RegisterNode` production gate (enrolled mTLS / admin / disabled) | verified | `auth/register_gate.rs`; `config::RegisterNodeMode`; `tests/register_node_gate.rs`; `DISK_REGISTER_NODE_MODE` in `deploy/prod/env.example` |
 
 ### T3 — Authorization (ACL)
 
@@ -106,7 +107,7 @@ Source of truth: `proto/disk.proto`.
 
 | RPC | AuthN | AuthZ notes | Test hook |
 |-----|-------|--------------|-----------|
-| `RegisterNode` | None (bootstrap) | Should be disabled on prod or admin-gated | `auth.rs` unit tests |
+| `RegisterNode` | mTLS (enrolled) or admin bearer | Production default `DISK_REGISTER_NODE_MODE=enrolled`: peer cert must match `node_certs` for `node_id`; `open` for stub/dev | `tests/register_node_gate.rs` |
 | `Authenticate` | API key | Issues 24h session | `auth/storage.rs` |
 
 ### `SyncService` (all require bearer + mTLS + ACL)

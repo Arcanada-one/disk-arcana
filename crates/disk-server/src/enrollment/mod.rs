@@ -313,8 +313,9 @@ impl EnrollmentService for EnrollmentServiceImpl {
             .await
             .map_err(|e| Status::internal(format!("CA request failed: {e}")))?;
 
-        // Compute cert fingerprint: blake3(DER). Since we receive PEM, parse it.
-        let cert_fp = blake3::hash(&cert.client_cert_pem);
+        // Compute cert fingerprint: blake3(DER) — matches mTLS `CertIdentity`.
+        let cert_fp = crate::auth::fingerprint_from_pem(&cert.client_cert_pem)
+            .map_err(|e| Status::internal(format!("cert fingerprint: {e}")))?;
 
         // Ensure node exists or insert a placeholder node row.
         sqlx::query(
@@ -339,7 +340,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
             "INSERT INTO node_certs (cert_fingerprint, node_id, enrolled_at, expires_at)
              VALUES (?1, ?2, ?3, ?4)",
         )
-        .bind(cert_fp.as_bytes().as_slice())
+        .bind(&cert_fp[..])
         .bind(node_row.0)
         .bind(now_ms as i64)
         .bind(expires_cert_ms as i64)
@@ -354,7 +355,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
              WHERE token_hash = ?3",
         )
         .bind(now_ms as i64)
-        .bind(cert_fp.as_bytes().as_slice())
+        .bind(&cert_fp[..])
         .bind(token_hash.as_bytes().as_slice())
         .execute(&self.pool)
         .await
@@ -419,7 +420,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::enrollment::ca_client::StubCaClient;
+    use crate::enrollment::ca_client::{stub_cert_pem, StubCaClient};
 
     const ADMIN_TOKEN: &str = "test-admin-token";
 
@@ -484,7 +485,8 @@ mod tests {
     #[tokio::test]
     async fn enroll_with_valid_token_marks_consumed() {
         let pool = make_pool().await;
-        let ca = Arc::new(StubCaClient::ok(b"CERT".to_vec(), b"CHAIN".to_vec()));
+        let cert_pem = stub_cert_pem(0x01);
+        let ca = Arc::new(StubCaClient::ok(cert_pem.clone(), b"CHAIN".to_vec()));
         let svc = make_service(pool.clone(), ca);
 
         // Issue token.
@@ -507,7 +509,7 @@ mod tests {
             .await
             .unwrap();
         let cert = enroll_resp.into_inner();
-        assert_eq!(cert.client_cert_pem, b"CERT");
+        assert_eq!(cert.client_cert_pem, cert_pem);
         assert_eq!(cert.ca_chain_pem, b"CHAIN");
 
         // Token must be consumed.
@@ -522,7 +524,8 @@ mod tests {
     #[tokio::test]
     async fn enroll_replay_returns_failed_precondition() {
         let pool = make_pool().await;
-        let ca = Arc::new(StubCaClient::ok(b"CERT".to_vec(), b"CHAIN".to_vec()));
+        let cert_pem = stub_cert_pem(0x01);
+        let ca = Arc::new(StubCaClient::ok(cert_pem.clone(), b"CHAIN".to_vec()));
         let svc = make_service(pool.clone(), ca);
 
         let token = svc
@@ -560,7 +563,8 @@ mod tests {
     #[tokio::test]
     async fn enroll_expired_token_returns_failed_precondition() {
         let pool = make_pool().await;
-        let ca = Arc::new(StubCaClient::ok(b"CERT".to_vec(), b"CHAIN".to_vec()));
+        let cert_pem = stub_cert_pem(0x01);
+        let ca = Arc::new(StubCaClient::ok(cert_pem.clone(), b"CHAIN".to_vec()));
         let svc = make_service(pool.clone(), ca);
 
         // Insert an already-expired token row manually.

@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use disk_proto::disk::{enrollment_service_server::EnrollmentService, EnrollRequest};
 use disk_server::auth::rate_limit::AuthAttemptLimiter;
-use disk_server::enrollment::{ca_client::StubCaClient, EnrollmentServiceImpl};
+use disk_server::enrollment::ca_client::{stub_cert_pem, StubCaClient};
+use disk_server::enrollment::EnrollmentServiceImpl;
 use sqlx::SqlitePool;
 use tonic::{transport::server::TcpConnectInfo, Code, Request};
 
@@ -42,7 +43,7 @@ async fn enroll_rate_limited_resource_exhausted() {
     let svc = EnrollmentServiceImpl::with_rate_limiter(
         pool,
         audit,
-        Arc::new(StubCaClient::ok(b"CERT".to_vec(), b"CHAIN".to_vec())),
+        Arc::new(StubCaClient::ok(stub_cert_pem(0x11), b"CHAIN".to_vec())),
         Some(limiter),
     );
 

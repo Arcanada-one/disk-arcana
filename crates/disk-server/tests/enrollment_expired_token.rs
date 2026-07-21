@@ -6,7 +6,10 @@
 use std::sync::Arc;
 
 use disk_proto::disk::{enrollment_service_server::EnrollmentService, EnrollRequest};
-use disk_server::enrollment::{ca_client::StubCaClient, EnrollErrorKind, EnrollmentServiceImpl};
+use disk_server::enrollment::{
+    ca_client::{stub_cert_pem, StubCaClient},
+    EnrollErrorKind, EnrollmentServiceImpl,
+};
 use sqlx::SqlitePool;
 use tonic::Request;
 
@@ -26,7 +29,7 @@ fn make_svc(pool: SqlitePool) -> EnrollmentServiceImpl {
     EnrollmentServiceImpl::new(
         pool,
         audit,
-        Arc::new(StubCaClient::ok(b"CERT".to_vec(), b"CHAIN".to_vec())),
+        Arc::new(StubCaClient::ok(stub_cert_pem(0x22), b"CHAIN".to_vec())),
     )
     .with_admin_token(ADMIN_TOK)
 }
