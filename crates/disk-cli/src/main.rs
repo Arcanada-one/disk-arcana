@@ -95,6 +95,9 @@ enum Command {
 
     /// AI agent webhooks, revision lookup, and optimistic writes (DISK-0028).
     Agents(AgentsArgs),
+
+    /// LAN peer discovery for P2P sync acceleration (DISK-0027).
+    Lan(LanArgs),
 }
 
 /// `disk daemon <subcmd>` — wrapper.
@@ -641,6 +644,26 @@ pub struct SelectiveSyncSetArgs {
     pub token: Option<String>,
 }
 
+/// `disk lan <subcmd>` — LAN sync helpers (DISK-0027).
+#[derive(clap::Args, Debug)]
+pub struct LanArgs {
+    #[command(subcommand)]
+    pub command: LanCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum LanCommand {
+    /// List mDNS-discovered Disk Arcana peers on the local network.
+    Peers(LanPeersArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct LanPeersArgs {
+    /// Daemon REST address. Defaults to `127.0.0.1:9444`.
+    #[arg(long)]
+    pub addr: Option<SocketAddr>,
+}
+
 /// `disk agents <subcmd>` — AI Agents API CLI (DISK-0028 slice 3).
 #[derive(clap::Args, Debug)]
 pub struct AgentsArgs {
@@ -1125,6 +1148,9 @@ async fn main() -> Result<()> {
                 )
                 .await
             }
+        },
+        Some(Command::Lan(args)) => match args.command {
+            LanCommand::Peers(p) => commands::run_lan_peers(p.addr).await,
         },
         Some(Command::Agents(args)) => match args.command {
             AgentsCommand::Webhooks(w) => match w.command {
@@ -1868,6 +1894,19 @@ node_id_hint = "from-bf"
                 assert_eq!(l.vault, "wiki");
             }
             other => panic!("expected trash list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_lan_peers() {
+        let cli = Cli::try_parse_from(["disk", "lan", "peers"]).unwrap();
+        match cli.command {
+            Some(Command::Lan(LanArgs {
+                command: LanCommand::Peers(p),
+            })) => {
+                assert!(p.addr.is_none());
+            }
+            other => panic!("expected lan peers, got {other:?}"),
         }
     }
 

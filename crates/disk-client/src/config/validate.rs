@@ -28,9 +28,19 @@ pub fn validate(cfg: &DiskConfig) -> Result<(), ConfigError> {
     validate_node_id(&cfg.node.id)?;
     validate_server_address(&cfg.server.address)?;
     validate_share_names_unique(&cfg.shares)?;
+    validate_lan_sync(&cfg.lan_sync)?;
 
     for share in &cfg.shares {
         validate_share(share, cfg.node.default.intended_direction)?;
+    }
+    Ok(())
+}
+
+fn validate_lan_sync(lan: &super::schema::LanSyncSection) -> Result<(), ConfigError> {
+    if lan.enabled && lan.advertise_port == 0 {
+        return Err(ConfigError::Validation(
+            "[lan_sync].advertise_port must be > 0 when lan_sync is enabled".into(),
+        ));
     }
     Ok(())
 }

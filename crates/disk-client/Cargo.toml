@@ -43,6 +43,8 @@ walkdir            = { workspace = true }
 blake3             = { workspace = true }
 tempfile           = "3"
 reqwest            = { workspace = true }
+mdns-sd            = { workspace = true }
+if-addrs           = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

@@ -12,6 +12,7 @@ pub mod connection;
 pub mod enrollment;
 pub mod import_state;
 pub mod keychain;
+pub mod lan_sync;
 pub mod mtls;
 pub mod rest_api;
 pub mod sync_loop;
@@ -20,6 +21,7 @@ pub mod vault_key;
 pub mod watcher;
 
 pub use blob_cache::BlobCache;
+pub use config::LanSyncSection;
 pub use config::TelemetrySection;
 pub use config::{spawn_config_watcher, ConfigSnapshot, ConfigWatcher, ReloadStatus};
 pub use conflict_writer::{apply_conflict, write_fork, ConflictApplyOutcome, ForkWriteError};
@@ -32,6 +34,9 @@ pub use import_state::{hash_file, import_state, ImportEntry, ImportError, Import
 pub use keychain::{
     detect_or_file, validate_label, FileKeyStore, KeyStore, KeyStoreError, OsKeyStore,
     DEFAULT_OS_KEYRING_SERVICE,
+};
+pub use lan_sync::{
+    parse_server_port, spawn_lan_discovery, LanPeer, LanPeerRegistry, PEER_TTL_SECS,
 };
 pub use mtls::{
     audit_key_permissions, build_client_tls_config, load_client_identity, load_server_ca, MtlsError,

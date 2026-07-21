@@ -36,9 +36,11 @@ use thiserror::Error;
 use tokio::sync::{mpsc, RwLock};
 
 use crate::config::schema::Direction;
+use crate::lan_sync::LanPeerRegistry;
 use crate::sync_loop::LoopState;
 
 pub mod conflicts;
+pub mod lan;
 pub mod status;
 pub mod sync;
 
@@ -99,6 +101,8 @@ struct DaemonStateInner {
     vault_root: Option<PathBuf>,
     /// Share-qualified roots used by Obsidian/plugin conflict operations.
     vault_roots: HashMap<String, PathBuf>,
+    /// LAN peer registry (DISK-0027); populated when `[lan_sync] enabled`.
+    lan_peers: Option<Arc<LanPeerRegistry>>,
 }
 
 impl DaemonState {
@@ -121,6 +125,7 @@ impl DaemonState {
             meta_db: None,
             vault_root: None,
             vault_roots: HashMap::new(),
+            lan_peers: None,
         };
         (
             Self {
@@ -312,6 +317,27 @@ impl DaemonState {
                 .flatten()
         })
     }
+
+    /// Attach the LAN peer registry for `GET /lan/peers`.
+    pub fn with_lan_peers(self, registry: Arc<LanPeerRegistry>) -> Self {
+        let inner = Arc::try_unwrap(self.inner).unwrap_or_else(|arc| {
+            panic!(
+                "DaemonState::with_lan_peers called after clone: Arc has {} refs",
+                Arc::strong_count(&arc)
+            );
+        });
+        let new_inner = DaemonStateInner {
+            lan_peers: Some(registry),
+            ..inner
+        };
+        Self {
+            inner: Arc::new(new_inner),
+        }
+    }
+
+    pub fn lan_peers(&self) -> Option<Arc<LanPeerRegistry>> {
+        self.inner.lan_peers.clone()
+    }
 }
 
 /// Endpoint envelope returned by `POST /sync` and `POST /config/reload`.
@@ -338,6 +364,7 @@ pub fn router(state: DaemonState) -> Router {
         )
         .route("/conflicts/:path/diff", get(conflicts::get_conflict_diff))
         .route("/conflicts/:path", post(conflicts::post_resolve_conflict))
+        .route("/lan/peers", get(lan::get_lan_peers))
         .with_state(state)
 }
 

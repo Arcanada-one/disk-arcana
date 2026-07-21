@@ -140,6 +140,38 @@ pub async fn run_config_reload(addr: Option<SocketAddr>) -> Result<()> {
     }
 }
 
+/// `disk lan peers [--addr <ip:port>]` — GET `/lan/peers`.
+pub async fn run_lan_peers(addr: Option<SocketAddr>) -> Result<()> {
+    let addr = addr.unwrap_or_else(default_addr);
+    let url = format!("http://{addr}/lan/peers");
+    let client = reqwest::Client::new();
+    let resp = send_with_retry(addr, || client.get(&url)).await?;
+    let status = resp.status();
+    if !status.is_success() {
+        anyhow::bail!("GET /lan/peers returned HTTP {status}");
+    }
+    let body: serde_json::Value = resp.json().await.context("decode /lan/peers JSON")?;
+    if !body["enabled"].as_bool().unwrap_or(false) {
+        println!("lan_sync: disabled (set [lan_sync] enabled = true in disk.toml)");
+        return Ok(());
+    }
+    let peers = body["peers"].as_array().cloned().unwrap_or_default();
+    if peers.is_empty() {
+        println!("lan_sync: enabled — no peers discovered yet");
+        return Ok(());
+    }
+    println!("lan_sync: {} peer(s)", peers.len());
+    for peer in peers {
+        let node_id = peer["node_id"].as_str().unwrap_or("?");
+        let host = peer["host"].as_str().unwrap_or("?");
+        let port = peer["port"].as_u64().unwrap_or(0);
+        let tenant = peer["tenant_id"].as_str().unwrap_or("—");
+        let seen = peer["last_seen_unix"].as_i64().unwrap_or(0);
+        println!("  {node_id}  {host}:{port}  tenant={tenant}  seen={seen}");
+    }
+    Ok(())
+}
+
 /// `disk conflicts list [--vault <name>] [--addr <ip:port>]`.
 pub async fn run_conflicts_list(
     addr: Option<SocketAddr>,
