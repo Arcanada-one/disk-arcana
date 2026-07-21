@@ -438,3 +438,22 @@ async fn migration_015_vault_snapshots_tables_exist() {
         );
     }
 }
+
+#[tokio::test]
+async fn migration_017_device_sync_includes_table_exists() {
+    let dir = tempdir().expect("tempdir");
+    let db = MetaDb::open(&dir.path().join("selective-sync-schema.sqlite"))
+        .await
+        .expect("open");
+
+    let tables: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .fetch_all(db.pool())
+            .await
+            .expect("sqlite_master");
+
+    assert!(
+        tables.iter().any(|t| t == "device_sync_includes"),
+        "device_sync_includes table must exist after migration 017; got {tables:?}"
+    );
+}

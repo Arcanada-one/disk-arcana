@@ -4,6 +4,7 @@ mod archive_cmd;
 mod commands;
 mod daemon;
 mod paths;
+mod selective_sync_cmd;
 mod share_init;
 mod sharing_cmd;
 mod snapshots_cmd;
@@ -87,6 +88,9 @@ enum Command {
 
     /// Vault sharing — invite links and collaborator RBAC (DISK-0022).
     Sharing(SharingArgs),
+
+    /// Per-device folder subset sync rules (DISK-0023).
+    SelectiveSync(SelectiveSyncArgs),
 }
 
 /// `disk daemon <subcmd>` — wrapper.
@@ -591,6 +595,48 @@ pub struct SharingMembersRemoveArgs {
     pub token: Option<String>,
 }
 
+/// `disk selective-sync <subcmd>` — per-device folder include rules.
+#[derive(clap::Args, Debug)]
+pub struct SelectiveSyncArgs {
+    #[command(subcommand)]
+    pub command: SelectiveSyncCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SelectiveSyncCommand {
+    /// Show folder include prefixes for a device.
+    List(SelectiveSyncListArgs),
+    /// Replace folder include prefixes (omit --include to sync all).
+    Set(SelectiveSyncSetArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct SelectiveSyncListArgs {
+    #[arg(long, default_value = "default")]
+    pub vault: String,
+    #[arg(long)]
+    pub node: String,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct SelectiveSyncSetArgs {
+    #[arg(long, default_value = "default")]
+    pub vault: String,
+    #[arg(long)]
+    pub node: String,
+    /// Comma-separated folder prefixes (e.g. `docs,photos/2024`). Omit to clear filter.
+    #[arg(long, value_delimiter = ',')]
+    pub include: Vec<String>,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
 /// `disk share <subcmd>` — wrapper for share management subcommands.
 #[derive(clap::Args, Debug)]
 pub struct ShareArgs {
@@ -950,6 +996,27 @@ async fn main() -> Result<()> {
                     .await
                 }
             },
+        },
+        Some(Command::SelectiveSync(args)) => match args.command {
+            SelectiveSyncCommand::List(l) => {
+                selective_sync_cmd::run_list(
+                    l.api.as_deref(),
+                    l.token.as_deref(),
+                    &l.vault,
+                    &l.node,
+                )
+                .await
+            }
+            SelectiveSyncCommand::Set(s) => {
+                selective_sync_cmd::run_set(
+                    s.api.as_deref(),
+                    s.token.as_deref(),
+                    &s.vault,
+                    &s.node,
+                    &s.include,
+                )
+                .await
+            }
         },
         None => {
             let version = env!("CARGO_PKG_VERSION");

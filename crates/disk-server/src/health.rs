@@ -28,6 +28,8 @@
 //! - `POST /sharing/invites/accept` — DISK-0022 accept invite token
 //! - `GET /sharing/members` — DISK-0022 list vault collaborators
 //! - `POST /sharing/members/remove` — DISK-0022 revoke collaborator access
+//! - `GET /selective-sync` — DISK-0023 per-device folder include rules
+//! - `PUT /selective-sync` — DISK-0023 replace per-device folder include rules
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -43,6 +45,7 @@ use crate::accounts::{
 use crate::billing::webhook::{stripe_webhook, WebhookState};
 use crate::compliance::{delete_account, export_data, list_consents, sub_processors};
 use crate::dashboard::{resolve_conflict, summary};
+use crate::selective_sync::{get_selective_sync, put_selective_sync};
 use crate::sharing::{accept_invite, create_invite, list_invites, list_members, remove_member};
 use crate::snapshots::{create_snapshot, get_snapshot, list_snapshots, restore_snapshot};
 use crate::trash::{delete_trash, empty_trash, list_trash, restore_trash};
@@ -103,7 +106,11 @@ pub async fn serve(
             .route("/sharing/invites", get(list_invites).post(create_invite))
             .route("/sharing/invites/accept", post(accept_invite))
             .route("/sharing/members", get(list_members))
-            .route("/sharing/members/remove", post(remove_member));
+            .route("/sharing/members/remove", post(remove_member))
+            .route(
+                "/selective-sync",
+                get(get_selective_sync).put(put_selective_sync),
+            );
         crate::trash::scheduler::spawn_periodic_prune(state.clone());
         app = app.merge(auth_router.with_state(state));
     }

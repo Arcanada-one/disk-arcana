@@ -19,6 +19,7 @@ pub mod health;
 pub mod middleware;
 pub mod multi_node;
 pub mod publisher;
+pub mod selective_sync;
 pub mod services;
 pub mod sharing;
 pub mod snapshots;
