@@ -17,6 +17,7 @@ pub mod archive;
 pub mod config;
 pub mod conflict;
 pub mod delta;
+pub mod e2ee;
 pub mod error;
 pub mod filter;
 pub mod meta_db;
@@ -30,6 +31,9 @@ pub mod types;
 pub mod vector_clock;
 
 pub use config::Config;
+pub use e2ee::{
+    decrypt, encrypt, random_salt, E2eeError, EncryptedBlob, VaultKey, KEY_LEN, NONCE_LEN, SALT_LEN,
+};
 pub use error::{
     ConfigError, FilterError, MetaDbError, PathGuardError, ReconcileError, ScannerError,
 };
