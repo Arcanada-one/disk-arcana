@@ -2017,7 +2017,10 @@ node_id_hint = "from-bf"
             })) => {
                 assert_eq!(w.share, "wiki");
                 assert_eq!(w.path, "notes/a.md");
-                assert_eq!(w.vector_file.as_deref(), Some(std::path::Path::new("/tmp/vec.bin")));
+                assert_eq!(
+                    w.vector_file.as_deref(),
+                    Some(std::path::Path::new("/tmp/vec.bin"))
+                );
                 assert!(w.vector_base64.is_none());
             }
             other => panic!("expected embeddings write, got {other:?}"),
