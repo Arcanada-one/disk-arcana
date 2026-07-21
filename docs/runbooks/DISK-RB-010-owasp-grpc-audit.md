@@ -60,7 +60,7 @@ Document cold-boot path: `docs/runbooks/DISK-RB-011-cold-boot-enroll.md` (DISK-0
 
 ### 6. Load harness (T6.2)
 
-- **CI/local (agent):** `bash scripts/load-test-harness.sh smoke` (1K) and `scale` (10K) — see `docs/load-test-harness.md`.
+- **CI/local (agent):** `bash scripts/load-test-harness.sh all` — scanner smoke/scale + 3-node sync; see `docs/load-test-harness.md`.
 - **Staging (operator):** multi-node gRPC soak not run — schedule when staging capacity available.
 
 ## Sign-off
