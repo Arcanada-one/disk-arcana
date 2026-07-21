@@ -15,6 +15,7 @@ mod node_baseline;
 mod nodes;
 mod snapshots;
 mod tombstones;
+mod trash;
 mod versions;
 
 use std::path::Path;
@@ -29,6 +30,7 @@ use crate::error::MetaDbError;
 
 pub use accounts::{NewOAuthUser, UserAccount};
 pub use snapshots::{VaultSnapshotFileRow, VaultSnapshotRow};
+pub use trash::TrashRow;
 pub use versions::{FileVersionRow, FileVersionUpsert};
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");

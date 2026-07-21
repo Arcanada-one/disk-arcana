@@ -6,6 +6,7 @@ mod daemon;
 mod paths;
 mod share_init;
 mod snapshots_cmd;
+mod trash_cmd;
 mod vault;
 mod versions_cmd;
 
@@ -79,6 +80,9 @@ enum Command {
 
     /// Point-in-time vault snapshots (DISK-0020 slice 4).
     Snapshots(SnapshotsArgs),
+
+    /// Recycle bin — list and restore soft-deleted files (DISK-0024).
+    Trash(TrashArgs),
 }
 
 /// `disk daemon <subcmd>` — wrapper.
@@ -412,6 +416,47 @@ pub struct SnapshotsRestoreArgs {
     pub token: Option<String>,
 }
 
+/// `disk trash <subcmd>` — soft-deleted file recycle bin.
+#[derive(clap::Args, Debug)]
+pub struct TrashArgs {
+    #[command(subcommand)]
+    pub command: TrashCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TrashCommand {
+    /// List trashed files for a vault.
+    List(TrashListArgs),
+    /// Restore a file from trash.
+    Restore(TrashRestoreArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct TrashListArgs {
+    #[arg(long, default_value = "default")]
+    pub vault: String,
+    #[arg(long, default_value_t = 20)]
+    pub limit: u32,
+    #[arg(long, default_value_t = 0)]
+    pub offset: u32,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct TrashRestoreArgs {
+    #[arg(long)]
+    pub path: String,
+    #[arg(long, default_value = "default")]
+    pub vault: String,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
 /// `disk share <subcmd>` — wrapper for share management subcommands.
 #[derive(clap::Args, Debug)]
 pub struct ShareArgs {
@@ -698,6 +743,27 @@ async fn main() -> Result<()> {
                     r.token.as_deref(),
                     &r.vault,
                     r.id,
+                )
+                .await
+            }
+        },
+        Some(Command::Trash(args)) => match args.command {
+            TrashCommand::List(l) => {
+                trash_cmd::run_trash_list(
+                    l.api.as_deref(),
+                    l.token.as_deref(),
+                    &l.vault,
+                    l.limit,
+                    l.offset,
+                )
+                .await
+            }
+            TrashCommand::Restore(r) => {
+                trash_cmd::run_trash_restore(
+                    r.api.as_deref(),
+                    r.token.as_deref(),
+                    &r.vault,
+                    &r.path,
                 )
                 .await
             }
@@ -1385,6 +1451,20 @@ node_id_hint = "from-bf"
                 assert_eq!(c.label.as_deref(), Some("cutover"));
             }
             other => panic!("expected snapshots create, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_trash_list() {
+        let cli = Cli::try_parse_from(["disk", "trash", "list", "--vault", "wiki"])
+            .unwrap();
+        match cli.command {
+            Some(Command::Trash(TrashArgs {
+                command: TrashCommand::List(l),
+            })) => {
+                assert_eq!(l.vault, "wiki");
+            }
+            other => panic!("expected trash list, got {other:?}"),
         }
     }
 
