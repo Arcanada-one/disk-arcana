@@ -100,6 +100,22 @@
         </div>
       </div>
 
+      <div id="onboarding-panel" class="hidden rounded-lg border border-emerald-800/50 bg-emerald-950/20 p-4 mb-2">
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+          <div>
+            <p class="text-emerald-200 font-medium">Getting started</p>
+            <p class="text-sm text-slate-400 mt-1">Complete these steps to sync your first files.</p>
+          </div>
+          <button id="onboarding-dismiss-btn" type="button"
+            class="text-sm text-slate-400 hover:text-slate-200 shrink-0">Dismiss</button>
+        </div>
+        <ol id="onboarding-steps" class="text-sm space-y-2 list-decimal list-inside text-slate-300"></ol>
+        <p class="text-xs text-slate-500 mt-3">
+          <a href="../docs/getting-started.html" class="text-emerald-400 hover:underline">Full tutorial</a>
+          · <a href="../docs/" class="text-emerald-400 hover:underline">Help Center</a>
+        </p>
+      </div>
+
       <p id="dash-error" class="text-sm text-red-400 hidden"></p>
       <p id="dash-loading" class="text-sm text-slate-400 hidden">Refreshing dashboard…</p>
 
@@ -668,6 +684,76 @@
       }
     }
 
+    const ONBOARDING_SYNC_WINDOW_SEC = 7 * 24 * 3600;
+
+    function onboardingDismissKey(userId) {
+      return 'disk_onboarding_dismissed:' + userId;
+    }
+
+    function isOnboardingDismissed(userId) {
+      try {
+        return localStorage.getItem(onboardingDismissKey(userId)) === '1';
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function deviceHasRecentSync(devices) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      return (devices || []).some(d => {
+        if (!d.last_seen) return false;
+        return nowSec - d.last_seen <= ONBOARDING_SYNC_WINDOW_SEC;
+      });
+    }
+
+    function onboardingStepRow(done, labelHtml) {
+      const icon = done
+        ? '<span class="text-emerald-400 mr-1">✓</span>'
+        : '<span class="text-slate-500 mr-1">○</span>';
+      const style = done ? 'text-slate-500 line-through' : '';
+      return '<li class="' + style + '">' + icon + labelHtml + '</li>';
+    }
+
+    function updateOnboardingPanel(data) {
+      const panel = document.getElementById('onboarding-panel');
+      const stepsEl = document.getElementById('onboarding-steps');
+      const userId = data.user.user_id;
+      const emailDone = !!data.user.email_verified;
+      const deviceDone = (data.devices || []).length > 0;
+      const vaultDone = (data.vaults || []).length > 0;
+      const syncDone = deviceHasRecentSync(data.devices);
+      const allDone = emailDone && deviceDone && vaultDone && syncDone;
+
+      if (allDone || isOnboardingDismissed(userId)) {
+        panel.classList.add('hidden');
+        return;
+      }
+
+      const steps = [
+        onboardingStepRow(emailDone,
+          emailDone ? 'Verify your email' :
+            'Verify your email — use the banner above or <button type="button" id="onboarding-resend-verify" class="text-emerald-400 hover:underline">resend link</button>'),
+        onboardingStepRow(deviceDone,
+          deviceDone ? 'Enroll a device' :
+            'Enroll a device — see <a href="../docs/enroll-device.html" class="text-emerald-400 hover:underline">enrollment guide</a>'),
+        onboardingStepRow(vaultDone,
+          vaultDone ? 'Create a vault share' :
+            'Create a vault — run <code class="text-slate-200">disk share init</code> on an enrolled device (<a href="../docs/getting-started.html" class="text-emerald-400 hover:underline">tutorial</a>)'),
+        onboardingStepRow(syncDone,
+          syncDone ? 'Complete first sync' :
+            'Complete first sync — add a file under your share; <strong>Last seen</strong> should update within a minute'),
+      ];
+      stepsEl.innerHTML = steps.join('');
+      panel.classList.remove('hidden');
+
+      const resend = document.getElementById('onboarding-resend-verify');
+      if (resend) {
+        resend.onclick = async () => {
+          document.getElementById('resend-verify-btn')?.click();
+        };
+      }
+    }
+
     function showDashboard(data) {
       authPanel.classList.add('hidden');
       dashPanel.classList.remove('hidden');
@@ -681,6 +767,7 @@
         data.user.email + ' · tenant <code class="text-slate-200">' + data.user.tenant_id + '</code>' + verifiedBadge;
 
       updateVerifyBanner(data, null);
+      updateOnboardingPanel(data);
 
       document.getElementById('plan-tier').textContent = data.billing.plan_tier;
       document.getElementById('storage-usage').textContent =
@@ -1528,11 +1615,29 @@
         const res = await api('/auth/resend-verification', { method: 'POST', body: '{}' });
         const summary = await api('/dashboard/summary');
         updateVerifyBanner(summary, res);
+        updateOnboardingPanel(summary);
       } catch (err) {
         showDashError(err.message);
       } finally {
         btn.disabled = false;
       }
+    };
+
+    document.getElementById('onboarding-dismiss-btn').onclick = () => {
+      const line = document.getElementById('user-line').textContent || '';
+      const match = line.match(/tenant\s/);
+      if (!match) {
+        document.getElementById('onboarding-panel').classList.add('hidden');
+        return;
+      }
+      api('/dashboard/summary').then(summary => {
+        try {
+          localStorage.setItem(onboardingDismissKey(summary.user.user_id), '1');
+        } catch (_) { /* ignore */ }
+        document.getElementById('onboarding-panel').classList.add('hidden');
+      }).catch(() => {
+        document.getElementById('onboarding-panel').classList.add('hidden');
+      });
     };
 
     document.getElementById('export-data-btn').onclick = async () => {

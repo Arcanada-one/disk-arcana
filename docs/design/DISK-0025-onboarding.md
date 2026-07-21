@@ -1,6 +1,6 @@
 # DISK-0025 — Onboarding Flow + Help Center
 
-**Status:** slice 1 on DEVS — static help center (`deploy/www/docs/`).  
+**Status:** slice 2 on DEVS — dashboard getting-started checklist.  
 **Parent:** DISK-0001 commercial / SaaS track.  
 **Tracking:** DISK-0025 in Datarim backlog.
 
@@ -8,8 +8,8 @@
 
 | Slice | In scope | Out of scope |
 |-------|----------|--------------|
-| 1 (this PR) | Static help center at `deploy/www/docs/` (Diátaxis-lite: tutorials + how-to), sitemap + home/dashboard links; canonical host `disk.arcanada.ai/docs/` (alias `docs.disk.arcanada.one` via nginx) | Dashboard onboarding wizard, server-side progress persistence |
-| 2 | Dashboard getting-started checklist derived from `/dashboard/summary`; dismiss via localStorage; deep links to help articles | Email drip campaigns, in-app tooltips tour |
+| 1 (merged #93) | Static help center at `deploy/www/docs/` (Diátaxis-lite: tutorials + how-to), sitemap + home/dashboard links; canonical host `disk.arcanada.ai/docs/` (alias `docs.disk.arcanada.one` via nginx) | Dashboard onboarding wizard, server-side progress persistence |
+| 2 (this PR) | Dashboard getting-started checklist derived from `/dashboard/summary`; dismiss via localStorage; deep links to help articles | Email drip campaigns, in-app tooltips tour |
 | 3 | `user_onboarding` table, `GET/PUT /onboarding`, persist dismiss across devices | PostHog funnel analytics (DISK-0026) |
 
 ## Help center structure
@@ -42,7 +42,7 @@ Static files ship with `deploy/www/` rsync (see `deploy/www/README.md`). Operato
 ## Tests
 
 - Slice 1: manual link check; no Rust tests (static HTML only)
-- Slice 2: manual dashboard checklist; optional Playwright in follow-up
+- Slice 2: manual dashboard checklist (verify / enroll / vault / sync steps)
 - Slice 3: `crates/disk-server/src/onboarding/routes.rs` integration tests
 
 ## References
