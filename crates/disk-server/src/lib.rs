@@ -20,6 +20,7 @@ pub mod health;
 pub mod middleware;
 pub mod multi_node;
 pub mod onboarding;
+pub mod orgs;
 pub mod publisher;
 pub mod selective_sync;
 pub mod services;
@@ -57,6 +58,7 @@ pub use enrollment::{EnrollErrorKind, EnrollmentServiceImpl};
 pub use middleware::{BombError, ReplayError, ReplayGuard};
 pub use multi_node::{lifecycle::revoke_node, vclock::VClock};
 pub use onboarding::{get_onboarding, put_onboarding};
+pub use orgs::{add_member, create_org, list_members, list_orgs};
 pub use publisher::{
     build_signed_payload, FileMetadata as PublisherFileMetadata, PublisherSignatureProof,
     PublisherVerifier, StubKeyFetcher, VerifyError,

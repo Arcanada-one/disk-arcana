@@ -537,3 +537,24 @@ async fn migration_021_agent_webhook_signing_secret_column_exists() {
         "signing_secret column must exist after migration 021; got {columns:?}"
     );
 }
+
+#[tokio::test]
+async fn migration_022_organization_tables_exist() {
+    let dir = tempdir().expect("tempdir");
+    let db = MetaDb::open(&dir.path().join("orgs-schema.sqlite"))
+        .await
+        .expect("open");
+
+    let tables: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .fetch_all(db.pool())
+            .await
+            .expect("sqlite_master");
+
+    for required in ["organizations", "organization_members"] {
+        assert!(
+            tables.iter().any(|t| t == required),
+            "{required} table must exist after migration 022; got {tables:?}"
+        );
+    }
+}
