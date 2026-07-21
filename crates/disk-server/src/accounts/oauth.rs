@@ -122,9 +122,7 @@ async fn oauth_start_inner(
     }
 
     let browser_redirect = browser_redirect_from_query(&query)?;
-    let provider = query
-        .provider
-        .unwrap_or_else(|| "auth_arcana".to_string());
+    let provider = query.provider.unwrap_or_else(|| "auth_arcana".to_string());
     let oauth_state =
         issue_oauth_state(&state.signing_key, &provider, browser_redirect.as_deref())?;
 
