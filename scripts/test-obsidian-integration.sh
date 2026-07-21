@@ -21,11 +21,14 @@ if curl --silent --show-error --max-time 1 http://127.0.0.1:9444/status >/dev/nu
     exit 1
 fi
 
-cargo run -p disk-client --example plugin_test_daemon -- "$FIXTURE_ROOT" >"$LOG_FILE" 2>&1 &
+echo "Building plugin_test_daemon fixture..."
+cargo build -p disk-client --example plugin_test_daemon --quiet
+
+cargo run -p disk-client --example plugin_test_daemon --quiet -- "$FIXTURE_ROOT" >"$LOG_FILE" 2>&1 &
 DAEMON_PID=$!
 
 ready=0
-for _ in $(seq 1 100); do
+for _ in $(seq 1 300); do
     if curl --silent --fail --max-time 1 http://127.0.0.1:9444/status >/dev/null 2>&1; then
         ready=1
         break
@@ -42,6 +45,7 @@ if [ "$ready" -ne 1 ]; then
     exit 1
 fi
 
+(cd "$PLUGIN_DIR" && npm ci --silent)
 (cd "$PLUGIN_DIR" && npm run test:integration)
 
 test "$(cat "$FIXTURE_ROOT/docs/notes/todo.md")" = "remote version"
