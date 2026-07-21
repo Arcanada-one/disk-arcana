@@ -135,6 +135,29 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("open MetaDb for sync service at {}", cfg.db_path.display()))?;
 
+    let quota_enforcer = if cfg.billing_mode.is_active() {
+        Some(
+            disk_server::QuotaEnforcer::new(cfg.billing_mode, meta_db.clone())
+                .context("init QuotaEnforcer")?,
+        )
+    } else {
+        None
+    };
+
+    let webhook_state = if cfg.billing_mode == disk_server::BillingMode::Stripe {
+        let require_sig = std::env::var("DISK_STRIPE_WEBHOOK_REQUIRE_SIG")
+            .ok()
+            .as_deref()
+            != Some("0");
+        Some(Arc::new(disk_server::WebhookState {
+            mode: cfg.billing_mode,
+            meta_db: meta_db.clone(),
+            require_signature_header: require_sig,
+        }))
+    } else {
+        None
+    };
+
     // gRPC service wrappers. EnrollmentServiceImpl is Clone (Arc-wrapped fields)
     // so we can host the same backing service on both listeners (DISK-0037).
     // Admin RPCs remain gated by `require_admin()` metadata check — the public
@@ -146,15 +169,19 @@ async fn main() -> anyhow::Result<()> {
             pool.clone(),
             cfg.admin_token.clone(),
         ));
-    let sync_svc = SyncServiceServer::new(
-        SyncServiceImpl::with_acl(
+    let sync_svc = SyncServiceServer::new({
+        let mut sync_impl = SyncServiceImpl::with_acl(
             auth_store.clone(),
             cfg.sync_root.clone(),
             acl_enforcer.clone(),
             audit_emitter.clone(),
         )
-        .with_meta_db(meta_db, "server"),
-    );
+        .with_meta_db(meta_db, "server");
+        if let Some(enforcer) = quota_enforcer {
+            sync_impl = sync_impl.with_quota_enforcer(enforcer);
+        }
+        sync_impl
+    });
     let enroll_svc = EnrollmentServiceServer::new(enrollment_impl.clone());
     let enroll_svc_public = EnrollmentServiceServer::new(enrollment_impl);
 
@@ -175,7 +202,9 @@ async fn main() -> anyhow::Result<()> {
     // Runs concurrently with the gRPC server; both shut down on SIGTERM/SIGINT.
     let health_addr = cfg.health_bind_addr;
     let _health_task = tokio::spawn(async move {
-        if let Err(e) = disk_server::health::serve(health_addr, health_shutdown).await {
+        if let Err(e) =
+            disk_server::health::serve(health_addr, webhook_state, health_shutdown).await
+        {
             tracing::error!(error = %e, "health server exited with error");
         }
     });
