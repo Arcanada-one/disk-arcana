@@ -70,6 +70,7 @@ mod tests {
             deleted: false,
             deleted_at: None,
             node_id: "n".into(),
+            encryption_nonce: None,
         }
     }
 

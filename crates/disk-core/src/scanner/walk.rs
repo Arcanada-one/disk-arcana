@@ -89,6 +89,7 @@ impl FileScanner {
                 deleted: false,
                 deleted_at: None,
                 node_id: self.node_id.clone(),
+                encryption_nonce: None,
             });
         }
 

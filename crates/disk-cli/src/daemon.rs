@@ -35,6 +35,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use disk_client::config::{spawn_config_watcher, ConfigWatcher, Direction, DiskConfig};
 use disk_client::connection::DiskClient;
+use disk_client::load_vault_key_from_env;
 use disk_client::rest_api::{serve, DaemonState, ShareSnapshot};
 use disk_client::sync_loop::{LoopState, LoopTrigger, RemoteSync, SyncLoop, POLL_INTERVAL};
 use disk_client::BlobCache;
@@ -180,6 +181,31 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
     let client_key_pem: Option<Vec<u8>> = std::fs::read(&cfg.server.client_key).ok();
     let node_id_for_loop = node_id.clone();
 
+    let e2ee_key = if cfg.vault.e2ee_enabled {
+        match load_vault_key_from_env() {
+            Ok(Some(key)) => {
+                tracing::info!("daemon: client-side E2EE enabled for uploads");
+                Some(key)
+            }
+            Ok(None) => {
+                tracing::warn!(
+                    "daemon: vault.e2ee_enabled=true but DISK_VAULT_PASSPHRASE unset; \
+                     uploads remain plaintext"
+                );
+                None
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "daemon: failed to derive vault key; uploads remain plaintext"
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // Use a broadcast-style approach: fan out manual_sync signals to all shares.
     let manual_sync_rx = Arc::new(tokio::sync::Mutex::new(manual_sync_rx));
 
@@ -199,6 +225,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
         let manual_sync_rx = Arc::clone(&manual_sync_rx);
         let meta_db = meta_db.clone();
         let blob_cache = Arc::clone(&blob_cache);
+        let e2ee_key = e2ee_key.clone();
         // Clone the DaemonState handle into the per-share task so it can
         // write live loop state back via `update_share`.
         let state_for_task = state.clone();
@@ -355,6 +382,9 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
                     baselines,
                     meta_db.clone(),
                 );
+                if let Some(ref key) = e2ee_key {
+                    transport = transport.with_e2ee_key(key.clone());
+                }
                 let outcome = loop_sm
                     .run_iteration(&mut transport, trigger, &mut rng)
                     .await;
@@ -798,6 +828,7 @@ client_key  = "/b"
             deleted: false,
             deleted_at: None,
             node_id: "arcana-ai".to_string(),
+            encryption_nonce: None,
         };
         db.upsert_node_baselines("arcana-ai", "wiki", std::slice::from_ref(&baseline))
             .await

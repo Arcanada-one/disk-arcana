@@ -36,6 +36,8 @@ pub enum FilterMode {
 pub struct DiskConfig {
     pub node: NodeSection,
     pub server: ServerSection,
+    #[serde(default)]
+    pub vault: VaultSection,
     #[serde(default, rename = "share")]
     pub shares: Vec<ShareSection>,
 }
@@ -95,6 +97,15 @@ pub struct ServerSection {
 
 fn default_tls_mode() -> String {
     "auto".to_owned()
+}
+
+/// Client-side vault / E2EE options (DISK-0015).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct VaultSection {
+    /// When true, uploads encrypt plaintext before `DeltaUpload`.
+    /// Requires `DISK_VAULT_PASSPHRASE` + `DISK_VAULT_SALT` env vars at runtime.
+    #[serde(default)]
+    pub e2ee_enabled: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -148,6 +148,7 @@ fn baseline_row_to_meta(row: sqlx::sqlite::SqliteRow) -> Result<FileMeta, MetaDb
         deleted: deleted_int != 0,
         deleted_at,
         node_id: node_id_writer,
+        encryption_nonce: None,
     })
 }
 

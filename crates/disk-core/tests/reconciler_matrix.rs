@@ -22,6 +22,7 @@ fn meta_with(path: &str, hash: u8, deleted: bool, inode: Option<u64>) -> FileMet
         deleted,
         deleted_at: if deleted { Some(0) } else { None },
         node_id: "node-A".into(),
+        encryption_nonce: None,
     }
 }
 
