@@ -54,6 +54,35 @@ pub struct VaultMemberRow {
 }
 
 impl MetaDb {
+    /// Lookup collaborator membership for a user on a vault owned by another tenant.
+    pub async fn get_collaborator_vault_access(
+        &self,
+        user_id: &str,
+        vault_id: &str,
+    ) -> Result<Option<(Option<String>, VaultShareRole)>, MetaDbError> {
+        let row = sqlx::query(
+            r#"
+            SELECT tenant_id, role
+            FROM vault_members
+            WHERE user_id = ?1 AND vault_id = ?2
+            LIMIT 1
+            "#,
+        )
+        .bind(user_id)
+        .bind(vault_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let tenant_id: Option<String> = row.try_get("tenant_id")?;
+        let role_raw: String = row.try_get("role")?;
+        let role = VaultShareRole::parse(&role_raw)
+            .ok_or_else(|| MetaDbError::Invalid(format!("unknown vault share role: {role_raw}")))?;
+        Ok(Some((tenant_id, role)))
+    }
+
     /// True when the vault is registered for the tenant.
     pub async fn vault_exists_for_tenant(
         &self,

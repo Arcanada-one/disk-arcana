@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::accounts::routes::{resolve_user_from_access, verify_bearer, AuthHttpState};
+use crate::sharing::access::{require_manage, resolve_vault_access};
 
 #[derive(Debug, Deserialize)]
 pub struct CreateInviteRequest {
@@ -113,19 +114,11 @@ pub struct RemoveMemberResponse {
 
 async fn assert_vault_manager(
     state: &AuthHttpState,
-    user_tenant: &str,
+    user: &disk_core::meta_db::UserAccount,
     vault_id: &str,
 ) -> Result<(), (StatusCode, &'static str)> {
-    let tenant_key = Some(user_tenant);
-    if !state
-        .meta_db
-        .vault_exists_for_tenant(tenant_key, vault_id)
-        .await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error"))?
-    {
-        return Err((StatusCode::NOT_FOUND, "vault not found"));
-    }
-    Ok(())
+    let access = resolve_vault_access(state, user, vault_id).await?;
+    require_manage(&access)
 }
 
 fn parse_share_role(raw: &str) -> Result<VaultShareRole, (StatusCode, &'static str)> {
@@ -167,7 +160,7 @@ async fn create_invite_inner(
 ) -> Result<InviteResponse, (StatusCode, &'static str)> {
     let claims = verify_bearer(state, headers).await?;
     let user = resolve_user_from_access(state, &claims).await?;
-    assert_vault_manager(state, &user.tenant_id, &body.vault_id).await?;
+    assert_vault_manager(state, &user, &body.vault_id).await?;
 
     let role = parse_share_role(&body.role)?;
     let ttl_secs = (body.ttl_hours.clamp(1, 24 * 30) as i64) * 3600;
@@ -228,7 +221,7 @@ async fn list_invites_inner(
 ) -> Result<InviteListResponse, (StatusCode, &'static str)> {
     let claims = verify_bearer(state, headers).await?;
     let user = resolve_user_from_access(state, &claims).await?;
-    assert_vault_manager(state, &user.tenant_id, &query.vault_id).await?;
+    assert_vault_manager(state, &user, &query.vault_id).await?;
 
     let rows = state
         .meta_db
@@ -350,7 +343,7 @@ async fn list_members_inner(
 ) -> Result<MemberListResponse, (StatusCode, &'static str)> {
     let claims = verify_bearer(state, headers).await?;
     let user = resolve_user_from_access(state, &claims).await?;
-    assert_vault_manager(state, &user.tenant_id, &query.vault_id).await?;
+    assert_vault_manager(state, &user, &query.vault_id).await?;
 
     let rows = state
         .meta_db
@@ -394,7 +387,7 @@ async fn remove_member_inner(
 ) -> Result<RemoveMemberResponse, (StatusCode, &'static str)> {
     let claims = verify_bearer(state, headers).await?;
     let user = resolve_user_from_access(state, &claims).await?;
-    assert_vault_manager(state, &user.tenant_id, &body.vault_id).await?;
+    assert_vault_manager(state, &user, &body.vault_id).await?;
 
     let removed = state
         .meta_db
