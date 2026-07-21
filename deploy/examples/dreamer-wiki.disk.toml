@@ -1,0 +1,36 @@
+# Example: Agent Dreamer wiki share (DISK-0011)
+#
+# Merge relevant sections into your enrolled node's disk.toml.
+# macOS dev path and Linux server path differ — adjust `path` per host.
+
+[node]
+id = "arcana-dev-node"
+display_name = "Arcana DEVS"
+
+[node.default]
+intended_direction = "bidirectional"
+
+[server]
+address = "disk.arcanada.ai:9443"
+tls = "auto"
+client_cert = "/etc/disk-arcana/client.crt"
+client_key = "/etc/disk-arcana/client.key"
+server_ca = "/etc/disk-arcana/server-ca.crt"
+tls_domain = "disk.arcanada.ai"
+
+[[share]]
+name = "wiki"
+path = "/home/dev/arcanada/wiki"
+intended_direction = "bidirectional"
+
+[share.filter]
+mode = "blacklist"
+exclude = [
+  "**/node_modules/**",
+  "**/.meta/**",
+  "**/.claude/**",
+  "**/.obsidian/workspace.json",
+  "**/.sync-conflict*",
+]
+
+# Hardcoded scanner denies (not configurable): .git, .disk-archive, .dreamer
