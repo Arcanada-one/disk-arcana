@@ -54,6 +54,7 @@ time        = { version = "0.3", default-features = false, features = ["std", "f
 walkdir     = "2.5"
 argon2          = "0.5"
 chacha20poly1305 = "0.10"
+jsonwebtoken    = "9"
 
 [profile.release]
 lto             = "fat"

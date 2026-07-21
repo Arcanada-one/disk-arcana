@@ -166,7 +166,7 @@ mod tests {
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         tokio::spawn(async move {
-            crate::health::serve(addr, Some(state), async move {
+            crate::health::serve(addr, Some(state), None, async move {
                 let _ = shutdown_rx.await;
             })
             .await
@@ -210,7 +210,7 @@ mod tests {
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         tokio::spawn(async move {
-            crate::health::serve(addr, Some(state), async move {
+            crate::health::serve(addr, Some(state), None, async move {
                 let _ = shutdown_rx.await;
             })
             .await

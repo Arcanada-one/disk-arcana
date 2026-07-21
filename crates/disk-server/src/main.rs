@@ -175,6 +175,20 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
+    let auth_state = if cfg.auth_mode.is_active() {
+        let key = cfg
+            .jwt_signing_key
+            .clone()
+            .expect("jwt key checked in ServerConfig::from_env");
+        Some(Arc::new(disk_server::AuthHttpState {
+            meta_db: meta_router.control(),
+            signing_key: key.into_bytes(),
+            token_ttl_secs: cfg.jwt_ttl_secs,
+        }))
+    } else {
+        None
+    };
+
     // gRPC service wrappers. EnrollmentServiceImpl is Clone (Arc-wrapped fields)
     // so we can host the same backing service on both listeners (DISK-0037).
     // Admin RPCs remain gated by `require_admin()` metadata check — the public
@@ -226,7 +240,8 @@ async fn main() -> anyhow::Result<()> {
     let health_addr = cfg.health_bind_addr;
     let _health_task = tokio::spawn(async move {
         if let Err(e) =
-            disk_server::health::serve(health_addr, webhook_state, health_shutdown).await
+            disk_server::health::serve(health_addr, webhook_state, auth_state, health_shutdown)
+                .await
         {
             tracing::error!(error = %e, "health server exited with error");
         }

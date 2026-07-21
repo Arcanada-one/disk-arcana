@@ -141,6 +141,12 @@ pub struct ServerConfig {
     /// metadata lives under `{dir}/{tenant}/meta.sqlite`; control tables stay
     /// on `DISK_DB_PATH`.
     pub tenant_db_dir: Option<PathBuf>,
+    /// SaaS user auth (DISK-0016). Default `disabled` for self-hosted.
+    pub auth_mode: crate::accounts::AuthMode,
+    /// HS256 signing key for interim JWT (min 32 bytes when auth=enforce).
+    pub jwt_signing_key: Option<String>,
+    /// Access token TTL seconds (default 86400).
+    pub jwt_ttl_secs: u64,
 }
 
 impl ServerConfig {
@@ -216,6 +222,31 @@ impl ServerConfig {
             .ok()
             .filter(|s| !s.is_empty());
 
+        let auth_mode_raw =
+            std::env::var("DISK_AUTH_MODE").unwrap_or_else(|_| "disabled".to_string());
+        let auth_mode = crate::accounts::AuthMode::parse(&auth_mode_raw)?;
+
+        let jwt_signing_key = std::env::var("DISK_JWT_SIGNING_KEY")
+            .ok()
+            .filter(|s| !s.is_empty());
+
+        let jwt_ttl_secs = std::env::var("DISK_JWT_TTL_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(disk_core::JWT_DEFAULT_TTL_SECS);
+
+        if auth_mode.is_active() {
+            let key = jwt_signing_key
+                .as_deref()
+                .ok_or(ConfigError::MissingEnv("DISK_JWT_SIGNING_KEY"))?;
+            if key.len() < 32 {
+                return Err(ConfigError::InvalidValue(
+                    "DISK_JWT_SIGNING_KEY",
+                    "must be at least 32 bytes when DISK_AUTH_MODE=enforce".into(),
+                ));
+            }
+        }
+
         Ok(Self {
             bind_addr,
             enrollment_bind_addr,
@@ -244,6 +275,9 @@ impl ServerConfig {
             billing_mode,
             stripe_webhook_secret,
             tenant_db_dir: opt_path("DISK_TENANT_DB_DIR"),
+            auth_mode,
+            jwt_signing_key,
+            jwt_ttl_secs,
         })
     }
 }

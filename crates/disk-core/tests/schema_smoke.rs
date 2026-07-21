@@ -339,3 +339,22 @@ async fn migration_009_node_baselines_tenant_index() {
         "idx_node_baselines_tenant_scope must exist after migration 009; got {indexes:?}"
     );
 }
+
+#[tokio::test]
+async fn migration_011_user_accounts_table_exists() {
+    let dir = tempdir().expect("tempdir");
+    let db = MetaDb::open(&dir.path().join("user-accounts-schema.sqlite"))
+        .await
+        .expect("open");
+
+    let tables: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .fetch_all(db.pool())
+            .await
+            .expect("sqlite_master");
+
+    assert!(
+        tables.iter().any(|t| t == "user_accounts"),
+        "user_accounts table must exist after migration 011; got {tables:?}"
+    );
+}
