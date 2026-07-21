@@ -1,6 +1,6 @@
 # DISK-0028 — AI Agents API (webhooks, agent-write protocol, optimistic locks)
 
-**Status:** slice 1 on DEVS — webhook registration + agent-write with optimistic revisions.  
+**Status:** slice 2 on DEVS — async webhook delivery with HMAC `X-Disk-Signature`.  
 **Parent:** DISK-0001 commercial / SaaS track.  
 **Tracking:** DISK-0028 in Datarim backlog.
 
@@ -8,8 +8,8 @@
 
 | Slice | In scope | Out of scope |
 |-------|----------|--------------|
-| 1 (this PR) | `agent_webhooks` + `agent_write_revisions` tables; `GET/POST/DELETE /agents/webhooks`; `GET /agents/revision`; `POST /agents/write` with `if_match_revision` optimistic locking | Async webhook delivery on file events, HMAC outbound signing, CLI `disk agents` |
-| 2 | Fire registered webhooks on sync/agent events with HMAC `X-Disk-Signature` | Agent API keys separate from user JWT |
+| 1 (merged #98) | `agent_webhooks` + `agent_write_revisions` tables; `GET/POST/DELETE /agents/webhooks`; `GET /agents/revision`; `POST /agents/write` with `if_match_revision` optimistic locking | Async webhook delivery on file events, HMAC outbound signing, CLI `disk agents` |
+| 2 (this PR) | Persist `signing_secret`; background mpsc dispatcher; fire `agent.write_ok` / `agent.write_conflict` with HMAC `X-Disk-Signature` | `sync.file_*` gRPC hooks, agent API keys separate from user JWT |
 | 3 | `disk agents` CLI (`webhooks`, `write`, `revision`) | LAN sync acceleration (DISK-0027) |
 
 ## Agent-write protocol
@@ -32,14 +32,22 @@ Response includes monotonic `revision` per `(tenant, vault, path)` independent o
 
 ## Webhook registration
 
-Tenant owners register HTTPS callback URLs per vault. Secrets are returned once on create (Blake3 hash stored). Delivery is deferred to slice 2.
+Tenant owners register HTTPS callback URLs per vault. Secrets are returned once on create; the server stores the signing key for outbound HMAC (migration 021).
 
-Supported event names (stored, not yet dispatched):
+Supported event names:
 
-- `sync.file_changed`
-- `sync.file_deleted`
-- `agent.write_ok`
-- `agent.write_conflict`
+- `sync.file_changed` (registered; gRPC dispatch deferred)
+- `sync.file_deleted` (registered; gRPC dispatch deferred)
+- `agent.write_ok` (dispatched on successful `/agents/write`)
+- `agent.write_conflict` (dispatched on revision mismatch)
+
+## Outbound delivery (slice 2)
+
+- **Transport:** `POST` JSON body to registered URL, async via bounded mpsc channel (512), fail-soft.
+- **Headers:** `X-Disk-Signature: t=<unix>,v1=<hmac_hex>`, `X-Disk-Event`, `X-Disk-Webhook-Id`
+- **Signature:** HMAC-SHA256 over `{timestamp}.{body}` keyed by `webhook_secret` (`whsec_...`)
+- **Retries:** 3 attempts, exponential backoff (200ms base)
+- **Verify helper:** `disk_core::agents::verify_disk_webhook_signature` for consumers
 
 ## HTTP API
 
@@ -56,12 +64,15 @@ Mounted on the health HTTP listener when `DISK_AUTH_MODE=enforce`.
 ## Storage
 
 - **Migration 020:** `agent_webhooks`, `agent_write_revisions`
+- **Migration 021:** `agent_webhooks.signing_secret` for outbound HMAC
 
 ## Tests
 
+- `crates/disk-core/src/agents/webhook_sig.rs` — sign/verify unit tests
 - `crates/disk-core/src/meta_db/agents.rs` — revision bump + webhook CRUD unit tests
+- `crates/disk-server/src/agents/dispatch.rs` — signed delivery integration test
 - `crates/disk-server/src/agents/routes.rs` — HTTP round-trip (write conflict + webhook CRUD)
-- `crates/disk-core/tests/schema_smoke.rs` — migration 020 tables exist
+- `crates/disk-core/tests/schema_smoke.rs` — migration 020/021 tables exist
 
 ## References
 

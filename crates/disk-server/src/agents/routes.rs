@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::accounts::routes::{resolve_user_from_access, verify_bearer, AuthHttpState};
+use crate::agents::{agent_write_conflict_payload, agent_write_ok_payload, AgentWebhookJob};
 use crate::sharing::access::{require_write, resolve_vault_access};
 
 const ALLOWED_WEBHOOK_EVENTS: &[&str] = &[
@@ -255,6 +256,7 @@ async fn register_webhook_inner(
             vault_id: &body.vault_id,
             url: &body.url,
             secret_hash: &hash,
+            signing_secret: &secret,
             events: &body.events,
             label: body.label.as_deref(),
         })
@@ -392,6 +394,12 @@ async fn agent_write_inner(
 
     let expected = body.if_match_revision.unwrap_or(0);
     if expected != current.revision {
+        state.agent_webhooks.enqueue(AgentWebhookJob {
+            tenant_id: tenant_key.map(str::to_string),
+            vault_id: body.vault_id.clone(),
+            event: "agent.write_conflict".into(),
+            payload: agent_write_conflict_payload(&path, expected, current.revision),
+        });
         return Err((StatusCode::CONFLICT, "revision_conflict"));
     }
 
@@ -439,7 +447,13 @@ async fn agent_write_inner(
 
     let new_revision = match bump {
         RevisionBumpOutcome::Applied { new_revision } => new_revision,
-        RevisionBumpOutcome::Conflict { .. } => {
+        RevisionBumpOutcome::Conflict { current_revision } => {
+            state.agent_webhooks.enqueue(AgentWebhookJob {
+                tenant_id: tenant_key.map(str::to_string),
+                vault_id: body.vault_id.clone(),
+                event: "agent.write_conflict".into(),
+                payload: agent_write_conflict_payload(&path, expected, current_revision),
+            });
             return Err((StatusCode::CONFLICT, "revision_conflict"));
         }
     };
@@ -486,11 +500,25 @@ async fn agent_write_inner(
 
     let _ = state.version_blobs.put(&content_hash, &bytes);
 
+    let content_hash_hex = hex::encode(content_hash);
+    state.agent_webhooks.enqueue(AgentWebhookJob {
+        tenant_id: tenant_key.map(str::to_string),
+        vault_id: body.vault_id.clone(),
+        event: "agent.write_ok".into(),
+        payload: agent_write_ok_payload(
+            &path,
+            new_revision,
+            &content_hash_hex,
+            bytes.len() as u64,
+            agent_label,
+        ),
+    });
+
     Ok(AgentWriteResponse {
         path,
         vault_id: body.vault_id,
         revision: new_revision,
-        content_hash_hex: hex::encode(content_hash),
+        content_hash_hex,
         size: bytes.len() as u64,
     })
 }
