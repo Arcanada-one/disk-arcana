@@ -70,6 +70,25 @@ justification_required: false
 related_task: DISK-0006 R5
 ```
 
+### `disk-cli daemon` — LAN blob server (opt-in)
+
+```yaml
+service: disk-cli daemon
+component: LAN P2P blob HTTP (DISK-0027 slice 2)
+bind: 0.0.0.0:9447
+config: disk.toml [lan_sync] advertise_port
+tier: 3
+x-exposure-justification: "Opt-in LAN acceleration — serves vault bytes only to enrolled peers with matching x-disk-tenant; cloud ExchangeState remains authority"
+x-exposure-expires: "2026-10-22"
+mitigations:
+  - Disabled by default ([lan_sync] enabled = false)
+  - Tenant header gate + requester node_id required
+  - path_guard on every blob path
+  - Fail-soft fetch — cloud delta_download fallback
+review_owner: Pavel Valentov
+related_task: DISK-0027
+```
+
 ## Out of scope
 
 - macOS / Linux installers' filesystem permissions — see DISK-RB-001.

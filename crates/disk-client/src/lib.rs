@@ -36,7 +36,8 @@ pub use keychain::{
     DEFAULT_OS_KEYRING_SERVICE,
 };
 pub use lan_sync::{
-    parse_server_port, spawn_lan_discovery, LanPeer, LanPeerRegistry, PEER_TTL_SECS,
+    eligible_peers, parse_server_port, spawn_lan_discovery, spawn_lan_serve, try_lan_fetch,
+    LanFetchContext, LanPeer, LanPeerRegistry, LanServeState, PEER_TTL_SECS,
 };
 pub use mtls::{
     audit_key_permissions, build_client_tls_config, load_client_identity, load_server_ca, MtlsError,
