@@ -35,6 +35,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use disk_client::config::{spawn_config_watcher, ConfigWatcher, Direction, DiskConfig};
 use disk_client::connection::DiskClient;
+use disk_client::embeddings_sweep::{sweep_share, EmbeddingsStatusSnapshot};
 use disk_client::lan_sync::{
     parse_server_port, spawn_lan_discovery, spawn_lan_serve, LanFetchContext, LanPeerRegistry,
     LanServeState,
@@ -42,7 +43,7 @@ use disk_client::lan_sync::{
 use disk_client::resolve_vault_key;
 use disk_client::rest_api::{serve, DaemonState, ShareSnapshot};
 use disk_client::sync_loop::{LoopState, LoopTrigger, RemoteSync, SyncLoop, POLL_INTERVAL};
-use disk_client::telemetry::{sync_outcome_label, ClientTelemetry};
+use disk_client::telemetry::{default_health_base, sync_outcome_label, ClientTelemetry};
 use disk_client::BlobCache;
 use disk_core::{MetaDb, DEFAULT_CONFLICT_TTL_SECS};
 use rand::{rngs::StdRng, SeedableRng};
@@ -106,6 +107,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
     }
 
     let (state, manual_sync_rx, reload_rx) = DaemonState::new(&node_id, config_version);
+    let state = state.with_embeddings_tracking(cfg.embeddings.enabled);
     state.set_shares(build_share_snapshots(&cfg)).await;
 
     let watcher = spawn_config_watcher(args.config.clone(), cfg.clone(), Some(reload_rx), None)
@@ -278,6 +280,8 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
     for share in cfg.shares.iter() {
         let share_name = share.name.clone();
         let share_path = share.path.clone();
+        let share_section = share.clone();
+        let embeddings_cfg = cfg.embeddings.clone();
         let declared_direction = share
             .effective_direction(cfg.node.default.intended_direction)
             .unwrap_or(Direction::Bidirectional);
@@ -497,6 +501,71 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
                             "trigger": trigger_label,
                         }),
                     );
+                }
+
+                if embeddings_cfg.enabled && matches!(outcome, Some(Ok(()))) {
+                    let share_for_sweep = share_section.clone();
+                    let share_name_for_log = share_for_sweep.name.clone();
+                    let embeddings_for_sweep = embeddings_cfg.clone();
+                    let state_for_sweep = state_for_task.clone();
+                    let server_for_report = server_addr.clone();
+                    tokio::spawn(async move {
+                        match tokio::task::spawn_blocking(move || {
+                            sweep_share(&share_for_sweep, &embeddings_for_sweep)
+                        })
+                        .await
+                        {
+                            Ok(Ok(report)) => {
+                                if report.stale > 0 || report.missing > 0 {
+                                    tracing::warn!(
+                                        share = %share_name_for_log,
+                                        stale = report.stale,
+                                        missing = report.missing,
+                                        "embeddings: stale or missing sidecars after sync"
+                                    );
+                                }
+                                state_for_sweep
+                                    .set_embeddings_status(EmbeddingsStatusSnapshot::from(
+                                        report.clone(),
+                                    ))
+                                    .await;
+                                if let Ok(token) = std::env::var("DISK_ACCESS_TOKEN") {
+                                    if !token.is_empty() {
+                                        let base = default_health_base(&server_for_report);
+                                        if let Err(e) =
+                                            disk_client::embeddings_sweep::report_stale_to_server(
+                                                &base,
+                                                &token,
+                                                "default",
+                                                &report.share_name,
+                                                &report,
+                                            )
+                                            .await
+                                        {
+                                            tracing::debug!(
+                                                error = %e,
+                                                "embeddings: stale webhook report failed (ignored)"
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            Ok(Err(e)) => {
+                                tracing::debug!(
+                                    share = %share_name_for_log,
+                                    error = %e,
+                                    "embeddings sweep failed (ignored)"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::debug!(
+                                    share = %share_name_for_log,
+                                    error = %e,
+                                    "embeddings sweep task join failed (ignored)"
+                                );
+                            }
+                        }
+                    });
                 }
             }
         });

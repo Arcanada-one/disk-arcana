@@ -1,6 +1,6 @@
 # DISK-0029 — Embeddings Co-storage (vector index synced alongside files)
 
-**Status:** slice 1 on DEVS — sidecar layout, filter passthrough, `disk embeddings status`.  
+**Status:** slice 2 on DEVS — daemon post-sync sweep + loopback status + `embeddings.stale` webhook.  
 **Parent:** DISK-0001 commercial / SaaS track.  
 **Tracking:** DISK-0029 in Datarim backlog.
 
@@ -14,8 +14,8 @@ Disk Arcana co-stores embedding vectors as **sidecar artefacts** under `.disk-em
 
 | Slice | In scope | Out of scope |
 |-------|----------|--------------|
-| 1 (this PR) | `.disk-embeddings/` layout + manifest v1 schema; extension-whitelist passthrough in `filter.rs`; `[embeddings]` in `disk.toml`; `disk embeddings status` CLI | Live embedding generation, Scrutator/Model Connector integration, daemon auto-invalidation hook |
-| 2 (planned) | Post-sync staleness sweep in daemon; optional webhook `embeddings.stale` | Server-side vector DB, cross-vault embedding search |
+| 1 (merged #103) | `.disk-embeddings/` layout + manifest v1 schema; extension-whitelist passthrough in `filter.rs`; `[embeddings]` in `disk.toml`; `disk embeddings status` CLI | Live embedding generation, Scrutator/Model Connector integration, daemon auto-invalidation hook |
+| 2 (this PR) | Post-sync staleness sweep in daemon; loopback `GET /embeddings/status`; `embeddings.stale` webhook event + `POST /agents/embeddings-stale` | Server-side vector DB, cross-vault embedding search |
 | 3 (planned) | `disk embeddings write` ingest path for external embedders | On-device model inference |
 
 ## Sidecar layout
@@ -67,6 +67,29 @@ disk embeddings status [--share <name>] [--config <path>]
 
 Reports per-share counts: `fresh`, `stale`, `missing`, `co_storage_files`. Lists non-fresh sources when embeddings are enabled.
 
+## Daemon sweep (slice 2)
+
+After each successful sync iteration when `[embeddings] enabled = true`:
+
+1. Blocking filesystem sweep via `embeddings_sweep::sweep_share`
+2. `warn` log when `stale > 0` or `missing > 0`
+3. Cache snapshot on `DaemonState` for loopback REST
+4. Optional `POST /agents/embeddings-stale` when `DISK_ACCESS_TOKEN` is set (fail-soft)
+
+## Loopback REST (slice 2)
+
+| Method | Path | Auth | Notes |
+|--------|------|------|-------|
+| GET | `/embeddings/status` | — (loopback) | `{ enabled, shares[] }` — last sweep per share |
+
+## Server webhook (slice 2)
+
+| Method | Path | Auth | Notes |
+|--------|------|------|-------|
+| POST | `/agents/embeddings-stale` | Bearer JWT (editor+) | Body: `{ vault_id, share, fresh, stale, missing, paths[] }` → dispatches `embeddings.stale` webhooks |
+
+Register with `disk agents webhooks register --events embeddings.stale`.
+
 ## Tests
 
 - `crates/disk-core/src/embeddings/paths.rs` — path mirroring + detection
@@ -75,6 +98,9 @@ Reports per-share counts: `fresh`, `stale`, `missing`, `co_storage_files`. Lists
 - `crates/disk-core/src/filter.rs` — co-storage whitelist bypass
 - `crates/disk-client/src/config/mod.rs` — `[embeddings]` parse
 - `crates/disk-cli/src/main.rs` — clap parse for `disk embeddings status`
+- `crates/disk-client/src/embeddings_sweep.rs` — sweep + webhook reporter
+- `crates/disk-client/src/rest_api/embeddings.rs` — loopback status JSON
+- `crates/disk-server/src/agents/routes.rs` — `embeddings.stale` event + report handler
 
 ## References
 
