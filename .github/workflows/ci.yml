@@ -141,6 +141,8 @@ jobs:
         run: cargo install cargo-llvm-cov --locked --quiet
       - name: cargo test
         run: cargo test --workspace --all-features
+      - name: Scanner load harness (1K + 10K, DISK-0012 G3)
+        run: bash scripts/load-test-harness.sh all
       - name: Coverage gate (≥80 % lines, DISK-0032)
         run: cargo llvm-cov --workspace --all-features --fail-under-lines 80
       - name: Obsidian plugin integration (DISK-0008)
@@ -187,17 +189,6 @@ jobs:
             echo "==> fuzz $target (20s)"
             cargo +nightly fuzz run "$target" -- -max_total_time=20
           done
-
-  load-harness:
-    name: Load harness (1K smoke + 10K scale, G3/T6.2)
-    runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Scanner load harness (smoke + scale)
-        run: bash scripts/load-test-harness.sh all
 
   build:
     name: Build (${{ matrix.target }})
