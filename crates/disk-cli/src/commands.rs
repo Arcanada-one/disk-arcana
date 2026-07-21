@@ -140,8 +140,11 @@ pub async fn run_config_reload(addr: Option<SocketAddr>) -> Result<()> {
     }
 }
 
-/// `disk conflicts list [--addr <ip:port>]` — GET `/conflicts`.
-pub async fn run_conflicts_list(addr: Option<SocketAddr>) -> Result<()> {
+/// `disk conflicts list [--vault <name>] [--addr <ip:port>]`.
+pub async fn run_conflicts_list(
+    addr: Option<SocketAddr>,
+    vault_filter: Option<&str>,
+) -> Result<()> {
     let addr = addr.unwrap_or_else(default_addr);
     let url = format!("http://{addr}/conflicts");
     let client = reqwest::Client::new();
@@ -150,16 +153,22 @@ pub async fn run_conflicts_list(addr: Option<SocketAddr>) -> Result<()> {
     if !status.is_success() {
         anyhow::bail!("GET /conflicts returned HTTP {status}");
     }
-    let items: Vec<disk_client::ConflictListItem> =
+    let mut items: Vec<disk_client::ConflictListItem> =
         resp.json().await.context("decode /conflicts JSON")?;
+    if let Some(vault) = vault_filter {
+        items.retain(|item| item.vault_id == vault);
+    }
     if items.is_empty() {
         println!("no unresolved conflicts");
         return Ok(());
     }
-    println!("{:<6}  {:<50}  type", "id", "path");
+    println!("{:<6}  {:<12}  {:<40}  type", "id", "vault", "path");
     println!("{}", "-".repeat(80));
     for item in &items {
-        println!("{:<6}  {:<50}  {}", item.id, item.path, item.conflict_type);
+        println!(
+            "{:<6}  {:<12}  {:<40}  {}",
+            item.id, item.vault_id, item.path, item.conflict_type
+        );
         if let Some(fork) = &item.fork_path {
             println!("       fork: {fork}");
         }
@@ -167,9 +176,10 @@ pub async fn run_conflicts_list(addr: Option<SocketAddr>) -> Result<()> {
     Ok(())
 }
 
-/// `disk conflicts resolve` — POST `/conflicts/{path}` or loop for `--all`.
+/// `disk conflicts resolve` — POST share-qualified `/conflicts/{vault}/{path}` or loop for `--all`.
 pub async fn run_conflicts_resolve(
     addr: Option<SocketAddr>,
+    vault: Option<String>,
     path: Option<String>,
     all: bool,
     action: &str,
@@ -178,7 +188,7 @@ pub async fn run_conflicts_resolve(
     let client = reqwest::Client::new();
 
     if all {
-        // Fetch all unresolved conflicts then resolve each.
+        // Fetch all unresolved conflicts then resolve each with its vault_id.
         let list_url = format!("http://{addr}/conflicts");
         let resp = send_with_retry(addr, || client.get(&list_url)).await?;
         let status = resp.status();
@@ -192,30 +202,41 @@ pub async fn run_conflicts_resolve(
             return Ok(());
         }
         for item in &items {
-            resolve_one(addr, &item.path, action, &client).await?;
+            resolve_one(
+                addr,
+                Some(item.vault_id.as_str()),
+                &item.path,
+                action,
+                &client,
+            )
+            .await?;
         }
         println!(
             "resolved {} conflict(s) with action '{action}'",
             items.len()
         );
     } else if let Some(p) = path {
-        resolve_one(addr, &p, action, &client).await?;
-        println!("resolved conflict at '{p}' with action '{action}'");
+        resolve_one(addr, vault.as_deref(), &p, action, &client).await?;
+        let vault_hint = vault
+            .as_deref()
+            .map(|v| format!(" (vault '{v}')"))
+            .unwrap_or_default();
+        println!("resolved conflict at '{p}'{vault_hint} with action '{action}'");
     } else {
         anyhow::bail!("either --path <path> or --all is required");
     }
     Ok(())
 }
 
-/// `disk conflicts show --path <path> [--addr <ip:port>]` — side-by-side diff.
-///
-/// Calls `GET /conflicts/{path}/diff` on the running daemon to retrieve the
-/// local and fork (remote) file contents, then renders a side-by-side diff
-/// using `prettydiff`.
-pub async fn run_conflicts_show(addr: Option<SocketAddr>, path: &str) -> Result<()> {
+/// `disk conflicts show --path <path> [--vault <name>] [--addr <ip:port>]` — side-by-side diff.
+pub async fn run_conflicts_show(
+    addr: Option<SocketAddr>,
+    vault: Option<&str>,
+    path: &str,
+) -> Result<()> {
     let addr = addr.unwrap_or_else(default_addr);
-    let encoded_path = percent_encode(path);
-    let url = format!("http://{addr}/conflicts/{encoded_path}/diff");
+    let api_path = conflict_api_path(vault, path, "/diff");
+    let url = format!("http://{addr}{api_path}");
     let client = reqwest::Client::new();
     let resp = send_with_retry(addr, || client.get(&url)).await?;
     let status = resp.status();
@@ -265,23 +286,42 @@ pub async fn run_conflicts_show(addr: Option<SocketAddr>, path: &str) -> Result<
     Ok(())
 }
 
-/// POST `/conflicts/{path}` with the given action.
+/// POST `/conflicts/{vault}/{path}` (or legacy `/conflicts/{path}`) with the given action.
 async fn resolve_one(
     addr: SocketAddr,
+    vault_id: Option<&str>,
     path: &str,
     action: &str,
     client: &reqwest::Client,
 ) -> Result<()> {
-    let encoded_path = percent_encode(path);
-    let url = format!("http://{addr}/conflicts/{encoded_path}");
+    let api_path = conflict_api_path(vault_id, path, "");
+    let url = format!("http://{addr}{api_path}");
     let body = serde_json::json!({ "action": action });
     let resp = send_with_retry(addr, || client.post(&url).json(&body)).await?;
     let status = resp.status();
     if !status.is_success() {
         let text = resp.text().await.unwrap_or_default();
-        anyhow::bail!("POST /conflicts/{path} returned HTTP {status}: {text}");
+        let vault_hint = vault_id
+            .map(|v| format!(" vault='{v}'"))
+            .unwrap_or_default();
+        anyhow::bail!("POST {api_path} ({path}{vault_hint}) returned HTTP {status}: {text}");
     }
     Ok(())
+}
+
+/// Build the REST path for conflict resolve or diff endpoints.
+///
+/// When `vault_id` is present the share-qualified route is used so file ops
+/// resolve against the correct share root in multi-share daemons.
+pub fn conflict_api_path(vault_id: Option<&str>, path: &str, suffix: &str) -> String {
+    let encoded_path = percent_encode(path);
+    match vault_id {
+        Some(vault) => {
+            let encoded_vault = percent_encode(vault);
+            format!("/conflicts/{encoded_vault}/{encoded_path}{suffix}")
+        }
+        None => format!("/conflicts/{encoded_path}{suffix}"),
+    }
 }
 
 /// Percent-encode a vault-relative path for use in a URL segment.
@@ -305,6 +345,26 @@ mod tests {
     use super::*;
     use std::net::TcpListener as StdTcpListener;
     use std::time::Instant;
+
+    #[test]
+    fn conflict_api_path_share_qualified() {
+        assert_eq!(
+            conflict_api_path(Some("docs"), "notes/todo.md", ""),
+            "/conflicts/docs/notes%2Ftodo.md"
+        );
+        assert_eq!(
+            conflict_api_path(Some("wiki"), "a.md", "/diff"),
+            "/conflicts/wiki/a.md/diff"
+        );
+    }
+
+    #[test]
+    fn conflict_api_path_legacy_unqualified() {
+        assert_eq!(
+            conflict_api_path(None, "notes/todo.md", ""),
+            "/conflicts/notes%2Ftodo.md"
+        );
+    }
 
     /// Reserve an OS-assigned loopback port, then release it so a connect to it
     /// initially refuses (nothing is listening) until the delayed server below
