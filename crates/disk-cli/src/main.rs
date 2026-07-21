@@ -679,6 +679,8 @@ pub struct EmbeddingsArgs {
 pub enum EmbeddingsCommand {
     /// Report fresh/stale/missing embedding sidecars for configured shares.
     Status(EmbeddingsStatusArgs),
+    /// Ingest an external embedding vector for a source file (writes sidecar artefacts).
+    Write(EmbeddingsWriteArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -686,6 +688,26 @@ pub struct EmbeddingsStatusArgs {
     /// Share name from `disk.toml`. Defaults to all shares.
     #[arg(long)]
     pub share: Option<String>,
+    /// Path to `disk.toml`. Defaults to platform install path.
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+}
+
+/// `disk embeddings write` — external embedder ingest (DISK-0029 slice 3).
+#[derive(clap::Args, Debug)]
+pub struct EmbeddingsWriteArgs {
+    /// Share name from `disk.toml`.
+    #[arg(long)]
+    pub share: String,
+    /// Vault-relative source path (e.g. `notes/a.md`).
+    #[arg(long)]
+    pub path: String,
+    /// Raw f32 LE vector blob file (`dimensions * 4` bytes).
+    #[arg(long, conflicts_with = "vector_base64")]
+    pub vector_file: Option<PathBuf>,
+    /// Base64-encoded vector blob (alternative to `--vector-file`).
+    #[arg(long, conflicts_with = "vector_file")]
+    pub vector_base64: Option<String>,
     /// Path to `disk.toml`. Defaults to platform install path.
     #[arg(long)]
     pub config: Option<PathBuf>,
@@ -1186,6 +1208,21 @@ async fn main() -> Result<()> {
                     .clone()
                     .unwrap_or_else(|| PathBuf::from(paths::DEFAULT_CONFIG));
                 embeddings_cmd::run_embeddings_status(&config, s.share.as_deref())
+            }
+            EmbeddingsCommand::Write(w) => {
+                let config = w
+                    .config
+                    .clone()
+                    .unwrap_or_else(|| PathBuf::from(paths::DEFAULT_CONFIG));
+                embeddings_cmd::run_embeddings_write(
+                    &config,
+                    embeddings_cmd::EmbeddingsWriteParams {
+                        share: &w.share,
+                        path: &w.path,
+                        vector_file: w.vector_file.as_deref(),
+                        vector_base64: w.vector_base64.as_deref(),
+                    },
+                )
             }
         },
         Some(Command::Agents(args)) => match args.command {
@@ -1957,6 +1994,36 @@ node_id_hint = "from-bf"
                 assert!(s.config.is_none());
             }
             other => panic!("expected embeddings status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_embeddings_write() {
+        let cli = Cli::try_parse_from([
+            "disk",
+            "embeddings",
+            "write",
+            "--share",
+            "wiki",
+            "--path",
+            "notes/a.md",
+            "--vector-file",
+            "/tmp/vec.bin",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Command::Embeddings(EmbeddingsArgs {
+                command: EmbeddingsCommand::Write(w),
+            })) => {
+                assert_eq!(w.share, "wiki");
+                assert_eq!(w.path, "notes/a.md");
+                assert_eq!(
+                    w.vector_file.as_deref(),
+                    Some(std::path::Path::new("/tmp/vec.bin"))
+                );
+                assert!(w.vector_base64.is_none());
+            }
+            other => panic!("expected embeddings write, got {other:?}"),
         }
     }
 

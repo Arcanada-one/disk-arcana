@@ -1,6 +1,6 @@
 # DISK-0029 — Embeddings Co-storage (vector index synced alongside files)
 
-**Status:** slice 2 on DEVS — daemon post-sync sweep + loopback status + `embeddings.stale` webhook.  
+**Status:** slice 3 on DEVS — `disk embeddings write` ingest for external embedders.  
 **Parent:** DISK-0001 commercial / SaaS track.  
 **Tracking:** DISK-0029 in Datarim backlog.
 
@@ -15,8 +15,8 @@ Disk Arcana co-stores embedding vectors as **sidecar artefacts** under `.disk-em
 | Slice | In scope | Out of scope |
 |-------|----------|--------------|
 | 1 (merged #103) | `.disk-embeddings/` layout + manifest v1 schema; extension-whitelist passthrough in `filter.rs`; `[embeddings]` in `disk.toml`; `disk embeddings status` CLI | Live embedding generation, Scrutator/Model Connector integration, daemon auto-invalidation hook |
-| 2 (this PR) | Post-sync staleness sweep in daemon; loopback `GET /embeddings/status`; `embeddings.stale` webhook event + `POST /agents/embeddings-stale` | Server-side vector DB, cross-vault embedding search |
-| 3 (planned) | `disk embeddings write` ingest path for external embedders | On-device model inference |
+| 2 (merged #104) | Post-sync staleness sweep in daemon; loopback `GET /embeddings/status`; `embeddings.stale` webhook event + `POST /agents/embeddings-stale` | Server-side vector DB, cross-vault embedding search |
+| 3 (this PR) | `disk embeddings write` ingest path for external embedders | On-device model inference |
 
 ## Sidecar layout
 
@@ -63,9 +63,12 @@ Validation when `enabled = true`: non-empty `model_id`, `dimensions > 0`.
 
 ```bash
 disk embeddings status [--share <name>] [--config <path>]
+disk embeddings write --share <name> --path <rel> [--vector-file <path>|--vector-base64 <b64>] [--config <path>]
 ```
 
-Reports per-share counts: `fresh`, `stale`, `missing`, `co_storage_files`. Lists non-fresh sources when embeddings are enabled.
+`status` reports per-share counts: `fresh`, `stale`, `missing`, `co_storage_files`. Lists non-fresh sources when embeddings are enabled.
+
+`write` ingests an external f32 LE vector blob for an existing source file. Requires `[embeddings] enabled = true`. Vector size must equal `dimensions * 4` bytes from config. Writes `.disk-embeddings/` manifest + `.vec.bin` atomically (vector first, then manifest).
 
 ## Daemon sweep (slice 2)
 
@@ -97,7 +100,9 @@ Register with `disk agents webhooks register --events embeddings.stale`.
 - `crates/disk-core/src/embeddings/scan.rs` — share inventory counts
 - `crates/disk-core/src/filter.rs` — co-storage whitelist bypass
 - `crates/disk-client/src/config/mod.rs` — `[embeddings]` parse
-- `crates/disk-cli/src/main.rs` — clap parse for `disk embeddings status`
+- `crates/disk-core/src/embeddings/write.rs` — sidecar ingest + validation
+- `crates/disk-cli/src/embeddings_cmd.rs` — `status` + `write` commands
+- `crates/disk-cli/src/main.rs` — clap parse for `disk embeddings status` and `disk embeddings write`
 - `crates/disk-client/src/embeddings_sweep.rs` — sweep + webhook reporter
 - `crates/disk-client/src/rest_api/embeddings.rs` — loopback status JSON
 - `crates/disk-server/src/agents/routes.rs` — `embeddings.stale` event + report handler
