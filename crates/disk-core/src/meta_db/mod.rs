@@ -34,8 +34,8 @@ use sqlx::{
 use crate::error::MetaDbError;
 
 pub use accounts::{NewOAuthUser, UserAccount};
+pub use agents::AgentWebhookDeliveryTarget;
 pub use agents::{AgentWriteRevision, NewAgentWebhook, RevisionBumpOutcome};
-pub use agents::{AgentWebhookDeliveryTarget};
 pub use sharing::{VaultInviteRow, VaultMemberRow, VaultShareRole};
 pub use snapshots::{VaultSnapshotFileRow, VaultSnapshotRow};
 pub use trash::TrashRow;
