@@ -122,12 +122,6 @@ struct OidcAccessClaims {
     tenant_id: Option<String>,
 }
 
-/// Peek JWT `alg` without verifying — used in tests.
-#[cfg(test)]
-pub fn token_algorithm(token: &str) -> Option<jsonwebtoken::Algorithm> {
-    decode_header(token).ok().map(|h| h.alg)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
