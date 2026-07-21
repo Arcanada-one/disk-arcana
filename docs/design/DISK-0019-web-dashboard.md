@@ -1,6 +1,6 @@
 # DISK-0019 — Web Dashboard
 
-**Status:** slice 2 on DEVS — OAuth browser landing + conflict resolve API.  
+**Status:** slice 3 on DEVS — dashboard polish (devices, vaults, signup/verify flow).  
 **Parent:** DISK-0001 commercial / SaaS track.  
 **Tracking:** DISK-0019 in Datarim backlog.
 
@@ -9,8 +9,9 @@
 | Slice | In scope | Out of scope |
 |-------|----------|--------------|
 | 1 (merged #73) | `GET /dashboard/summary`, static SPA (`deploy/www/dashboard/`), signup/login UI | Stripe checkout UI, OAuth browser redirect handler, conflict resolve actions |
-| 2 (this PR) | OAuth browser flow (`flow=browser` + `oauth-callback.html`), `POST /dashboard/conflicts/{id}/resolve` | Stripe checkout, file-level conflict ops |
-| 3+ | Billing upgrade CTA | DISK-0018 Billing Arcana integration |
+| 2 (merged #74) | OAuth browser flow (`flow=browser` + `oauth-callback.html`), `POST /dashboard/conflicts/{id}/resolve` | Stripe checkout, file-level conflict ops |
+| 3 (this PR) | SPA polish: device/vault tables, quota bars, email verify banner + `verify-email.html`, token refresh, signup verify hints | Stripe upgrade CTA (DISK-0018 gate) |
+| 4+ | Billing upgrade CTA | DISK-0018 Billing Arcana integration |
 
 ## HTTP API
 
@@ -25,6 +26,12 @@
 2. `redirect_uri` is embedded in signed OAuth `state` and used for stub/Auth Arcana authorize.
 3. IdP redirects to `deploy/www/dashboard/oauth-callback.html?code=…&state=…`.
 4. Callback page exchanges code via `GET /auth/oauth/callback`, stores token, redirects to dashboard.
+
+### Email verification (slice 3)
+
+1. Signup in stub mode returns `verification_token` / `verification_url`; SPA links to `verify-email.html?token=…`.
+2. `verify-email.html` calls `GET /auth/verify-email`, stores refreshed JWT, redirects to dashboard.
+3. Logged-in unverified users see a banner with **Resend link** (`POST /auth/resend-verification`).
 
 `redirect_uri` must be `https://…` or `http://127.0.0.1` / `http://localhost` (dev).
 
@@ -53,7 +60,9 @@ Mounted on the health HTTP listener (`DISK_HEALTH_BIND_ADDR`, default `:9446`) w
 - Deploy with `deploy/www/README.md` rsync to `disk.arcanada.ai`
 - API base: same origin when health routes are reverse-proxied; override via `?api=https://host:9446` for dev
 
-Signup/login uses DISK-0016 `/auth/signup`, `/auth/login`, `/auth/me`, and OAuth via `oauth-callback.html`.
+Signup/login uses DISK-0016 `/auth/signup`, `/auth/login`, `/auth/me`, OAuth via `oauth-callback.html`, and email verification via `verify-email.html`.
+
+Slice 3 UI: device/vault tables with timestamps, quota usage bars (read-only), empty-state hints, session refresh via `/auth/refresh` on 401.
 
 ## Tests
 

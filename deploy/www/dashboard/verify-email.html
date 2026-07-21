@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Disk Arcana — Verifying email…</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' }</script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased flex items-center justify-center">
+  <div class="text-center px-6 max-w-md">
+    <p id="status" class="text-slate-300">Verifying your email…</p>
+    <p id="error" class="mt-4 text-sm text-red-400 hidden"></p>
+    <a id="back-link" href="index.html" class="mt-6 inline-block text-sm text-emerald-400 hover:underline hidden">Back to dashboard</a>
+  </div>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const apiBase = (localStorage.getItem('diskApiBase') || location.origin).replace(/\/$/, '');
+    const tokenKey = 'diskAccessToken';
+    const refreshKey = 'diskRefreshToken';
+
+    function fail(msg) {
+      document.getElementById('status').textContent = 'Verification failed';
+      const err = document.getElementById('error');
+      err.textContent = msg;
+      err.classList.remove('hidden');
+      document.getElementById('back-link').classList.remove('hidden');
+    }
+
+    (async () => {
+      const token = params.get('token');
+      if (!token) {
+        fail('Missing verification token');
+        return;
+      }
+      try {
+        const url = apiBase + '/auth/verify-email?token=' + encodeURIComponent(token);
+        const res = await fetch(url);
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error || res.statusText);
+        localStorage.setItem(tokenKey, body.access_token);
+        if (body.refresh_token) localStorage.setItem(refreshKey, body.refresh_token);
+        document.getElementById('status').textContent = 'Email verified — redirecting…';
+        location.replace('index.html');
+      } catch (e) {
+        fail(e.message || String(e));
+      }
+    })();
+  </script>
+</body>
+</html>
