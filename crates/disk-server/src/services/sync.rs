@@ -27,6 +27,7 @@ use tonic::{Request, Response, Status, Streaming};
 use disk_core::meta_db::MetaDb;
 use disk_core::path_guard;
 use disk_core::reconciler::ReconciliationEngine;
+use disk_core::tenant::enforce_node_tenant;
 use disk_core::types::{ActionType, FileMeta};
 use disk_core::vector_clock::VectorClock;
 use disk_proto::disk::{
@@ -180,6 +181,26 @@ impl SyncServiceImpl {
             .map(str::to_string)
     }
 
+    /// Resolve effective tenant for an authenticated sync RPC (DISK-0017 slice 2).
+    async fn resolve_session_tenant(
+        &self,
+        metadata: &tonic::metadata::MetadataMap,
+        node_id: &str,
+    ) -> Result<Option<String>, Status> {
+        let header = Self::extract_tenant(metadata);
+        let node_tenant = if let Some(t) = self.store.node_tenant(node_id) {
+            Some(t)
+        } else if let Some(db) = &self.meta_db {
+            db.get_node_tenant(node_id)
+                .await
+                .map_err(|e| Status::internal(format!("node tenant lookup: {e}")))?
+        } else {
+            None
+        };
+        enforce_node_tenant(header.as_deref(), node_tenant.as_deref())
+            .map_err(|_| Status::permission_denied("tenant mismatch"))
+    }
+
     /// Run ACL role check using a pre-extracted `CertIdentity`.
     ///
     /// Call pattern:
@@ -304,6 +325,9 @@ impl SyncService for SyncServiceImpl {
         request: Request<Streaming<SyncStateRequest>>,
     ) -> Result<Response<Self::SyncStateStream>, Status> {
         let node_id = self.require_auth(request.metadata())?;
+        let _tenant = self
+            .resolve_session_tenant(request.metadata(), &node_id)
+            .await?;
         let share = Self::extract_share(request.metadata());
         let cert_id = CertIdentity::from_request(&request);
         self.check_acl_by_cert(
@@ -359,9 +383,11 @@ impl SyncService for SyncServiceImpl {
         &self,
         request: Request<Streaming<DeltaUploadRequest>>,
     ) -> Result<Response<DeltaUploadResponse>, Status> {
-        let _node_id = self.require_auth(request.metadata())?;
+        let node_id = self.require_auth(request.metadata())?;
+        let tenant = self
+            .resolve_session_tenant(request.metadata(), &node_id)
+            .await?;
         let share = Self::extract_share(request.metadata());
-        let tenant = Self::extract_tenant(request.metadata());
         let cert_id = CertIdentity::from_request(&request);
         self.check_acl_by_cert(cert_id.as_ref(), &share, WRITE_ROLES, "send_only")
             .await?;
@@ -607,7 +633,10 @@ impl SyncService for SyncServiceImpl {
         &self,
         request: Request<DeltaDownloadRequest>,
     ) -> Result<Response<Self::DeltaDownloadStream>, Status> {
-        let _node_id = self.require_auth(request.metadata())?;
+        let node_id = self.require_auth(request.metadata())?;
+        let _tenant = self
+            .resolve_session_tenant(request.metadata(), &node_id)
+            .await?;
         let share = Self::extract_share(request.metadata());
         let cert_id = CertIdentity::from_request(&request);
         self.check_acl_by_cert(cert_id.as_ref(), &share, READ_ROLES, "receive_only")
@@ -655,6 +684,9 @@ impl SyncService for SyncServiceImpl {
         request: Request<SyncStateRequest>,
     ) -> Result<Response<SyncStateResponse>, Status> {
         let node_id = self.require_auth(request.metadata())?;
+        let _tenant = self
+            .resolve_session_tenant(request.metadata(), &node_id)
+            .await?;
         let share = Self::extract_share(request.metadata());
         let cert_id = CertIdentity::from_request(&request);
         self.check_acl_by_cert(

@@ -34,6 +34,7 @@ use rand::RngCore;
 use sqlx::SqlitePool;
 use tonic::{Request, Response, Status};
 
+use disk_core::tenant::resolve_tenant_id;
 use disk_proto::disk::{
     enrollment_service_server::EnrollmentService, EnrollRequest, EnrollResponse,
     EnrollmentTokenRequest, EnrollmentTokenResponse, RevokePendingRequest, RevokePendingResponse,
@@ -190,6 +191,13 @@ impl EnrollmentService for EnrollmentServiceImpl {
     ) -> Result<Response<EnrollmentTokenResponse>, Status> {
         self.require_admin(request.metadata())?;
 
+        let tenant = resolve_tenant_id(
+            request
+                .metadata()
+                .get("x-disk-tenant")
+                .and_then(|v| v.to_str().ok()),
+            &request.get_ref().tenant_id,
+        );
         let req = request.into_inner();
         let now_ms = unix_now_ms()?;
 
@@ -208,13 +216,14 @@ impl EnrollmentService for EnrollmentServiceImpl {
 
         sqlx::query(
             "INSERT INTO pending_enrollments
-             (token_hash, node_id_hint, issued_at, expires_at)
-             VALUES (?1, ?2, ?3, ?4)",
+             (token_hash, node_id_hint, issued_at, expires_at, tenant_id)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
         )
         .bind(token_hash.as_bytes().as_slice())
         .bind(&req.node_id_hint)
         .bind(now_ms as i64)
         .bind(expires_at_ms as i64)
+        .bind(tenant.as_deref())
         .execute(&self.pool)
         .await
         .map_err(|e| Status::internal(format!("db: {e}")))?;
@@ -246,8 +255,8 @@ impl EnrollmentService for EnrollmentServiceImpl {
         let token_hash = blake3::hash(&req.opaque_token);
 
         // Lookup token row.
-        let row: Option<(i64, Option<i64>, Option<i64>)> = sqlx::query_as(
-            "SELECT expires_at, consumed_at, revoked_at
+        let row: Option<(i64, Option<i64>, Option<i64>, Option<String>)> = sqlx::query_as(
+            "SELECT expires_at, consumed_at, revoked_at, tenant_id
              FROM pending_enrollments WHERE token_hash = ?1",
         )
         .bind(token_hash.as_bytes().as_slice())
@@ -255,7 +264,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
         .await
         .map_err(|e| Status::internal(format!("db: {e}")))?;
 
-        let (expires_at, consumed_at, revoked_at) = match row {
+        let (expires_at, consumed_at, revoked_at, enroll_tenant) = match row {
             None => {
                 self.record_enroll_failure_peer(&peer, now_secs);
                 let _ = self
@@ -319,14 +328,24 @@ impl EnrollmentService for EnrollmentServiceImpl {
 
         // Ensure node exists or insert a placeholder node row.
         sqlx::query(
-            "INSERT OR IGNORE INTO nodes (node_id, display_name, platform, api_key_hash, registered_at)
-             VALUES (?1, ?1, 'unknown', '', ?2)",
+            "INSERT OR IGNORE INTO nodes (tenant_id, node_id, display_name, platform, api_key_hash, registered_at)
+             VALUES (?1, ?2, ?2, 'unknown', '', ?3)",
         )
+        .bind(enroll_tenant.as_deref())
         .bind(&req.node_id_hint)
         .bind(now_ms as i64)
         .execute(&self.pool)
         .await
         .map_err(|e| Status::internal(format!("db (node insert): {e}")))?;
+
+        if enroll_tenant.is_some() {
+            sqlx::query("UPDATE nodes SET tenant_id = ?1 WHERE node_id = ?2")
+                .bind(enroll_tenant.as_deref())
+                .bind(&req.node_id_hint)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| Status::internal(format!("db (node tenant bind): {e}")))?;
+        }
 
         let node_row: (i64,) = sqlx::query_as("SELECT id FROM nodes WHERE node_id = ?1")
             .bind(&req.node_id_hint)
@@ -454,6 +473,7 @@ mod tests {
         let req = Request::new(EnrollmentTokenRequest {
             node_id_hint: "node-1".into(),
             ttl_seconds: 0,
+        tenant_id: String::new(),
         });
         let err = svc.issue_pending_token(req).await.unwrap_err();
         assert_eq!(err.code(), tonic::Code::Unauthenticated);
@@ -467,6 +487,7 @@ mod tests {
         let req = admin_request(EnrollmentTokenRequest {
             node_id_hint: "node-2".into(),
             ttl_seconds: 3600,
+        tenant_id: String::new(),
         });
 
         let resp = svc.issue_pending_token(req).await.unwrap();
@@ -494,6 +515,7 @@ mod tests {
             .issue_pending_token(admin_request(EnrollmentTokenRequest {
                 node_id_hint: "node-3".into(),
                 ttl_seconds: 3600,
+            tenant_id: String::new(),
             }))
             .await
             .unwrap();
@@ -532,6 +554,7 @@ mod tests {
             .issue_pending_token(admin_request(EnrollmentTokenRequest {
                 node_id_hint: "node-4".into(),
                 ttl_seconds: 3600,
+            tenant_id: String::new(),
             }))
             .await
             .unwrap()
@@ -596,6 +619,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn enroll_binds_tenant_from_token() {
+        let pool = make_pool().await;
+        let cert_pem = stub_cert_pem(0x02);
+        let ca = Arc::new(StubCaClient::ok(cert_pem.clone(), b"CHAIN".to_vec()));
+        let svc = make_service(pool.clone(), ca);
+
+        let token = svc
+            .issue_pending_token(admin_request(EnrollmentTokenRequest {
+                node_id_hint: "tenant-node".into(),
+                ttl_seconds: 3600,
+                tenant_id: "saas-co".into(),
+            }))
+            .await
+            .unwrap()
+            .into_inner()
+            .opaque_token;
+
+        svc.enroll(Request::new(EnrollRequest {
+            opaque_token: token,
+            csr_pem: b"CSR".to_vec(),
+            node_id_hint: "tenant-node".into(),
+        }))
+        .await
+        .unwrap();
+
+        let row: (Option<String>,) =
+            sqlx::query_as("SELECT tenant_id FROM nodes WHERE node_id = 'tenant-node'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(row.0.as_deref(), Some("saas-co"));
+    }
+
+    #[tokio::test]
     async fn revoke_pending_marks_row_revoked() {
         let pool = make_pool().await;
         let svc = make_service(pool.clone(), Arc::new(StubCaClient::missing_token()));
@@ -604,6 +661,7 @@ mod tests {
             .issue_pending_token(admin_request(EnrollmentTokenRequest {
                 node_id_hint: "node-6".into(),
                 ttl_seconds: 3600,
+            tenant_id: String::new(),
             }))
             .await
             .unwrap()

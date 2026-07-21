@@ -47,6 +47,9 @@ pub struct NodeSection {
     pub id: String,
     #[serde(default)]
     pub display_name: Option<String>,
+    /// SaaS tenant id — sent as `x-disk-tenant` on sync RPCs (DISK-0017).
+    #[serde(default)]
+    pub tenant_id: Option<String>,
     #[serde(default)]
     pub default: NodeDefault,
 }

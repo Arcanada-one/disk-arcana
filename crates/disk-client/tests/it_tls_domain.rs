@@ -158,6 +158,7 @@ async fn ip_endpoint_without_tls_domain_fails_handshake() {
         client_key_pem: None,
         node_id: "test-node".into(),
         api_key: None,
+        tenant_id: None,
     })
     .await;
 
@@ -185,6 +186,7 @@ async fn ip_endpoint_with_tls_domain_connects_and_rpc_succeeds() {
         client_key_pem: None,
         node_id: "test-node".into(),
         api_key: None,
+        tenant_id: None,
     })
     .await
     .expect("connect with tls_domain must succeed (cert SAN matches override)");
@@ -222,6 +224,7 @@ async fn connect_lazy_for_test_accepts_tls_domain() {
         client_key_pem: None,
         node_id: "lazy-node".into(),
         api_key: None,
+        tenant_id: None,
     });
     assert!(
         result.is_ok(),

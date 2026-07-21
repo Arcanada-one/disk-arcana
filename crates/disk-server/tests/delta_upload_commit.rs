@@ -331,6 +331,7 @@ async fn v_ac_5_pull_server_file_to_client() {
         client_key_pem: None,
         node_id: "pull-client".into(),
         api_key: None,
+        tenant_id: None,
     })
     .await
     .expect("DiskClient::connect");
@@ -348,6 +349,7 @@ async fn v_ac_5_pull_server_file_to_client() {
         client_key_pem: None,
         node_id: "pull-client".into(),
         api_key: Some(api_key),
+        tenant_id: None,
     })
     .await
     .expect("DiskClient::connect (with api_key)");

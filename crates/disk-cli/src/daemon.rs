@@ -180,6 +180,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
     let client_cert_pem: Option<Vec<u8>> = std::fs::read(&cfg.server.client_cert).ok();
     let client_key_pem: Option<Vec<u8>> = std::fs::read(&cfg.server.client_key).ok();
     let node_id_for_loop = node_id.clone();
+    let tenant_id_for_loop = cfg.node.tenant_id.clone();
 
     let e2ee_key = if cfg.vault.e2ee_enabled {
         match resolve_vault_key(&node_id, &args.state_dir) {
@@ -223,6 +224,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
         let client_cert_pem = client_cert_pem.clone();
         let client_key_pem = client_key_pem.clone();
         let node_id_for_loop = node_id_for_loop.clone();
+        let tenant_id_for_loop = tenant_id_for_loop.clone();
         let manual_sync_rx = Arc::clone(&manual_sync_rx);
         let meta_db = meta_db.clone();
         let blob_cache = Arc::clone(&blob_cache);
@@ -252,6 +254,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
                         client_cert_pem.clone(),
                         client_key_pem.clone(),
                         node_id_for_loop.clone(),
+                        tenant_id_for_loop.clone(),
                     )
                     .await
                     {
@@ -698,6 +701,7 @@ async fn build_disk_client(
     client_cert_pem: Option<Vec<u8>>,
     client_key_pem: Option<Vec<u8>>,
     node_id: String,
+    tenant_id: Option<String>,
 ) -> Result<DiskClient> {
     use disk_client::connection::ClientConfig;
 
@@ -709,6 +713,7 @@ async fn build_disk_client(
         client_key_pem,
         node_id,
         api_key: None,
+        tenant_id,
     };
     DiskClient::connect(cfg)
         .await
@@ -861,6 +866,7 @@ client_key  = "/b"
             client_key_pem: None,
             node_id: "arcana-ai".into(),
             api_key: None,
+            tenant_id: None,
         })
         .expect("connect_lazy_for_test must succeed (no I/O at construction)");
 
@@ -989,6 +995,7 @@ client_key  = "/b"
             client_key_pem: None,
             node_id: "n1".into(),
             api_key: None,
+            tenant_id: None,
         })
         .expect("lazy connect");
 

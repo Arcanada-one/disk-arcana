@@ -177,7 +177,7 @@ async fn admin_pending_token_round_trip() {
         .expect("connect");
 
     let resp = client
-        .issue_pending_token(ADMIN_TOKEN, "new-node-01", 3600)
+        .issue_pending_token(ADMIN_TOKEN, "new-node-01", 3600, None)
         .await
         .expect("issue_pending_token");
 
@@ -199,7 +199,7 @@ async fn admin_pending_token_rejects_missing_bearer() {
         .expect("connect");
 
     let err = client
-        .issue_pending_token("wrong-admin", "new-node-01", 3600)
+        .issue_pending_token("wrong-admin", "new-node-01", 3600, None)
         .await
         .expect_err("must reject wrong admin token");
     match err {
