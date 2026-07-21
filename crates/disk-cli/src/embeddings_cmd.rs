@@ -1,11 +1,10 @@
-//! `disk embeddings` — co-storage sidecar diagnostics (DISK-0029 slice 1).
+//! `disk embeddings` — co-storage sidecar diagnostics (DISK-0029).
 
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use disk_client::config::{DiskConfig, FilterMode, ShareSection};
-use disk_core::embeddings::scan::{scan_share_embeddings, DEFAULT_EMBEDDABLE_EXTENSIONS};
-use disk_core::filter::{Filter, FilterRules};
+use disk_client::config::DiskConfig;
+use disk_client::embeddings_sweep::{share_filter, sweep_share};
 
 /// `disk embeddings status [--share <name>] [--config <path>]`.
 pub fn run_embeddings_status(config_path: &Path, share_name: Option<&str>) -> Result<()> {
@@ -25,17 +24,9 @@ pub fn run_embeddings_status(config_path: &Path, share_name: Option<&str>) -> Re
     }
 
     for share in shares {
-        let filter = share_filter(share)?;
-        let report = scan_share_embeddings(
-            &share.name,
-            &share.path,
-            &filter,
-            cfg.embeddings.enabled,
-            &cfg.embeddings.model_id,
-            cfg.embeddings.dimensions,
-            DEFAULT_EMBEDDABLE_EXTENSIONS,
-        )
-        .with_context(|| format!("scan share {}", share.name))?;
+        let _ = share_filter(share).map_err(|e| anyhow::anyhow!("filter: {e}"))?;
+        let report = sweep_share(share, &cfg.embeddings)
+            .with_context(|| format!("scan share {}", share.name))?;
 
         println!("share: {}", report.share_name);
         println!("  embeddings_enabled: {}", report.enabled);
@@ -62,20 +53,4 @@ pub fn run_embeddings_status(config_path: &Path, share_name: Option<&str>) -> Re
     }
 
     Ok(())
-}
-
-fn share_filter(share: &ShareSection) -> Result<Filter> {
-    let mut rules = FilterRules::default();
-    if let Some(f) = &share.filter {
-        match f.mode {
-            FilterMode::Whitelist => {
-                rules.extensions_whitelist = f.extensions.clone();
-                rules.ignore_globs.extend(f.include.clone());
-            }
-            FilterMode::Blacklist => {
-                rules.ignore_globs.extend(f.exclude.clone());
-            }
-        }
-    }
-    Filter::from_config(&rules).map_err(|e| anyhow::anyhow!("filter: {e}"))
 }

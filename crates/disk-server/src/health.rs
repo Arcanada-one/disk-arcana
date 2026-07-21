@@ -52,7 +52,10 @@ use crate::accounts::routes::{login, me, signup, AuthHttpState};
 use crate::accounts::{
     oauth_callback, oauth_start, refresh_token, resend_verification, verify_email,
 };
-use crate::agents::{agent_write, delete_webhook, get_revision, list_webhooks, register_webhook};
+use crate::agents::{
+    agent_write, delete_webhook, get_revision, list_webhooks, register_webhook,
+    report_embeddings_stale,
+};
 use crate::billing::webhook::{stripe_webhook, WebhookState};
 use crate::compliance::{delete_account, export_data, list_consents, sub_processors};
 use crate::dashboard::{resolve_conflict, summary};
@@ -134,7 +137,8 @@ pub async fn serve(
                     .delete(delete_webhook),
             )
             .route("/agents/revision", get(get_revision))
-            .route("/agents/write", post(agent_write));
+            .route("/agents/write", post(agent_write))
+            .route("/agents/embeddings-stale", post(report_embeddings_stale));
         crate::trash::scheduler::spawn_periodic_prune(state.clone());
         app = app.merge(auth_router.with_state(state));
     }

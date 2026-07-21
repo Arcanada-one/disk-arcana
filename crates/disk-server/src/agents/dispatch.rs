@@ -222,6 +222,23 @@ pub fn agent_write_ok_payload(
     })
 }
 
+/// Build a standard payload for embedding sidecar staleness reports.
+pub fn embeddings_stale_payload(
+    share: &str,
+    fresh: usize,
+    stale: usize,
+    missing: usize,
+    paths: &[impl Serialize],
+) -> Value {
+    json!({
+        "share": share,
+        "fresh": fresh,
+        "stale": stale,
+        "missing": missing,
+        "paths": paths,
+    })
+}
+
 /// Build a standard payload for revision conflicts.
 pub fn agent_write_conflict_payload(
     path: &str,

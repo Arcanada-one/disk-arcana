@@ -9,6 +9,7 @@ pub mod blob_cache;
 pub mod config;
 pub mod conflict_writer;
 pub mod connection;
+pub mod embeddings_sweep;
 pub mod enrollment;
 pub mod import_state;
 pub mod keychain;
@@ -21,11 +22,15 @@ pub mod vault_key;
 pub mod watcher;
 
 pub use blob_cache::BlobCache;
+pub use config::EmbeddingsSection;
 pub use config::LanSyncSection;
 pub use config::TelemetrySection;
 pub use config::{spawn_config_watcher, ConfigSnapshot, ConfigWatcher, ReloadStatus};
 pub use conflict_writer::{apply_conflict, write_fork, ConflictApplyOutcome, ForkWriteError};
 pub use connection::{ClientConfig, ClientError, DiskClient};
+pub use embeddings_sweep::{
+    report_stale_to_server, share_filter, sweep_share, EmbeddingsStatusSnapshot,
+};
 pub use enrollment::{
     gen_keypair_and_csr, parse_bootstrap_file, redact_token, write_cert_file, write_key_file,
     BootstrapFile, EnrollmentClient, EnrollmentError,

@@ -36,10 +36,12 @@ use thiserror::Error;
 use tokio::sync::{mpsc, RwLock};
 
 use crate::config::schema::Direction;
+use crate::embeddings_sweep::EmbeddingsStatusSnapshot;
 use crate::lan_sync::LanPeerRegistry;
 use crate::sync_loop::LoopState;
 
 pub mod conflicts;
+pub mod embeddings;
 pub mod lan;
 pub mod status;
 pub mod sync;
@@ -103,6 +105,9 @@ struct DaemonStateInner {
     vault_roots: HashMap<String, PathBuf>,
     /// LAN peer registry (DISK-0027); populated when `[lan_sync] enabled`.
     lan_peers: Option<Arc<LanPeerRegistry>>,
+    /// Last embedding sidecar sweep per share (DISK-0029 slice 2).
+    embeddings_enabled: bool,
+    embeddings_status: RwLock<Vec<EmbeddingsStatusSnapshot>>,
 }
 
 impl DaemonState {
@@ -126,6 +131,8 @@ impl DaemonState {
             vault_root: None,
             vault_roots: HashMap::new(),
             lan_peers: None,
+            embeddings_enabled: false,
+            embeddings_status: RwLock::new(Vec::new()),
         };
         (
             Self {
@@ -338,6 +345,37 @@ impl DaemonState {
     pub fn lan_peers(&self) -> Option<Arc<LanPeerRegistry>> {
         self.inner.lan_peers.clone()
     }
+
+    /// Configure embeddings co-storage tracking for loopback status.
+    pub fn with_embeddings_tracking(self, enabled: bool) -> Self {
+        let inner = Arc::try_unwrap(self.inner).unwrap_or_else(|arc| {
+            panic!(
+                "DaemonState::with_embeddings_tracking called after clone: Arc has {} refs",
+                Arc::strong_count(&arc)
+            );
+        });
+        let new_inner = DaemonStateInner {
+            embeddings_enabled: enabled,
+            ..inner
+        };
+        Self {
+            inner: Arc::new(new_inner),
+        }
+    }
+
+    pub async fn set_embeddings_status(&self, snapshot: EmbeddingsStatusSnapshot) {
+        let mut guard = self.inner.embeddings_status.write().await;
+        if let Some(existing) = guard.iter_mut().find(|s| s.share == snapshot.share) {
+            *existing = snapshot;
+        } else {
+            guard.push(snapshot);
+        }
+    }
+
+    pub async fn embeddings_status(&self) -> (bool, Vec<EmbeddingsStatusSnapshot>) {
+        let guard = self.inner.embeddings_status.read().await;
+        (self.inner.embeddings_enabled, guard.clone())
+    }
 }
 
 /// Endpoint envelope returned by `POST /sync` and `POST /config/reload`.
@@ -365,6 +403,7 @@ pub fn router(state: DaemonState) -> Router {
         .route("/conflicts/:path/diff", get(conflicts::get_conflict_diff))
         .route("/conflicts/:path", post(conflicts::post_resolve_conflict))
         .route("/lan/peers", get(lan::get_lan_peers))
+        .route("/embeddings/status", get(embeddings::get_embeddings_status))
         .with_state(state)
 }
 

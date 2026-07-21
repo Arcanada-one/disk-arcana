@@ -17,7 +17,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::accounts::routes::{resolve_user_from_access, verify_bearer, AuthHttpState};
-use crate::agents::{agent_write_conflict_payload, agent_write_ok_payload, AgentWebhookJob};
+use crate::agents::{
+    agent_write_conflict_payload, agent_write_ok_payload, embeddings_stale_payload, AgentWebhookJob,
+};
 use crate::sharing::access::{require_write, resolve_vault_access};
 
 const ALLOWED_WEBHOOK_EVENTS: &[&str] = &[
@@ -25,6 +27,7 @@ const ALLOWED_WEBHOOK_EVENTS: &[&str] = &[
     "sync.file_deleted",
     "agent.write_ok",
     "agent.write_conflict",
+    "embeddings.stale",
 ];
 
 #[derive(Debug, Deserialize)]
@@ -116,6 +119,33 @@ pub struct AgentWriteResponse {
     pub revision: u64,
     pub content_hash_hex: String,
     pub size: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EmbeddingsStaleReportRequest {
+    #[serde(default = "default_vault")]
+    pub vault_id: String,
+    pub share: String,
+    #[serde(default)]
+    pub fresh: usize,
+    #[serde(default)]
+    pub stale: usize,
+    #[serde(default)]
+    pub missing: usize,
+    #[serde(default)]
+    pub paths: Vec<EmbeddingsStalePath>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct EmbeddingsStalePath {
+    pub path: String,
+    pub status: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct EmbeddingsStaleReportResponse {
+    pub accepted: bool,
+    pub dispatched: bool,
 }
 
 fn default_vault() -> String {
@@ -348,6 +378,56 @@ async fn get_revision_inner(
         revision: row.revision,
         exists: row.revision > 0,
         content_hash_hex: row.content_hash.map(hex::encode),
+    })
+}
+
+pub async fn report_embeddings_stale(
+    axum::extract::State(state): axum::extract::State<Arc<AuthHttpState>>,
+    headers: HeaderMap,
+    Json(body): Json<EmbeddingsStaleReportRequest>,
+) -> impl IntoResponse {
+    match report_embeddings_stale_inner(&state, &headers, body).await {
+        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Err((code, msg)) => (code, Json(json!({ "error": msg }))).into_response(),
+    }
+}
+
+async fn report_embeddings_stale_inner(
+    state: &AuthHttpState,
+    headers: &HeaderMap,
+    body: EmbeddingsStaleReportRequest,
+) -> Result<EmbeddingsStaleReportResponse, (StatusCode, &'static str)> {
+    if body.share.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "share required"));
+    }
+
+    let claims = verify_bearer(state, headers).await?;
+    let user = resolve_user_from_access(state, &claims).await?;
+    let access = resolve_vault_access(state, &user, &body.vault_id).await?;
+    require_write(&access)?;
+    let tenant_key = access.tenant_key();
+
+    let dispatched = if body.stale > 0 || body.missing > 0 {
+        state.agent_webhooks.enqueue(AgentWebhookJob {
+            tenant_id: tenant_key.map(str::to_string),
+            vault_id: body.vault_id.clone(),
+            event: "embeddings.stale".into(),
+            payload: embeddings_stale_payload(
+                &body.share,
+                body.fresh,
+                body.stale,
+                body.missing,
+                &body.paths,
+            ),
+        });
+        true
+    } else {
+        false
+    };
+
+    Ok(EmbeddingsStaleReportResponse {
+        accepted: true,
+        dispatched,
     })
 }
 
