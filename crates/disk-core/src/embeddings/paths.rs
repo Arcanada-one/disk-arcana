@@ -13,9 +13,9 @@ pub const VECTOR_SUFFIX: &str = ".vec.bin";
 
 /// `true` when `rel` lives under `.disk-embeddings/`.
 pub fn is_co_storage_path(rel: &Path) -> bool {
-    rel.components().next().is_some_and(|c| {
-        matches!(c, Component::Normal(seg) if seg.eq_ignore_ascii_case(CO_STORAGE_ROOT))
-    })
+    rel.components().next().is_some_and(
+        |c| matches!(c, Component::Normal(seg) if seg.eq_ignore_ascii_case(CO_STORAGE_ROOT)),
+    )
 }
 
 /// Relative manifest path for a source file, e.g. `notes/a.md` →
@@ -27,10 +27,7 @@ pub fn manifest_rel_path(source_rel: &Path) -> PathBuf {
         .file_name()
         .map(|n| n.to_os_string())
         .unwrap_or_default();
-    out.set_file_name(format!(
-        "{}{MANIFEST_SUFFIX}",
-        file_name.to_string_lossy()
-    ));
+    out.set_file_name(format!("{}{MANIFEST_SUFFIX}", file_name.to_string_lossy()));
     out
 }
 
@@ -43,10 +40,7 @@ pub fn vector_blob_rel_path(source_rel: &Path) -> PathBuf {
         .file_name()
         .map(|n| n.to_os_string())
         .unwrap_or_default();
-    out.set_file_name(format!(
-        "{}{VECTOR_SUFFIX}",
-        file_name.to_string_lossy()
-    ));
+    out.set_file_name(format!("{}{VECTOR_SUFFIX}", file_name.to_string_lossy()));
     out
 }
 

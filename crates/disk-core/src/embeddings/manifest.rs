@@ -153,13 +153,7 @@ mod tests {
         fs::write(root.join(source_rel), b"hello").unwrap();
         let hash = hex::encode(hash_file(&root.join(source_rel)).unwrap());
 
-        let manifest = SidecarManifest::new(
-            "notes/a.md",
-            hash.clone(),
-            "bge-m3",
-            4,
-            16,
-        );
+        let manifest = SidecarManifest::new("notes/a.md", hash.clone(), "bge-m3", 4, 16);
         manifest.write_to_share(root, source_rel).unwrap();
 
         let vector_rel = vector_blob_rel_path(source_rel);

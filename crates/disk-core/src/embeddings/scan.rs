@@ -90,9 +90,8 @@ pub fn scan_share_embeddings(
             continue;
         }
 
-        let hash_hex = hex::encode(
-            hash_file(abs).map_err(|e| std::io::Error::other(e.to_string()))?,
-        );
+        let hash_hex =
+            hex::encode(hash_file(abs).map_err(|e| std::io::Error::other(e.to_string()))?);
         let staleness = evaluate_staleness(share_root, &rel, &hash_hex, model_id, dimensions);
         sources.push(SourceSidecarStatus {
             source_path: rel,
@@ -107,9 +106,8 @@ pub fn scan_share_embeddings(
     for row in &sources {
         match row.staleness {
             super::manifest::Staleness::Fresh => fresh += 1,
-            super::manifest::Staleness::MissingManifest | super::manifest::Staleness::MissingVector => {
-                missing += 1
-            }
+            super::manifest::Staleness::MissingManifest
+            | super::manifest::Staleness::MissingVector => missing += 1,
             _ => stale += 1,
         }
     }

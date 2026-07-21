@@ -158,9 +158,7 @@ mod tests {
     fn co_storage_paths_bypass_extension_whitelist() {
         let cfg = rules_with_whitelist(&["md"]);
         let f = Filter::from_config(&cfg).unwrap();
-        assert!(!f.is_excluded(Path::new(
-            ".disk-embeddings/notes/x.md.manifest.json"
-        )));
+        assert!(!f.is_excluded(Path::new(".disk-embeddings/notes/x.md.manifest.json")));
         assert!(!f.is_excluded(Path::new(".disk-embeddings/notes/x.md.vec.bin")));
     }
 

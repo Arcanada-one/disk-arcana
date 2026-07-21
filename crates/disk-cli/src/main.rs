@@ -1948,14 +1948,7 @@ node_id_hint = "from-bf"
 
     #[test]
     fn cli_parses_embeddings_status() {
-        let cli = Cli::try_parse_from([
-            "disk",
-            "embeddings",
-            "status",
-            "--share",
-            "wiki",
-        ])
-        .unwrap();
+        let cli = Cli::try_parse_from(["disk", "embeddings", "status", "--share", "wiki"]).unwrap();
         match cli.command {
             Some(Command::Embeddings(EmbeddingsArgs {
                 command: EmbeddingsCommand::Status(s),

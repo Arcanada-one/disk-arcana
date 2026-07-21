@@ -9,15 +9,11 @@ use disk_core::filter::{Filter, FilterRules};
 
 /// `disk embeddings status [--share <name>] [--config <path>]`.
 pub fn run_embeddings_status(config_path: &Path, share_name: Option<&str>) -> Result<()> {
-    let cfg = DiskConfig::load(config_path)
-        .with_context(|| format!("load {}", config_path.display()))?;
+    let cfg =
+        DiskConfig::load(config_path).with_context(|| format!("load {}", config_path.display()))?;
 
     let shares: Vec<_> = match share_name {
-        Some(name) => cfg
-            .shares
-            .iter()
-            .filter(|s| s.name == name)
-            .collect(),
+        Some(name) => cfg.shares.iter().filter(|s| s.name == name).collect(),
         None => cfg.shares.iter().collect(),
     };
 
