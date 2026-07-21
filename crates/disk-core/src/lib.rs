@@ -27,6 +27,7 @@ pub mod platform;
 pub mod reconciler;
 pub mod scanner;
 pub mod tenant;
+pub mod tenant_db;
 pub mod tombstone;
 pub mod types;
 pub mod vector_clock;
@@ -53,6 +54,7 @@ pub use platform::FileIdentity;
 pub use reconciler::ReconciliationEngine;
 pub use scanner::FileScanner;
 pub use tenant::{enforce_node_tenant, resolve_tenant_id, TenantScope, TenantViolation};
+pub use tenant_db::{tenant_db_path, tenant_shard_key, TenantMetaRouter};
 pub use tombstone::{Tombstone, DEFAULT_TTL_SECS};
 pub use types::{
     ActionType, ConflictKind, ConflictRecord, ConflictReport, FileMeta, NodeId, RenamePair,

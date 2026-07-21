@@ -3,7 +3,7 @@
 use disk_core::billing::{
     check_node_capacity, check_storage_delta, check_vault_capacity, PlanTier, QuotaLimits,
 };
-use disk_core::meta_db::MetaDb;
+use disk_core::TenantMetaRouter;
 use tonic::Status;
 
 use super::mode::{default_plan_tier_from_env, BillingMode};
@@ -14,18 +14,18 @@ use crate::config::ConfigError;
 #[derive(Debug, Clone)]
 pub struct QuotaEnforcer {
     pub mode: BillingMode,
-    pub meta_db: MetaDb,
+    pub router: TenantMetaRouter,
     pub default_tier: PlanTier,
     /// Test-only override; production uses tier limits from `PlanTier`.
     test_limits: Option<QuotaLimits>,
 }
 
 impl QuotaEnforcer {
-    pub fn new(mode: BillingMode, meta_db: MetaDb) -> Result<Self, ConfigError> {
+    pub fn new(mode: BillingMode, router: TenantMetaRouter) -> Result<Self, ConfigError> {
         let default_tier = default_plan_tier_from_env()?;
         Ok(Self {
             mode,
-            meta_db,
+            router,
             default_tier,
             test_limits: None,
         })
@@ -44,7 +44,8 @@ impl QuotaEnforcer {
 
     async fn tier_and_limits(&self, tenant_id: Option<&str>) -> Result<QuotaLimits, Status> {
         let tier = self
-            .meta_db
+            .router
+            .control()
             .get_plan_tier(tenant_id, self.default_tier)
             .await
             .map_err(|e| Status::internal(format!("billing lookup: {e}")))?;
@@ -87,12 +88,14 @@ impl QuotaEnforcer {
         let limits = self.tier_and_limits(tenant_id).await?;
 
         let known_vaults = self
-            .meta_db
+            .router
+            .control()
             .count_tenant_vaults(tenant_id)
             .await
             .map_err(|e| Status::internal(format!("vault count: {e}")))?;
         let vault_known = self
-            .meta_db
+            .router
+            .control()
             .tenant_vault_exists(tenant_id, share)
             .await
             .map_err(|e| Status::internal(format!("vault lookup: {e}")))?;
@@ -100,13 +103,13 @@ impl QuotaEnforcer {
             .map_err(|e| Status::resource_exhausted(format!("vault quota: {e}")))?;
 
         let used = self
-            .meta_db
+            .router
             .sum_storage_bytes(tenant_id)
             .await
             .map_err(|e| Status::internal(format!("storage sum: {e}")))?;
 
         let old_size = self
-            .meta_db
+            .router
             .get_file_scoped(tenant_id, share, path)
             .await
             .map_err(|e| Status::internal(format!("file lookup: {e}")))?
@@ -129,7 +132,8 @@ impl QuotaEnforcer {
             return Ok(());
         }
         let tenant_id = Self::tenant_from_metadata(tenant_header);
-        self.meta_db
+        self.router
+            .control()
             .register_tenant_vault(tenant_id, share)
             .await
             .map_err(|e| Status::internal(format!("vault register: {e}")))?;
@@ -142,13 +146,17 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    use disk_core::meta_db::MetaDb;
+    use disk_core::TenantMetaRouter;
+
     #[tokio::test]
     async fn disabled_mode_allows_any_upload() {
         let dir = tempdir().unwrap();
         let db = MetaDb::open(&dir.path().join("q.sqlite")).await.unwrap();
+        let router = TenantMetaRouter::single(db);
         let enforcer = QuotaEnforcer {
             mode: BillingMode::Disabled,
-            meta_db: db,
+            router,
             default_tier: PlanTier::Free,
             test_limits: Some(QuotaLimits {
                 max_storage_bytes: 1,

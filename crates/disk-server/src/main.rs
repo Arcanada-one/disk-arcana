@@ -131,13 +131,18 @@ async fn main() -> anyhow::Result<()> {
 
     // MetaDb for the sync service (DISK-0043): commit uploaded bytes + vector-clock
     // upsert. Opens a second WAL-mode connection against the same SQLite file — safe.
-    let meta_db = disk_core::meta_db::MetaDb::open(&cfg.db_path)
+    let control_meta = disk_core::meta_db::MetaDb::open(&cfg.db_path)
         .await
         .with_context(|| format!("open MetaDb for sync service at {}", cfg.db_path.display()))?;
 
+    let meta_router = match &cfg.tenant_db_dir {
+        Some(dir) => disk_core::TenantMetaRouter::split(control_meta.clone(), dir.clone()),
+        None => disk_core::TenantMetaRouter::single(control_meta.clone()),
+    };
+
     let quota_enforcer = if cfg.billing_mode.is_active() {
         Some(
-            disk_server::QuotaEnforcer::new(cfg.billing_mode, meta_db.clone())
+            disk_server::QuotaEnforcer::new(cfg.billing_mode, meta_router.clone())
                 .context("init QuotaEnforcer")?,
         )
     } else {
@@ -161,7 +166,7 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or(disk_server::billing::webhook::DEFAULT_STRIPE_TOLERANCE_SECS);
         Some(Arc::new(disk_server::WebhookState {
             mode: cfg.billing_mode,
-            meta_db: meta_db.clone(),
+            meta_db: meta_router.control(),
             webhook_secret: cfg.stripe_webhook_secret.clone(),
             signature_tolerance_secs: tolerance,
             require_signature_header: require_sig,
@@ -184,7 +189,7 @@ async fn main() -> anyhow::Result<()> {
         if let Some(ref enforcer) = quota_enforcer {
             auth_impl = auth_impl.with_quota_enforcer(enforcer.clone());
         }
-        auth_impl = auth_impl.with_meta_db(meta_db.clone());
+        auth_impl = auth_impl.with_meta_db(meta_router.control());
         auth_impl
     });
     let sync_svc = SyncServiceServer::new({
@@ -194,7 +199,7 @@ async fn main() -> anyhow::Result<()> {
             acl_enforcer.clone(),
             audit_emitter.clone(),
         )
-        .with_meta_db(meta_db, "server");
+        .with_meta_router(meta_router, "server");
         if let Some(enforcer) = quota_enforcer {
             sync_impl = sync_impl.with_quota_enforcer(enforcer);
         }

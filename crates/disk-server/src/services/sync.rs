@@ -30,6 +30,7 @@ use disk_core::reconciler::ReconciliationEngine;
 use disk_core::tenant::enforce_node_tenant;
 use disk_core::types::{ActionType, FileMeta};
 use disk_core::vector_clock::VectorClock;
+use disk_core::TenantMetaRouter;
 use disk_proto::disk::{
     sync_service_server::SyncService, AclMismatchDetails, DeltaChunk, DeltaDownloadRequest,
     DeltaUploadRequest, DeltaUploadResponse, FileMetadata, SyncStateAck, SyncStateRequest,
@@ -66,7 +67,7 @@ pub struct SyncServiceImpl {
     /// SQLite metadata index — authoritative server state (DISK-0043).
     /// `None` in legacy/test mode constructed via `new()`; `Some` when
     /// constructed via `with_acl()` or `with_meta_db()`.
-    pub meta_db: Option<MetaDb>,
+    pub meta_router: Option<TenantMetaRouter>,
     /// Stable server node identifier used as the writer in MetaDb upserts
     /// and as the `node_id` for `ReconciliationEngine`.
     pub server_node_id: String,
@@ -90,7 +91,7 @@ impl SyncServiceImpl {
             store,
             replay: Arc::new(ReplayGuard::new()),
             root,
-            meta_db: None,
+            meta_router: None,
             server_node_id: "server".into(),
             acl_enforcer: None,
             audit: None,
@@ -111,7 +112,7 @@ impl SyncServiceImpl {
             store,
             replay: Arc::new(ReplayGuard::new()),
             root,
-            meta_db: None,
+            meta_router: None,
             server_node_id: "server".into(),
             acl_enforcer: Some(acl_enforcer),
             audit: Some(audit),
@@ -124,7 +125,18 @@ impl SyncServiceImpl {
     /// Attach a `MetaDb` handle and optional server node id to an existing instance.
     /// Called from `main.rs` after the database is opened.
     pub fn with_meta_db(mut self, db: MetaDb, node_id: impl Into<String>) -> Self {
-        self.meta_db = Some(db);
+        self.meta_router = Some(TenantMetaRouter::single(db));
+        self.server_node_id = node_id.into();
+        self
+    }
+
+    /// Wire split or single-tenant metadata routing (DISK-0017 slice 4).
+    pub fn with_meta_router(
+        mut self,
+        router: TenantMetaRouter,
+        node_id: impl Into<String>,
+    ) -> Self {
+        self.meta_router = Some(router);
         self.server_node_id = node_id.into();
         self
     }
@@ -190,8 +202,10 @@ impl SyncServiceImpl {
         let header = Self::extract_tenant(metadata);
         let node_tenant = if let Some(t) = self.store.node_tenant(node_id) {
             Some(t)
-        } else if let Some(db) = &self.meta_db {
-            db.get_node_tenant(node_id)
+        } else if let Some(router) = &self.meta_router {
+            router
+                .control()
+                .get_node_tenant(node_id)
                 .await
                 .map_err(|e| Status::internal(format!("node tenant lookup: {e}")))?
         } else {
@@ -567,7 +581,11 @@ impl SyncService for SyncServiceImpl {
                 .map_err(|e| Status::internal(format!("rename temp to target: {e}")))?;
 
             // 4. MetaDb upsert (after bytes are durable on disk).
-            if let Some(ref db) = self.meta_db {
+            if let Some(ref router) = self.meta_router {
+                let db = router
+                    .tenant_data(tenant.as_deref())
+                    .await
+                    .map_err(|e| Status::internal(format!("tenant meta db: {e}")))?;
                 let mtime_ns = target
                     .metadata()
                     .ok()
@@ -721,7 +739,11 @@ impl SyncService for SyncServiceImpl {
         // Per-client baseline tracking enables delete propagation: a file deleted
         // on the client (present in indexed, absent from remote) is now reachable
         // via the DeleteLocal branch of resolve_one.
-        let (server_files, client_files, db) = if let Some(ref db) = self.meta_db {
+        let (server_files, client_files, db) = if let Some(ref router) = self.meta_router {
+            let db = router
+                .tenant_data(tenant.as_deref())
+                .await
+                .map_err(|e| Status::internal(format!("tenant meta db: {e}")))?;
             let server = db
                 .list_files_scoped(tenant.as_deref(), &share)
                 .await
@@ -1172,7 +1194,7 @@ mod tests {
         let svc = SyncServiceImpl::new(AuthStore::new(), root.path().to_path_buf())
             .with_meta_db(db, "server-test");
         assert_eq!(svc.server_node_id(), "server-test");
-        assert!(svc.meta_db.is_some());
+        assert!(svc.meta_router.is_some());
     }
 
     // ── DISK-0043 Step 2 & 3: delta_upload commits bytes to sync_root + MetaDb ──
@@ -1396,9 +1418,10 @@ mod tests {
             node_id: "server".into(),
             encryption_nonce: None,
         };
-        svc.meta_db
+        svc.meta_router
             .as_ref()
             .unwrap()
+            .control()
             .upsert_file(&server_meta)
             .await
             .unwrap();
@@ -1447,9 +1470,10 @@ mod tests {
             encryption_nonce: None,
         };
         // require_auth returns the node_label used at register_node time ("vac4-node").
-        svc.meta_db
+        svc.meta_router
             .as_ref()
             .unwrap()
+            .control()
             .upsert_node_baselines("vac4-node", "default", &[baseline_entry])
             .await
             .unwrap();
@@ -1511,7 +1535,7 @@ mod tests {
             node_id: "server".into(),
             encryption_nonce: None,
         };
-        let db = svc.meta_db.as_ref().unwrap();
+        let db = svc.meta_router.as_ref().unwrap().control();
         db.upsert_file(&server_tomb).await.unwrap();
 
         // Client's baseline records the file as live (it saw it on prior sync).
@@ -1581,7 +1605,7 @@ mod tests {
             node_id: "server".into(),
             encryption_nonce: None,
         };
-        let db = svc.meta_db.as_ref().unwrap();
+        let db = svc.meta_router.as_ref().unwrap().control();
         db.upsert_file(&file_meta).await.unwrap();
         db.upsert_node_baselines("vac2-node", "default", &[file_meta])
             .await
@@ -1602,7 +1626,7 @@ mod tests {
         .unwrap();
 
         // Reload the server's authoritative files row.
-        let db = svc.meta_db.as_ref().unwrap();
+        let db = svc.meta_router.as_ref().unwrap().control();
         let server_files = db.list_all_files().await.unwrap();
         let row = server_files
             .iter()
@@ -1661,7 +1685,7 @@ mod tests {
             encryption_nonce: None,
         };
 
-        let db_ref = svc.meta_db.as_ref().unwrap();
+        let db_ref = svc.meta_router.as_ref().unwrap().control();
         // Seed server authoritative row + baselines for both A and B.
         db_ref.upsert_file(&shared_file).await.unwrap();
         db_ref
@@ -1754,7 +1778,7 @@ mod tests {
             node_id: "server".into(),
             encryption_nonce: None,
         };
-        let db_ref = svc.meta_db.as_ref().unwrap();
+        let db_ref = svc.meta_router.as_ref().unwrap().control();
         // Server tombstone already in place (simulates fan-out already applied).
         let tomb = disk_core::types::FileMeta {
             deleted: true,
@@ -1851,7 +1875,7 @@ mod tests {
             node_id: "server".into(),
             encryption_nonce: None,
         };
-        let db = svc.meta_db.as_ref().unwrap();
+        let db = svc.meta_router.as_ref().unwrap().control();
         db.upsert_file(&synced_meta).await.unwrap();
         db.upsert_node_baselines("vac1-node", "default", &[synced_meta])
             .await
@@ -1911,7 +1935,7 @@ mod tests {
         let tok_c = tok_c.as_str().to_string();
 
         let svc = SyncServiceImpl::new(store, root.path().to_path_buf()).with_meta_db(db, "server");
-        let db_ref = svc.meta_db.as_ref().unwrap();
+        let db_ref = svc.meta_router.as_ref().unwrap().control();
 
         // Server holds the recreated file (hash 0x99).
         let server_recreated = disk_core::types::FileMeta {
@@ -2006,7 +2030,7 @@ mod tests {
         let tok_c = tok_c.as_str().to_string();
 
         let svc = SyncServiceImpl::new(store, root.path().to_path_buf()).with_meta_db(db, "server");
-        let db_ref = svc.meta_db.as_ref().unwrap();
+        let db_ref = svc.meta_router.as_ref().unwrap().control();
 
         // Server: recreated file with hash 0xBB (different from C's 0xDD).
         let server_recreated = disk_core::types::FileMeta {
@@ -2174,9 +2198,10 @@ mod tests {
             node_id: "server".into(),
             encryption_nonce: None,
         };
-        svc.meta_db
+        svc.meta_router
             .as_ref()
             .unwrap()
+            .control()
             .upsert_file(&server_file)
             .await
             .unwrap();
@@ -2195,9 +2220,10 @@ mod tests {
             node_id: "ct-node".into(),
             encryption_nonce: None,
         };
-        svc.meta_db
+        svc.meta_router
             .as_ref()
             .unwrap()
+            .control()
             .upsert_node_baselines("ct-node", "default", &[baseline_file])
             .await
             .unwrap();
@@ -2242,9 +2268,10 @@ mod tests {
 
         // Assert 2: conflict row persisted in meta_db with fork_path set.
         let db_conflicts = svc
-            .meta_db
+            .meta_router
             .as_ref()
             .unwrap()
+            .control()
             .list_unresolved_conflicts()
             .await
             .unwrap();
