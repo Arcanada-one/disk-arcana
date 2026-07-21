@@ -11,6 +11,7 @@ use disk_proto::disk::{
 };
 
 use crate::auth::{check_register_gate, AuthStore};
+use crate::billing::QuotaEnforcer;
 use crate::config::RegisterNodeMode;
 use sqlx::SqlitePool;
 
@@ -21,6 +22,7 @@ pub struct AuthServiceImpl {
     register_mode: RegisterNodeMode,
     pool: Option<SqlitePool>,
     admin_token: Option<String>,
+    quota_enforcer: Option<QuotaEnforcer>,
 }
 
 impl AuthServiceImpl {
@@ -30,7 +32,14 @@ impl AuthServiceImpl {
             register_mode: RegisterNodeMode::Open,
             pool: None,
             admin_token: None,
+            quota_enforcer: None,
         }
+    }
+
+    /// Attach storage/node quota enforcement (DISK-0018).
+    pub fn with_quota_enforcer(mut self, enforcer: QuotaEnforcer) -> Self {
+        self.quota_enforcer = Some(enforcer);
+        self
     }
 
     /// Wire production `RegisterNode` gate (OWASP T2.10).
@@ -66,6 +75,20 @@ impl AuthService for AuthServiceImpl {
             &node_id,
         )
         .await?;
+
+        let tenant = request
+            .metadata()
+            .get("x-disk-tenant")
+            .and_then(|v| v.to_str().ok())
+            .filter(|s| !s.is_empty());
+
+        if let Some(enforcer) = &self.quota_enforcer {
+            if !self.store.has_node(&node_id) {
+                enforcer
+                    .check_register_node(tenant, self.store.node_count() as u32)
+                    .await?;
+            }
+        }
 
         let req = request.into_inner();
         let display_name = req.display_name.trim();

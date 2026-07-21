@@ -32,9 +32,9 @@ pub mod types;
 pub mod vector_clock;
 
 pub use billing::{
-    check_storage_delta, compute_v1_signature, parse_stripe_subscription_event,
-    verify_stripe_webhook_signature, PlanTier, QuotaError, QuotaLimits, StripeSigError,
-    StripeSubscriptionEvent,
+    check_node_capacity, check_storage_delta, check_vault_capacity, compute_v1_signature,
+    parse_stripe_subscription_event, verify_stripe_webhook_signature, PlanTier, QuotaError,
+    QuotaLimits, StripeSigError, StripeSubscriptionEvent,
 };
 pub use config::Config;
 pub use e2ee::{

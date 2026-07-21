@@ -493,7 +493,7 @@ impl SyncService for SyncServiceImpl {
         // ── Storage quota gate (DISK-0018) ─────────────────────────────────
         if let (Some(enforcer), Some(file_path)) = (&self.quota_enforcer, last_path.as_deref()) {
             enforcer
-                .check_upload(tenant.as_deref(), file_path, assembled.len() as u64)
+                .check_upload(tenant.as_deref(), &share, file_path, assembled.len() as u64)
                 .await?;
         }
 
@@ -587,6 +587,12 @@ impl SyncService for SyncServiceImpl {
                 // rebuilds the row from disk (convergent recovery).
                 let _ = db.upsert_file(&meta).await;
             }
+        }
+
+        if let Some(enforcer) = &self.quota_enforcer {
+            enforcer
+                .record_vault_usage(tenant.as_deref(), &share)
+                .await?;
         }
 
         Ok(Response::new(DeltaUploadResponse {

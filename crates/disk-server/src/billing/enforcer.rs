@@ -1,6 +1,8 @@
-//! Storage quota gate on `DeltaUpload`.
+//! Plan-tier quota gates on nodes, vaults, and storage (DISK-0018).
 
-use disk_core::billing::{check_storage_delta, PlanTier, QuotaLimits};
+use disk_core::billing::{
+    check_node_capacity, check_storage_delta, check_vault_capacity, PlanTier, QuotaLimits,
+};
 use disk_core::meta_db::MetaDb;
 use tonic::Status;
 
@@ -8,7 +10,7 @@ use super::mode::{default_plan_tier_from_env, BillingMode};
 
 use crate::config::ConfigError;
 
-/// Enforces per-tenant storage quotas before upload commit.
+/// Enforces per-tenant commercial quotas.
 #[derive(Debug, Clone)]
 pub struct QuotaEnforcer {
     pub mode: BillingMode,
@@ -40,14 +42,40 @@ impl QuotaEnforcer {
         self.test_limits.unwrap_or_else(|| tier.limits())
     }
 
+    async fn tier_and_limits(&self, tenant_id: Option<&str>) -> Result<QuotaLimits, Status> {
+        let tier = self
+            .meta_db
+            .get_plan_tier(tenant_id, self.default_tier)
+            .await
+            .map_err(|e| Status::internal(format!("billing lookup: {e}")))?;
+        Ok(self.limits_for_tier(tier))
+    }
+
     fn tenant_from_metadata(tenant_header: Option<&str>) -> Option<&str> {
         tenant_header.filter(|s| !s.is_empty())
+    }
+
+    /// Reject `RegisterNode` when the tenant is at the node cap.
+    pub async fn check_register_node(
+        &self,
+        tenant_header: Option<&str>,
+        active_nodes: u32,
+    ) -> Result<(), Status> {
+        if !self.mode.is_active() {
+            return Ok(());
+        }
+        let tenant_id = Self::tenant_from_metadata(tenant_header);
+        let limits = self.tier_and_limits(tenant_id).await?;
+        check_node_capacity(active_nodes, limits)
+            .map_err(|e| Status::resource_exhausted(format!("node quota: {e}")))?;
+        Ok(())
     }
 
     /// Reject upload when projected storage exceeds the tenant plan.
     pub async fn check_upload(
         &self,
         tenant_header: Option<&str>,
+        share: &str,
         path: &str,
         new_size: u64,
     ) -> Result<(), Status> {
@@ -56,12 +84,20 @@ impl QuotaEnforcer {
         }
 
         let tenant_id = Self::tenant_from_metadata(tenant_header);
-        let tier = self
+        let limits = self.tier_and_limits(tenant_id).await?;
+
+        let known_vaults = self
             .meta_db
-            .get_plan_tier(tenant_id, self.default_tier)
+            .count_tenant_vaults(tenant_id)
             .await
-            .map_err(|e| Status::internal(format!("billing lookup: {e}")))?;
-        let limits = self.limits_for_tier(tier);
+            .map_err(|e| Status::internal(format!("vault count: {e}")))?;
+        let vault_known = self
+            .meta_db
+            .tenant_vault_exists(tenant_id, share)
+            .await
+            .map_err(|e| Status::internal(format!("vault lookup: {e}")))?;
+        check_vault_capacity(known_vaults, vault_known, limits)
+            .map_err(|e| Status::resource_exhausted(format!("vault quota: {e}")))?;
 
         let used = self
             .meta_db
@@ -80,6 +116,23 @@ impl QuotaEnforcer {
         let delta = new_size as i64 - old_size as i64;
         check_storage_delta(used, delta, limits)
             .map_err(|e| Status::resource_exhausted(format!("storage quota: {e}")))?;
+        Ok(())
+    }
+
+    /// Register vault usage after a successful upload (idempotent).
+    pub async fn record_vault_usage(
+        &self,
+        tenant_header: Option<&str>,
+        share: &str,
+    ) -> Result<(), Status> {
+        if !self.mode.is_active() {
+            return Ok(());
+        }
+        let tenant_id = Self::tenant_from_metadata(tenant_header);
+        self.meta_db
+            .register_tenant_vault(tenant_id, share)
+            .await
+            .map_err(|e| Status::internal(format!("vault register: {e}")))?;
         Ok(())
     }
 }
@@ -104,7 +157,7 @@ mod tests {
             }),
         };
         enforcer
-            .check_upload(None, "a.txt", 1_000_000)
+            .check_upload(None, "default", "a.txt", 1_000_000)
             .await
             .unwrap();
     }
