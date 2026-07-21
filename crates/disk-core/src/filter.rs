@@ -90,7 +90,11 @@ impl Filter {
             }
         }
 
-        if !self.extensions_whitelist.is_empty() {
+        if self.extensions_whitelist.is_empty() {
+            // fall through
+        } else if super::embeddings::paths::is_co_storage_path(rel_path) {
+            // Co-storage sidecars always pass extension whitelist (DISK-0029).
+        } else {
             let ext = rel_path
                 .extension()
                 .and_then(|e| e.to_str())
@@ -148,6 +152,16 @@ mod tests {
         let f = Filter::from_config(&cfg).unwrap();
         assert!(f.is_excluded(Path::new("notes/x.txt")));
         assert!(!f.is_excluded(Path::new("notes/x.md")));
+    }
+
+    #[test]
+    fn co_storage_paths_bypass_extension_whitelist() {
+        let cfg = rules_with_whitelist(&["md"]);
+        let f = Filter::from_config(&cfg).unwrap();
+        assert!(!f.is_excluded(Path::new(
+            ".disk-embeddings/notes/x.md.manifest.json"
+        )));
+        assert!(!f.is_excluded(Path::new(".disk-embeddings/notes/x.md.vec.bin")));
     }
 
     #[test]

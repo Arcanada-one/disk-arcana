@@ -29,6 +29,7 @@ pub fn validate(cfg: &DiskConfig) -> Result<(), ConfigError> {
     validate_server_address(&cfg.server.address)?;
     validate_share_names_unique(&cfg.shares)?;
     validate_lan_sync(&cfg.lan_sync)?;
+    validate_embeddings(&cfg.embeddings)?;
 
     for share in &cfg.shares {
         validate_share(share, cfg.node.default.intended_direction)?;
@@ -40,6 +41,23 @@ fn validate_lan_sync(lan: &super::schema::LanSyncSection) -> Result<(), ConfigEr
     if lan.enabled && lan.advertise_port == 0 {
         return Err(ConfigError::Validation(
             "[lan_sync].advertise_port must be > 0 when lan_sync is enabled".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_embeddings(embeddings: &super::schema::EmbeddingsSection) -> Result<(), ConfigError> {
+    if !embeddings.enabled {
+        return Ok(());
+    }
+    if embeddings.model_id.trim().is_empty() {
+        return Err(ConfigError::Validation(
+            "[embeddings].model_id must be non-empty when embeddings is enabled".into(),
+        ));
+    }
+    if embeddings.dimensions == 0 {
+        return Err(ConfigError::Validation(
+            "[embeddings].dimensions must be > 0 when embeddings is enabled".into(),
         ));
     }
     Ok(())

@@ -6,5 +6,6 @@ mod hash;
 mod rename;
 mod walk;
 
+pub use hash::hash_file;
 pub use rename::detect_renames;
 pub use walk::{scan_root, FileScanner};
