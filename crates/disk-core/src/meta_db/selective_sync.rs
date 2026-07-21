@@ -33,6 +33,33 @@ impl MetaDb {
         Ok(rows)
     }
 
+    /// Folder include prefixes for a device+vault (any owning user).
+    ///
+    /// Used by gRPC sync enforcement when only `node_id` is known from the session.
+    pub async fn list_node_sync_includes(
+        &self,
+        tenant_id: Option<&str>,
+        node_id: &str,
+        vault_id: &str,
+    ) -> Result<Vec<String>, MetaDbError> {
+        let rows = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT DISTINCT path_prefix
+            FROM device_sync_includes
+            WHERE tenant_id IS ?1
+              AND node_id = ?2
+              AND vault_id = ?3
+            ORDER BY path_prefix ASC
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(node_id)
+        .bind(vault_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
     /// Replace include rules for a device+vault (transactional delete + insert).
     pub async fn replace_device_sync_includes(
         &self,
@@ -148,5 +175,26 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_node_sync_includes_ignores_user_id() {
+        let dir = tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("node-includes.sqlite"))
+            .await
+            .unwrap();
+        user(&db, "u1", "corp").await;
+        user(&db, "u2", "corp").await;
+        db.replace_device_sync_includes(Some("corp"), "u1", "n1", "wiki", &["docs".into()])
+            .await
+            .unwrap();
+        db.replace_device_sync_includes(Some("corp"), "u2", "n1", "wiki", &["photos".into()])
+            .await
+            .unwrap();
+        let rows = db
+            .list_node_sync_includes(Some("corp"), "n1", "wiki")
+            .await
+            .unwrap();
+        assert_eq!(rows, vec!["docs".to_string(), "photos".to_string()]);
     }
 }

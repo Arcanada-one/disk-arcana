@@ -28,6 +28,7 @@ use disk_core::billing::{PlanTier, VersionRetention};
 use disk_core::meta_db::{FileVersionUpsert, MetaDb};
 use disk_core::path_guard;
 use disk_core::reconciler::ReconciliationEngine;
+use disk_core::selective_sync::path_matches_includes;
 use disk_core::tenant::enforce_node_tenant;
 use disk_core::types::{ActionType, FileMeta};
 use disk_core::vector_clock::VectorClock;
@@ -236,6 +237,43 @@ impl SyncServiceImpl {
             .map_err(|_| Status::permission_denied("tenant mismatch"))
     }
 
+    /// Per-device folder include prefixes (empty = sync entire vault).
+    async fn selective_includes_for_node(
+        &self,
+        tenant_id: Option<&str>,
+        node_id: &str,
+        vault_id: &str,
+    ) -> Result<Vec<String>, Status> {
+        let Some(router) = &self.meta_router else {
+            return Ok(Vec::new());
+        };
+        router
+            .control()
+            .list_node_sync_includes(tenant_id, node_id, vault_id)
+            .await
+            .map_err(|e| Status::internal(format!("selective sync lookup: {e}")))
+    }
+
+    fn require_selective_path(path: &str, includes: &[String]) -> Result<(), Status> {
+        if path_matches_includes(path, includes) {
+            Ok(())
+        } else {
+            Err(Status::permission_denied(
+                "path outside selective sync includes",
+            ))
+        }
+    }
+
+    fn filter_proto_paths(items: Vec<FileMetadata>, includes: &[String]) -> Vec<FileMetadata> {
+        if includes.is_empty() {
+            return items;
+        }
+        items
+            .into_iter()
+            .filter(|m| path_matches_includes(&m.path, includes))
+            .collect()
+    }
+
     /// Run ACL role check using a pre-extracted `CertIdentity`.
     ///
     /// Call pattern:
@@ -423,6 +461,9 @@ impl SyncService for SyncServiceImpl {
             .resolve_session_tenant(request.metadata(), &node_id)
             .await?;
         let share = Self::extract_share(request.metadata());
+        let includes = self
+            .selective_includes_for_node(tenant.as_deref(), &node_id, &share)
+            .await?;
         let cert_id = CertIdentity::from_request(&request);
         self.check_acl_by_cert(cert_id.as_ref(), &share, WRITE_ROLES, "send_only")
             .await?;
@@ -439,6 +480,7 @@ impl SyncService for SyncServiceImpl {
 
             // Validate path on first message.
             if last_path.is_none() {
+                Self::require_selective_path(&req.path, &includes)?;
                 let candidate = std::path::Path::new(&req.path);
                 path_guard::validate(candidate, &self.root)
                     .map_err(|e| Status::invalid_argument(format!("path guard: {e}")))?;
@@ -696,14 +738,19 @@ impl SyncService for SyncServiceImpl {
         request: Request<DeltaDownloadRequest>,
     ) -> Result<Response<Self::DeltaDownloadStream>, Status> {
         let node_id = self.require_auth(request.metadata())?;
-        let _tenant = self
+        let tenant = self
             .resolve_session_tenant(request.metadata(), &node_id)
             .await?;
         let share = Self::extract_share(request.metadata());
+        let includes = self
+            .selective_includes_for_node(tenant.as_deref(), &node_id, &share)
+            .await?;
         let cert_id = CertIdentity::from_request(&request);
         self.check_acl_by_cert(cert_id.as_ref(), &share, READ_ROLES, "receive_only")
             .await?;
         let req = request.into_inner();
+
+        Self::require_selective_path(&req.path, &includes)?;
 
         // Validate path.
         let candidate = std::path::Path::new(&req.path);
@@ -969,6 +1016,13 @@ impl SyncService for SyncServiceImpl {
         db.upsert_node_baselines_scoped(tenant.as_deref(), &node_id, vault_id, &new_baseline)
             .await
             .map_err(|e| Status::internal(format!("baseline writeback: {e}")))?;
+
+        let includes = self
+            .selective_includes_for_node(tenant.as_deref(), &node_id, vault_id)
+            .await?;
+        to_download = Self::filter_proto_paths(to_download, &includes);
+        to_upload = Self::filter_proto_paths(to_upload, &includes);
+        to_delete = Self::filter_proto_paths(to_delete, &includes);
 
         Ok(Response::new(SyncStateResponse {
             to_upload,
@@ -1238,6 +1292,54 @@ mod tests {
         assert_eq!(reassembled, content);
     }
 
+    #[tokio::test]
+    async fn delta_download_rejects_path_outside_selective_includes() {
+        let root = tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("docs")).unwrap();
+        std::fs::write(root.path().join("wiki/secret.txt"), b"nope").unwrap_or(());
+        std::fs::create_dir_all(root.path().join("wiki")).unwrap();
+        std::fs::write(root.path().join("wiki/secret.txt"), b"nope").unwrap();
+        std::fs::write(root.path().join("docs/allowed.txt"), b"ok").unwrap();
+
+        let db_dir = tempdir().unwrap();
+        let db = disk_core::MetaDb::open(&db_dir.path().join("meta.sqlite"))
+            .await
+            .unwrap();
+        let hash = disk_core::hash_password("long-password").unwrap();
+        db.create_user_account("usr_dl", "dl@corp.test", &hash, "corp")
+            .await
+            .unwrap();
+        db.replace_device_sync_includes(None, "usr_dl", "dl-node", "default", &["docs".into()])
+            .await
+            .unwrap();
+
+        let store = AuthStore::new();
+        let key = store.register_node("dl-node", "N", "linux", None).unwrap();
+        let (token, _) = store.authenticate("dl-node", key.as_str()).unwrap();
+        let svc = SyncServiceImpl::new(store, root.path().to_path_buf()).with_meta_db(db, "server");
+
+        let mut blocked = Request::new(DeltaDownloadRequest {
+            path: "wiki/secret.txt".into(),
+            ..Default::default()
+        });
+        blocked.metadata_mut().insert(
+            "authorization",
+            format!("Bearer {}", token.as_str()).parse().unwrap(),
+        );
+        let err = svc.delta_download(blocked).await.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::PermissionDenied);
+
+        let mut allowed = Request::new(DeltaDownloadRequest {
+            path: "docs/allowed.txt".into(),
+            ..Default::default()
+        });
+        allowed.metadata_mut().insert(
+            "authorization",
+            format!("Bearer {}", token.as_str()).parse().unwrap(),
+        );
+        assert!(svc.delta_download(allowed).await.is_ok());
+    }
+
     // ── DISK-0043 Step 1: SyncServiceImpl constructs with a MetaDb ──────
 
     #[tokio::test]
@@ -1315,6 +1417,65 @@ mod tests {
             "client should be told to download server's file"
         );
         assert_eq!(resp.to_download[0].path, "wiki/page.md");
+    }
+
+    /// Selective sync includes filter outbound reconcile downloads (DISK-0023 slice 3).
+    #[tokio::test]
+    async fn exchange_state_filters_to_download_by_selective_includes() {
+        let root = tempdir().unwrap();
+        std::fs::create_dir_all(root.path()).unwrap();
+        let db_dir = tempdir().unwrap();
+        let db = disk_core::MetaDb::open(&db_dir.path().join("meta.sqlite"))
+            .await
+            .unwrap();
+
+        let hash = disk_core::hash_password("long-password").unwrap();
+        db.create_user_account("usr_sel", "sel@corp.test", &hash, "corp")
+            .await
+            .unwrap();
+        db.replace_device_sync_includes(None, "usr_sel", "sel-node", "default", &["docs".into()])
+            .await
+            .unwrap();
+
+        for (path, byte) in [("wiki/page.md", 0xABu8), ("docs/readme.md", 0xCDu8)] {
+            let meta = disk_core::types::FileMeta {
+                path: std::path::PathBuf::from(path),
+                content_hash: [byte; 32],
+                size: 10,
+                mtime_ns: 1,
+                inode: None,
+                vector_clock: disk_core::VectorClock::new(),
+                deleted: false,
+                deleted_at: None,
+                node_id: "server".into(),
+                encryption_nonce: None,
+                version_id: None,
+                parent_version_id: None,
+            };
+            db.upsert_file(&meta).await.unwrap();
+        }
+
+        let store = AuthStore::new();
+        let key = store.register_node("sel-node", "N", "linux", None).unwrap();
+        let (token, _) = store.authenticate("sel-node", key.as_str()).unwrap();
+
+        let svc = SyncServiceImpl::new(store, root.path().to_path_buf()).with_meta_db(db, "server");
+
+        let mut req = Request::new(SyncStateRequest {
+            node_id: "sel-node".into(),
+            session_token: token.as_str().to_string(),
+            files: vec![],
+            node_clock: std::collections::HashMap::new(),
+            ..Default::default()
+        });
+        req.metadata_mut().insert(
+            "authorization",
+            format!("Bearer {}", token.as_str()).parse().unwrap(),
+        );
+
+        let resp = svc.exchange_state(req).await.unwrap().into_inner();
+        assert_eq!(resp.to_download.len(), 1);
+        assert_eq!(resp.to_download[0].path, "docs/readme.md");
     }
 
     /// Client has a file; server has empty state → to_upload contains the file.
