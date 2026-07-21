@@ -7,7 +7,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
 use disk_core::billing::PlanTier;
-use serde::Serialize;
+use disk_core::normalize_email;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::accounts::routes::{resolve_user_from_access, verify_bearer, AuthHttpState};
@@ -122,6 +123,78 @@ async fn export_data_inner(
                 })
                 .collect(),
         },
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeleteAccountRequest {
+    pub confirm_email: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeleteAccountResponse {
+    pub deleted: bool,
+    pub user_id: String,
+    pub tenant_purged: bool,
+}
+
+pub async fn delete_account(
+    State(state): State<Arc<AuthHttpState>>,
+    headers: HeaderMap,
+    Json(body): Json<DeleteAccountRequest>,
+) -> impl IntoResponse {
+    match delete_account_inner(&state, &headers, body).await {
+        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Err((code, msg)) => (code, Json(json!({ "error": msg }))).into_response(),
+    }
+}
+
+async fn delete_account_inner(
+    state: &AuthHttpState,
+    headers: &HeaderMap,
+    body: DeleteAccountRequest,
+) -> Result<DeleteAccountResponse, (StatusCode, &'static str)> {
+    let claims = verify_bearer(state, headers).await?;
+    let user = resolve_user_from_access(state, &claims).await?;
+
+    let confirm = normalize_email(&body.confirm_email);
+    if confirm != user.email {
+        return Err((StatusCode::BAD_REQUEST, "confirm_email mismatch"));
+    }
+
+    let tenant_id = user.tenant_id.clone();
+    let user_id = user.id.clone();
+
+    let removed = state
+        .meta_db
+        .delete_user_by_id(&user_id)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
+    if !removed {
+        return Err((StatusCode::NOT_FOUND, "user not found"));
+    }
+
+    let remaining = state
+        .meta_db
+        .count_users_for_tenant(&tenant_id)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
+
+    let tenant_purged = if remaining == 0 {
+        state
+            .meta_db
+            .purge_tenant_metadata(&tenant_id)
+            .await
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
+        true
+    } else {
+        false
+    };
+
+    Ok(DeleteAccountResponse {
+        deleted: true,
+        user_id,
+        tenant_purged,
     })
 }
 
@@ -272,6 +345,136 @@ mod integration_tests {
             assert_eq!(export["tenant"]["devices"].as_array().unwrap().len(), 1);
             assert!(export["exported_at"].as_i64().unwrap() > 0);
             assert!(export["user"].get("password_hash").is_none());
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn compliance_delete_account_requires_auth() {
+        let dir = tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("delete-auth.sqlite"))
+            .await
+            .unwrap();
+        with_compliance_server(db, |addr| async move {
+            let resp = reqwest::Client::new()
+                .post(format!("http://{addr}/compliance/delete-account"))
+                .json(&serde_json::json!({ "confirm_email": "a@b.com" }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), 401);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn compliance_delete_account_round_trip() {
+        let dir = tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("delete-rt.sqlite"))
+            .await
+            .unwrap();
+        let seed_db = db.clone();
+
+        with_compliance_server(db, |addr| async move {
+            let base = format!("http://{addr}");
+            let client = reqwest::Client::new();
+
+            let signup: Value = client
+                .post(format!("{base}/auth/signup"))
+                .json(&serde_json::json!({
+                    "email": "delete@example.com",
+                    "password": "secure-pass",
+                    "tenant_id": "delete-corp"
+                }))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            let token = signup["access_token"].as_str().unwrap();
+
+            seed_db
+                .register_tenant_vault(Some("delete-corp"), "wiki")
+                .await
+                .unwrap();
+
+            let deleted: Value = client
+                .post(format!("{base}/compliance/delete-account"))
+                .bearer_auth(token)
+                .json(&serde_json::json!({ "confirm_email": "delete@example.com" }))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+
+            assert_eq!(deleted["deleted"], true);
+            assert_eq!(deleted["tenant_purged"], true);
+
+            assert!(seed_db
+                .get_user_by_email("delete@example.com")
+                .await
+                .unwrap()
+                .is_none());
+            assert!(seed_db
+                .list_tenant_vaults(Some("delete-corp"))
+                .await
+                .unwrap()
+                .is_empty());
+
+            let me = client
+                .get(format!("{base}/auth/me"))
+                .bearer_auth(token)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(me.status(), 401);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn compliance_delete_account_rejects_email_mismatch() {
+        let dir = tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("delete-mismatch.sqlite"))
+            .await
+            .unwrap();
+
+        with_compliance_server(db, |addr| async move {
+            let base = format!("http://{addr}");
+            let client = reqwest::Client::new();
+
+            let signup: Value = client
+                .post(format!("{base}/auth/signup"))
+                .json(&serde_json::json!({
+                    "email": "keep@example.com",
+                    "password": "secure-pass",
+                    "tenant_id": "keep-corp"
+                }))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            let token = signup["access_token"].as_str().unwrap();
+
+            let resp = client
+                .post(format!("{base}/compliance/delete-account"))
+                .bearer_auth(token)
+                .json(&serde_json::json!({ "confirm_email": "wrong@example.com" }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), 400);
         })
         .await;
     }

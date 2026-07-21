@@ -6,6 +6,7 @@
 
 mod accounts;
 mod billing;
+pub mod compliance;
 pub mod conflicts;
 mod dashboard;
 mod files;

@@ -39,7 +39,7 @@ pub use audit::{AuditEmitter, AuditError, AuditEvent, AuditKind};
 pub use auth::{ApiKey, AuthStore, CertIdentity, SessionToken};
 pub use billing::webhook::WebhookState;
 pub use billing::{BillingMode, QuotaEnforcer};
-pub use compliance::export_data;
+pub use compliance::{delete_account, export_data};
 pub use dashboard::{resolve_conflict, summary};
 pub use enrollment::{EnrollErrorKind, EnrollmentServiceImpl};
 pub use middleware::{BombError, ReplayError, ReplayGuard};
