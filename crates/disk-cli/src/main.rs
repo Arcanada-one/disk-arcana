@@ -429,6 +429,10 @@ pub enum TrashCommand {
     List(TrashListArgs),
     /// Restore a file from trash.
     Restore(TrashRestoreArgs),
+    /// Permanently delete one file from trash.
+    Delete(TrashDeleteArgs),
+    /// Permanently empty the recycle bin for a vault.
+    Empty(TrashEmptyArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -451,6 +455,31 @@ pub struct TrashRestoreArgs {
     pub path: String,
     #[arg(long, default_value = "default")]
     pub vault: String,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct TrashDeleteArgs {
+    #[arg(long)]
+    pub path: String,
+    #[arg(long, default_value = "default")]
+    pub vault: String,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct TrashEmptyArgs {
+    #[arg(long, default_value = "default")]
+    pub vault: String,
+    /// Required to confirm permanent deletion of all trashed files.
+    #[arg(long)]
+    pub yes: bool,
     #[arg(long)]
     pub api: Option<String>,
     #[arg(long)]
@@ -764,6 +793,24 @@ async fn main() -> Result<()> {
                     r.token.as_deref(),
                     &r.vault,
                     &r.path,
+                )
+                .await
+            }
+            TrashCommand::Delete(d) => {
+                trash_cmd::run_trash_delete(
+                    d.api.as_deref(),
+                    d.token.as_deref(),
+                    &d.vault,
+                    &d.path,
+                )
+                .await
+            }
+            TrashCommand::Empty(e) => {
+                trash_cmd::run_trash_empty(
+                    e.api.as_deref(),
+                    e.token.as_deref(),
+                    &e.vault,
+                    e.yes,
                 )
                 .await
             }

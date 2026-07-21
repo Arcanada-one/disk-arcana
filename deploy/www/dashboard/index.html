@@ -303,6 +303,10 @@
             class="text-sm border border-slate-700 rounded px-3 py-2 hover:border-emerald-500">
             Refresh list
           </button>
+          <button id="trash-empty-btn" type="button"
+            class="text-sm border border-red-900 text-red-300 rounded px-3 py-2 hover:bg-red-950/40">
+            Empty bin
+          </button>
         </div>
         <p id="trash-loading" class="text-sm text-slate-400 hidden mb-2">Loading recycle bin…</p>
         <p id="trash-pruned-hint" class="text-sm text-amber-400 hidden mb-2"></p>
@@ -903,8 +907,11 @@
       const restoreBtn = item.blob_available
         ? '<button type="button" data-trash-path="' + escapeHtml(item.path) + '" data-vault="' +
           escapeHtml(vault) +
-          '" class="trash-restore text-xs border border-slate-700 rounded px-2 py-0.5 hover:border-emerald-500">Restore</button>'
-        : '<span class="text-slate-600 text-xs">—</span>';
+          '" class="trash-restore text-xs border border-slate-700 rounded px-2 py-0.5 hover:border-emerald-500 mr-1">Restore</button>'
+        : '';
+      const deleteBtn = '<button type="button" data-trash-path="' + escapeHtml(item.path) + '" data-vault="' +
+        escapeHtml(vault) +
+        '" class="trash-delete text-xs border border-red-900 text-red-300 rounded px-2 py-0.5 hover:bg-red-950/40">Delete</button>';
       return '<tr class="border-b border-slate-800/60">' +
         '<td class="py-2 pr-3"><code>' + escapeHtml(item.path) + '</code></td>' +
         '<td class="py-2 pr-3 text-slate-400">' + formatDate(item.deleted_at) + '</td>' +
@@ -912,10 +919,10 @@
           formatDate(item.expires_at) + '</td>' +
         '<td class="py-2 pr-3 text-slate-400">' + formatBytes(item.size) + '</td>' +
         '<td class="py-2 pr-3">' + blob + '</td>' +
-        '<td class="py-2">' + restoreBtn + '</td></tr>';
+        '<td class="py-2">' + restoreBtn + deleteBtn + '</td></tr>';
     }
 
-    function bindTrashRestore(vault) {
+    function bindTrashActions(vault) {
       document.querySelectorAll('.trash-restore').forEach(el => {
         el.onclick = async () => {
           const path = el.dataset.trashPath;
@@ -930,6 +937,28 @@
             });
             const ok = document.getElementById('trash-success');
             ok.textContent = res.message || ('Restored ' + path);
+            ok.classList.remove('hidden');
+            await loadTrash(vault, trashPage.offset);
+          } catch (err) {
+            showDashError(err.message);
+            el.disabled = false;
+          }
+        };
+      });
+      document.querySelectorAll('.trash-delete').forEach(el => {
+        el.onclick = async () => {
+          const path = el.dataset.trashPath;
+          if (!window.confirm('Permanently delete "' + path + '" from trash? This cannot be undone.')) return;
+          el.disabled = true;
+          clearDashError();
+          document.getElementById('trash-success').classList.add('hidden');
+          try {
+            const res = await api('/trash/delete', {
+              method: 'POST',
+              body: JSON.stringify({ path, vault_id: vault }),
+            });
+            const ok = document.getElementById('trash-success');
+            ok.textContent = res.message || ('Deleted ' + path);
             ok.classList.remove('hidden');
             await loadTrash(vault, trashPage.offset);
           } catch (err) {
@@ -983,7 +1012,7 @@
           document.getElementById('trash-list').innerHTML =
             data.items.map(item => trashRowHtml(item, vault)).join('');
           table.classList.remove('hidden');
-          bindTrashRestore(vault);
+          bindTrashActions(vault);
         }
 
         if (data.pagination.total > trashPage.limit || offset > 0) {
@@ -1289,6 +1318,29 @@
         await loadTrash(vault, trashPage.offset + trashPage.limit);
       } catch (err) {
         showDashError(err.message);
+      }
+    };
+
+    document.getElementById('trash-empty-btn').onclick = async () => {
+      const btn = document.getElementById('trash-empty-btn');
+      const vault = document.getElementById('trash-vault').value.trim() || 'default';
+      if (!window.confirm('Permanently delete ALL files in the recycle bin for vault "' + vault + '"? This cannot be undone.')) return;
+      btn.disabled = true;
+      clearDashError();
+      document.getElementById('trash-success').classList.add('hidden');
+      try {
+        const res = await api('/trash/empty', {
+          method: 'POST',
+          body: JSON.stringify({ vault_id: vault, confirm: true }),
+        });
+        const ok = document.getElementById('trash-success');
+        ok.textContent = res.message || ('Emptied trash for vault ' + vault);
+        ok.classList.remove('hidden');
+        await loadTrash(vault, 0);
+      } catch (err) {
+        showDashError(err.message);
+      } finally {
+        btn.disabled = false;
       }
     };
 

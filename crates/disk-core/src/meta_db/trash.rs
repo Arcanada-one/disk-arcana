@@ -88,6 +88,88 @@ impl MetaDb {
         Ok(result.rows_affected() as u32)
     }
 
+    /// Permanently remove one soft-deleted file from the index.
+    pub async fn delete_trash_item(
+        &self,
+        tenant_id: Option<&str>,
+        vault_id: &str,
+        path: &str,
+    ) -> Result<bool, MetaDbError> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM files
+            WHERE tenant_id IS ?1 AND vault_id = ?2 AND path = ?3 AND deleted = 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(vault_id)
+        .bind(path)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Permanently remove all soft-deleted files in a vault.
+    pub async fn empty_trash(
+        &self,
+        tenant_id: Option<&str>,
+        vault_id: &str,
+    ) -> Result<u32, MetaDbError> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM files
+            WHERE tenant_id IS ?1 AND vault_id = ?2 AND deleted = 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(vault_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() as u32)
+    }
+
+    /// Distinct tenant ids that currently have trashed files (for scheduled prune).
+    pub async fn list_trash_tenant_ids(&self) -> Result<Vec<Option<String>>, MetaDbError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT DISTINCT tenant_id
+            FROM files
+            WHERE deleted = 1
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|row| {
+                let tenant_id: Option<String> = row.try_get("tenant_id")?;
+                Ok(tenant_id)
+            })
+            .collect()
+    }
+
+    /// Distinct vault ids with trashed files for a tenant.
+    pub async fn list_vaults_with_trash(
+        &self,
+        tenant_id: Option<&str>,
+    ) -> Result<Vec<String>, MetaDbError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT DISTINCT vault_id
+            FROM files
+            WHERE tenant_id IS ?1 AND deleted = 1
+            "#,
+        )
+        .bind(tenant_id)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|row| {
+                let vault_id: String = row.try_get("vault_id")?;
+                Ok(vault_id)
+            })
+            .collect()
+    }
+
     /// Clear soft-delete flags on a trashed file row (caller writes live bytes).
     pub async fn mark_trash_restored(
         &self,
@@ -209,5 +291,35 @@ mod tests {
 
         let after = db.count_trash(Some("t1"), "wiki").await.unwrap();
         assert_eq!(after, 0);
+    }
+
+    #[tokio::test]
+    async fn delete_and_empty_trash() {
+        let dir = tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("trash-del.sqlite"))
+            .await
+            .unwrap();
+        let now = unix_now();
+
+        db.upsert_file_scoped(Some("t1"), "wiki", &deleted_sample("a.md", now))
+            .await
+            .unwrap();
+        db.upsert_file_scoped(Some("t1"), "wiki", &deleted_sample("b.md", now))
+            .await
+            .unwrap();
+
+        let deleted = db
+            .delete_trash_item(Some("t1"), "wiki", "a.md")
+            .await
+            .unwrap();
+        assert!(deleted);
+        assert_eq!(db.count_trash(Some("t1"), "wiki").await.unwrap(), 1);
+
+        let emptied = db.empty_trash(Some("t1"), "wiki").await.unwrap();
+        assert_eq!(emptied, 1);
+        assert_eq!(db.count_trash(Some("t1"), "wiki").await.unwrap(), 0);
+
+        let vaults = db.list_vaults_with_trash(Some("t1")).await.unwrap();
+        assert!(vaults.is_empty());
     }
 }
