@@ -42,8 +42,7 @@ cargo test -p disk-core --test load_scan load_scan_10000_markdown_files -- --ign
 
 ## CI
 
-- `.github/workflows/ci.yml` → `load-harness-smoke` (1K)
-- `.github/workflows/ci.yml` → `load-harness-scale` (10K)
+- `.github/workflows/ci.yml` → `load-harness` (1K smoke + 10K scale, sequential)
 
 ## Evidence
 
