@@ -9,6 +9,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use dashmap::DashMap;
 
 use super::api_key::{ApiKey, SessionToken};
+use super::rate_limit::{AuthAttemptLimiter, SharedAuthAttemptLimiter};
 
 /// TTL for session tokens (24 hours).
 pub const SESSION_TTL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -45,15 +46,22 @@ pub struct AuthStore {
 struct StoreInner {
     nodes: DashMap<String, NodeEntry>,
     sessions: DashMap<SessionToken, SessionEntry>,
+    limiter: Option<SharedAuthAttemptLimiter>,
 }
 
 impl AuthStore {
-    /// Create a new, empty store.
+    /// Create a new, empty store with default auth rate limiting enabled.
     pub fn new() -> Self {
+        Self::with_rate_limiter(Some(Arc::new(AuthAttemptLimiter::default())))
+    }
+
+    /// Create a store with an optional per-node failed-auth rate limiter.
+    pub fn with_rate_limiter(limiter: Option<SharedAuthAttemptLimiter>) -> Self {
         Self {
             inner: Arc::new(StoreInner {
                 nodes: DashMap::new(),
                 sessions: DashMap::new(),
+                limiter,
             }),
         }
     }
@@ -87,19 +95,33 @@ impl AuthStore {
     ///
     /// Returns a fresh `SessionToken` valid for [`SESSION_TTL`].
     /// Returns `Err(Unauthenticated)` on wrong key or unknown node.
+    /// Returns `Err(RateLimited)` when too many failed attempts occurred recently.
     pub fn authenticate(
         &self,
         node_id: &str,
         api_key: &str,
     ) -> Result<(SessionToken, i64), AuthError> {
-        let entry = self
-            .inner
-            .nodes
-            .get(node_id)
-            .ok_or(AuthError::Unauthenticated)?;
+        let now = unix_now_secs();
+        if let Some(limiter) = &self.inner.limiter {
+            limiter.check(node_id, now).map_err(|e| AuthError::RateLimited {
+                retry_after_secs: e.retry_after_secs,
+            })?;
+        }
 
-        if !ApiKey::verify(api_key, &entry.api_key_hash) {
+        let authed = match self.inner.nodes.get(node_id) {
+            Some(entry) => ApiKey::verify(api_key, &entry.api_key_hash),
+            None => false,
+        };
+
+        if !authed {
+            if let Some(limiter) = &self.inner.limiter {
+                limiter.record_failure(node_id, now);
+            }
             return Err(AuthError::Unauthenticated);
+        }
+
+        if let Some(limiter) = &self.inner.limiter {
+            limiter.clear(node_id);
         }
 
         let expires_at = unix_now_secs() + SESSION_TTL.as_secs();
@@ -168,6 +190,8 @@ pub enum AuthError {
     AlreadyExists,
     #[error("unauthenticated: bad credentials")]
     Unauthenticated,
+    #[error("too many failed auth attempts; retry after {retry_after_secs}s")]
+    RateLimited { retry_after_secs: u64 },
     #[error("session expired or unknown")]
     SessionExpired,
 }
@@ -245,6 +269,61 @@ mod tests {
         store.insert_test_session(token.clone(), "node-x", 1);
         assert!(store.validate_session(&token).is_none());
         assert_eq!(store.session_count(), 0);
+    }
+
+    #[test]
+    fn rate_limited_after_repeated_failures() {
+        use std::time::Duration;
+
+        use super::super::rate_limit::AuthAttemptLimiter;
+
+        let limiter = Arc::new(AuthAttemptLimiter::new(3, Duration::from_secs(60)));
+        let store = AuthStore::with_rate_limiter(Some(limiter));
+        store
+            .register_node("node-rl", "N", "linux")
+            .expect("register");
+
+        for _ in 0..3 {
+            let err = store
+                .authenticate("node-rl", "arc_disk_WRONG")
+                .unwrap_err();
+            assert_eq!(err, AuthError::Unauthenticated);
+        }
+
+        let err = store
+            .authenticate("node-rl", "arc_disk_WRONG")
+            .unwrap_err();
+        assert!(matches!(err, AuthError::RateLimited { .. }));
+    }
+
+    #[test]
+    fn successful_auth_clears_rate_limit_counter() {
+        use std::time::Duration;
+
+        use super::super::rate_limit::AuthAttemptLimiter;
+
+        let limiter = Arc::new(AuthAttemptLimiter::new(2, Duration::from_secs(60)));
+        let store = AuthStore::with_rate_limiter(Some(limiter));
+        let key = store
+            .register_node("node-rl2", "N", "linux")
+            .expect("register");
+
+        store
+            .authenticate("node-rl2", "arc_disk_WRONG")
+            .unwrap_err();
+        store.authenticate("node-rl2", key.as_str()).expect("auth ok");
+
+        // Counter cleared — two more failures should trigger block on third.
+        store
+            .authenticate("node-rl2", "arc_disk_WRONG")
+            .unwrap_err();
+        store
+            .authenticate("node-rl2", "arc_disk_WRONG")
+            .unwrap_err();
+        let err = store
+            .authenticate("node-rl2", "arc_disk_WRONG")
+            .unwrap_err();
+        assert!(matches!(err, AuthError::RateLimited { .. }));
     }
 
     #[test]

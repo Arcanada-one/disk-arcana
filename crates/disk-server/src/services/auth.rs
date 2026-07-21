@@ -72,6 +72,11 @@ impl AuthService for AuthServiceImpl {
             Err(crate::auth::storage::AuthError::Unauthenticated) => {
                 Err(Status::unauthenticated("invalid node_id or api_key"))
             }
+            Err(crate::auth::storage::AuthError::RateLimited {
+                retry_after_secs,
+            }) => Err(Status::resource_exhausted(format!(
+                "too many failed auth attempts; retry after {retry_after_secs}s"
+            ))),
             Err(e) => Err(Status::internal(e.to_string())),
         }
     }
@@ -164,6 +169,44 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.code(), tonic::Code::Unauthenticated);
+    }
+
+    #[tokio::test]
+    async fn authenticate_rate_limited_after_repeated_failures() {
+        use std::sync::Arc;
+        use std::time::Duration;
+
+        use crate::auth::rate_limit::AuthAttemptLimiter;
+
+        let limiter = Arc::new(AuthAttemptLimiter::new(3, Duration::from_secs(60)));
+        let store = AuthStore::with_rate_limiter(Some(limiter));
+        let svc = AuthServiceImpl::new(store);
+        svc.register_node(Request::new(NodeRegisterRequest {
+            node_id: "rl-node".into(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap();
+
+        for _ in 0..3 {
+            let err = svc
+                .authenticate(Request::new(NodeAuthRequest {
+                    node_id: "rl-node".into(),
+                    api_key: "arc_disk_WRONG".into(),
+                }))
+                .await
+                .unwrap_err();
+            assert_eq!(err.code(), tonic::Code::Unauthenticated);
+        }
+
+        let err = svc
+            .authenticate(Request::new(NodeAuthRequest {
+                node_id: "rl-node".into(),
+                api_key: "arc_disk_WRONG".into(),
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), tonic::Code::ResourceExhausted);
     }
 
     #[tokio::test]
