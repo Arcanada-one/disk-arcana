@@ -5,6 +5,7 @@ mod commands;
 mod daemon;
 mod paths;
 mod share_init;
+mod sharing_cmd;
 mod snapshots_cmd;
 mod trash_cmd;
 mod vault;
@@ -83,6 +84,9 @@ enum Command {
 
     /// Recycle bin — list and restore soft-deleted files (DISK-0024).
     Trash(TrashArgs),
+
+    /// Vault sharing — invite links and collaborator RBAC (DISK-0022).
+    Sharing(SharingArgs),
 }
 
 /// `disk daemon <subcmd>` — wrapper.
@@ -486,6 +490,107 @@ pub struct TrashEmptyArgs {
     pub token: Option<String>,
 }
 
+/// `disk sharing <subcmd>` — vault invite links and collaborator RBAC.
+#[derive(clap::Args, Debug)]
+pub struct SharingArgs {
+    #[command(subcommand)]
+    pub command: SharingCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SharingCommand {
+    /// Manage vault invite links.
+    Invites(SharingInvitesArgs),
+    /// List or revoke vault collaborators.
+    Members(SharingMembersArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct SharingInvitesArgs {
+    #[command(subcommand)]
+    pub command: SharingInvitesCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SharingInvitesCommand {
+    /// Create a new invite link for a vault.
+    Create(SharingInviteCreateArgs),
+    /// List pending invites for a vault.
+    List(SharingInviteListArgs),
+    /// Accept an invite token.
+    Accept(SharingInviteAcceptArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct SharingInviteCreateArgs {
+    #[arg(long, default_value = "default")]
+    pub vault: String,
+    #[arg(long, default_value = "viewer")]
+    pub role: String,
+    #[arg(long, default_value_t = 168)]
+    pub ttl_hours: u32,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct SharingInviteListArgs {
+    #[arg(long, default_value = "default")]
+    pub vault: String,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct SharingInviteAcceptArgs {
+    #[arg(long)]
+    pub invite_token: String,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct SharingMembersArgs {
+    #[command(subcommand)]
+    pub command: SharingMembersCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SharingMembersCommand {
+    /// List external collaborators on a vault.
+    List(SharingMembersListArgs),
+    /// Revoke a collaborator.
+    Remove(SharingMembersRemoveArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct SharingMembersListArgs {
+    #[arg(long, default_value = "default")]
+    pub vault: String,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct SharingMembersRemoveArgs {
+    #[arg(long)]
+    pub user: String,
+    #[arg(long, default_value = "default")]
+    pub vault: String,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
 /// `disk share <subcmd>` — wrapper for share management subcommands.
 #[derive(clap::Args, Debug)]
 pub struct ShareArgs {
@@ -804,6 +909,47 @@ async fn main() -> Result<()> {
                 trash_cmd::run_trash_empty(e.api.as_deref(), e.token.as_deref(), &e.vault, e.yes)
                     .await
             }
+        },
+        Some(Command::Sharing(args)) => match args.command {
+            SharingCommand::Invites(i) => match i.command {
+                SharingInvitesCommand::Create(c) => {
+                    sharing_cmd::run_invite_create(
+                        c.api.as_deref(),
+                        c.token.as_deref(),
+                        &c.vault,
+                        &c.role,
+                        c.ttl_hours,
+                    )
+                    .await
+                }
+                SharingInvitesCommand::List(l) => {
+                    sharing_cmd::run_invite_list(l.api.as_deref(), l.token.as_deref(), &l.vault)
+                        .await
+                }
+                SharingInvitesCommand::Accept(a) => {
+                    sharing_cmd::run_invite_accept(
+                        a.api.as_deref(),
+                        a.token.as_deref(),
+                        &a.invite_token,
+                    )
+                    .await
+                }
+            },
+            SharingCommand::Members(m) => match m.command {
+                SharingMembersCommand::List(l) => {
+                    sharing_cmd::run_members_list(l.api.as_deref(), l.token.as_deref(), &l.vault)
+                        .await
+                }
+                SharingMembersCommand::Remove(r) => {
+                    sharing_cmd::run_member_remove(
+                        r.api.as_deref(),
+                        r.token.as_deref(),
+                        &r.vault,
+                        &r.user,
+                    )
+                    .await
+                }
+            },
         },
         None => {
             let version = env!("CARGO_PKG_VERSION");
