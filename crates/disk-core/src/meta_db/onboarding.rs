@@ -77,18 +77,18 @@ impl MetaDb {
     }
 }
 
+fn unix_now_secs() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
     use tempfile::tempdir;
-
-    fn unix_now_secs() -> i64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64
-    }
 
     #[tokio::test]
     async fn onboarding_defaults_not_dismissed() {
@@ -126,12 +126,4 @@ mod tests {
         assert!(!cleared.dismissed);
         assert!(cleared.dismissed_at.is_none());
     }
-}
-
-fn unix_now_secs() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64
 }
