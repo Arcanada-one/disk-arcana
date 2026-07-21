@@ -1,12 +1,17 @@
 # DISK-0016 — Auth & Accounts scaffold
 
-**Status:** slice 4 on DEVS — Auth Arcana JWKS verification, retire interim JWT in `auth_arcana` mode.  
+**Status:** slice 5 on DEVS — Auth Arcana session continuity (refresh token + OAuth password path).  
 **Parent:** DISK-0001 commercial / SaaS track.  
 **Tracking:** DISK-0016 in Datarim backlog.
 
 > **Interim auth.** Local `user_accounts` + HS256 JWT until Auth Arcana JWKS
 > verification retires interim signing (`DISK_JWT_MODE=auth_arcana`). OAuth providers route through
 > Auth Arcana per ecosystem mandate — no direct Google/GitHub integrations.
+>
+> **ROPC / device flow:** Auth Arcana 2.1 explicitly deprecates ROPC (`grant_type=password`).
+> Password authentication in `auth_arcana` mode uses the OIDC authorization-code flow via
+> `/auth/oauth/start` (user enters credentials on Auth Arcana). Device authorization grant is
+> deferred until Auth Arcana ships it.
 
 ## Scope
 
@@ -15,8 +20,8 @@
 | 1 (merged #68) | `user_accounts`, Argon2id passwords, HS256 JWT, `/auth/signup\|login\|me` | OAuth, email verify, Auth Arcana |
 | 2 (merged #69) | OAuth columns, `stub` + `auth_arcana` modes, `/auth/oauth/start\|callback` | Email verify, JWKS retire |
 | 3 (merged #70) | HMAC verification tokens, `/auth/verify-email`, `/auth/resend-verification` | SMTP delivery, Auth Arcana |
-| 4 (this PR) | `DISK_JWT_MODE`, JWKS cache + verify, OAuth token passthrough | SMTP, DISK-0018 billing |
-| 5+ | Full password auth via Auth Arcana (ROPC/device) | — |
+| 4 (merged #71) | `DISK_JWT_MODE`, JWKS cache + verify, OAuth token passthrough | SMTP, DISK-0018 billing |
+| 5 (this PR) | `refresh_token` passthrough, `POST /auth/refresh`, password→OAuth redirect hints | ROPC, device flow (blocked on Auth Arcana) |
 
 ## HTTP API
 
@@ -28,7 +33,17 @@
 | POST | `/auth/login` | `{ email, password }` | `200` + Bearer token |
 | GET | `/auth/me` | `Authorization: Bearer` | `200` + user profile |
 
-Password signup/login return `403` when `DISK_JWT_MODE=auth_arcana` (use OAuth).
+Password signup/login return `403` when `DISK_JWT_MODE=auth_arcana` — use `/auth/oauth/start` instead.
+
+### Slice 5 (session continuity)
+
+| Method | Path | Body | Response |
+|--------|------|------|----------|
+| POST | `/auth/refresh` | `{ refresh_token }` | `200` + new Bearer token (+ rotated `refresh_token` when IdP rotates) |
+
+- Mounted only when `DISK_OAUTH_MODE=auth_arcana` **and** `DISK_JWT_MODE` is `auth_arcana` or `dual`.
+- OAuth callback includes `refresh_token` when Auth Arcana returns one.
+- Proxies `grant_type=refresh_token` to Auth Arcana token endpoint; verifies new access token via JWKS before responding.
 
 ### Slice 2 (OAuth)
 
@@ -99,6 +114,8 @@ DISK_EMAIL_VERIFY_TTL_SECS=86400            # optional, default 24h
 - `crates/disk-server/src/accounts/oauth.rs` — stub code + state HMAC unit tests
 - `crates/disk-server/src/accounts/email_verify.rs` — verification token HMAC unit tests
 - `crates/disk-server/src/accounts/jwt_service.rs` — JWT mode unit tests
+- `crates/disk-server/src/accounts/oidc_client.rs` — OIDC discovery + refresh grant
+- `crates/disk-server/src/accounts/token_refresh.rs` — refresh handler
 - `crates/disk-server/src/accounts/routes.rs` — `integration_tests` HTTP round-trips
 
 ## References
@@ -107,4 +124,6 @@ DISK_EMAIL_VERIFY_TTL_SECS=86400            # optional, default 24h
 - `crates/disk-server/src/accounts/oauth.rs`
 - `crates/disk-server/src/accounts/email_verify.rs`
 - `crates/disk-server/src/accounts/jwt_service.rs`
+- `crates/disk-server/src/accounts/oidc_client.rs`
+- `crates/disk-server/src/accounts/token_refresh.rs`
 - `documentation/mandates/auth-arcana-mandate.md` § JWKS

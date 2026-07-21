@@ -6,6 +6,7 @@
 //! - `POST /auth/signup`, `POST /auth/login`, `GET /auth/me` — DISK-0016 (when auth=enforce)
 //! - `GET /auth/oauth/start`, `GET /auth/oauth/callback` — DISK-0016 slice 2 (when oauth active)
 //! - `GET /auth/verify-email`, `POST /auth/resend-verification` — DISK-0016 slice 3 (when email verify active)
+//! - `POST /auth/refresh` — DISK-0016 slice 5 (when oauth=auth_arcana + jwt JWKS mode)
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -15,7 +16,9 @@ use axum::{Json, Router};
 use serde_json::{json, Value};
 
 use crate::accounts::routes::{login, me, signup, AuthHttpState};
-use crate::accounts::{oauth_callback, oauth_start, resend_verification, verify_email};
+use crate::accounts::{
+    oauth_callback, oauth_start, refresh_token, resend_verification, verify_email,
+};
 use crate::billing::webhook::{stripe_webhook, WebhookState};
 
 /// Start the health HTTP server. Returns an error if the bind fails; otherwise
@@ -42,6 +45,11 @@ pub async fn serve(
             auth_router = auth_router
                 .route("/auth/oauth/start", get(oauth_start))
                 .route("/auth/oauth/callback", get(oauth_callback));
+        }
+        if state.oauth.mode == crate::accounts::OAuthMode::AuthArcana
+            && state.jwt.mode.allows_jwks_verify()
+        {
+            auth_router = auth_router.route("/auth/refresh", post(refresh_token));
         }
         if state.email_verify.mode.is_active() {
             auth_router = auth_router

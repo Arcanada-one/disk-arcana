@@ -21,6 +21,7 @@ use sha2::Sha256;
 
 use super::jwt_mode::JwtMode;
 use super::oauth_mode::OAuthMode;
+use super::oidc_client::fetch_oidc_discovery;
 use super::routes::{
     build_external_token_response, build_token_response, AuthHttpState, AuthTokenResponse,
 };
@@ -61,6 +62,24 @@ struct OAuthExchange {
     identity: OAuthIdentity,
     access_token: Option<String>,
     expires_in: Option<u64>,
+    refresh_token: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct OAuthSessionOutcome {
+    access_token: Option<String>,
+    expires_in: Option<u64>,
+    refresh_token: Option<String>,
+}
+
+impl From<OAuthExchange> for OAuthSessionOutcome {
+    fn from(exchange: OAuthExchange) -> Self {
+        Self {
+            access_token: exchange.access_token,
+            expires_in: exchange.expires_in,
+            refresh_token: exchange.refresh_token,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -127,6 +146,7 @@ async fn oauth_callback_inner(
             identity: parse_stub_code(&query.code)?,
             access_token: None,
             expires_in: None,
+            refresh_token: None,
         },
         OAuthMode::AuthArcana => {
             let state_param = query
@@ -198,10 +218,6 @@ async fn exchange_auth_arcana_code(
     state: &AuthHttpState,
     code: &str,
 ) -> Result<OAuthExchange, (StatusCode, &'static str)> {
-    let issuer = state.oauth.issuer.as_deref().ok_or((
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "oauth issuer not configured",
-    ))?;
     let client_id = state.oauth.client_id.as_deref().ok_or((
         StatusCode::INTERNAL_SERVER_ERROR,
         "oauth client_id not configured",
@@ -215,28 +231,10 @@ async fn exchange_auth_arcana_code(
         "oauth redirect_uri not configured",
     ))?;
 
-    let issuer = issuer.trim_end_matches('/');
-    let discovery_url = format!("{issuer}/.well-known/openid-configuration");
-    let discovery: serde_json::Value = reqwest::Client::new()
-        .get(&discovery_url)
-        .send()
-        .await
-        .map_err(|_| (StatusCode::BAD_GATEWAY, "oidc discovery failed"))?
-        .error_for_status()
-        .map_err(|_| (StatusCode::BAD_GATEWAY, "oidc discovery failed"))?
-        .json()
-        .await
-        .map_err(|_| (StatusCode::BAD_GATEWAY, "oidc discovery invalid"))?;
-
-    let token_endpoint = discovery["token_endpoint"]
-        .as_str()
-        .ok_or((StatusCode::BAD_GATEWAY, "oidc token_endpoint missing"))?;
-    let userinfo_endpoint = discovery["userinfo_endpoint"]
-        .as_str()
-        .ok_or((StatusCode::BAD_GATEWAY, "oidc userinfo_endpoint missing"))?;
+    let discovery = fetch_oidc_discovery(&state.oauth).await?;
 
     let token_resp: serde_json::Value = reqwest::Client::new()
-        .post(token_endpoint)
+        .post(&discovery.token_endpoint)
         .form(&[
             ("grant_type", "authorization_code"),
             ("code", code),
@@ -258,9 +256,10 @@ async fn exchange_auth_arcana_code(
         .ok_or((StatusCode::BAD_GATEWAY, "access_token missing"))?
         .to_owned();
     let expires_in = token_resp["expires_in"].as_u64();
+    let refresh_token = token_resp["refresh_token"].as_str().map(str::to_owned);
 
     let userinfo: serde_json::Value = reqwest::Client::new()
-        .get(userinfo_endpoint)
+        .get(&discovery.userinfo_endpoint)
         .bearer_auth(&access_token)
         .send()
         .await
@@ -290,6 +289,7 @@ async fn exchange_auth_arcana_code(
         },
         access_token: Some(access_token),
         expires_in,
+        refresh_token,
     })
 }
 
@@ -301,7 +301,13 @@ async fn login_or_create_oauth_user(
         identity,
         access_token,
         expires_in,
+        refresh_token,
     } = exchange;
+    let session = OAuthSessionOutcome {
+        access_token,
+        expires_in,
+        refresh_token,
+    };
     if !validate_email(&identity.email) {
         return Err((StatusCode::BAD_REQUEST, "invalid email from oauth"));
     }
@@ -318,8 +324,7 @@ async fn login_or_create_oauth_user(
             &user.email,
             &user.tenant_id,
             user.email_verified,
-            access_token.clone(),
-            expires_in,
+            &session,
         );
     }
 
@@ -354,8 +359,7 @@ async fn login_or_create_oauth_user(
                     &user.email,
                     &user.tenant_id,
                     user.email_verified,
-                    access_token.clone(),
-                    expires_in,
+                    &session,
                 );
             }
             return Err((StatusCode::CONFLICT, "email already registered"));
@@ -374,8 +378,7 @@ async fn login_or_create_oauth_user(
         &identity.email,
         &tenant_id,
         identity.email_verified,
-        access_token,
-        expires_in,
+        &session,
     )
 }
 
@@ -385,12 +388,11 @@ fn finish_oauth_login(
     email: &str,
     tenant_id: &str,
     email_verified: bool,
-    access_token: Option<String>,
-    expires_in: Option<u64>,
+    session: &OAuthSessionOutcome,
 ) -> Result<AuthTokenResponse, (StatusCode, &'static str)> {
     if state.jwt.mode == JwtMode::AuthArcana {
-        if let Some(token) = access_token {
-            let expires = expires_in.unwrap_or(state.jwt.token_ttl_secs);
+        if let Some(token) = session.access_token.clone() {
+            let expires = session.expires_in.unwrap_or(state.jwt.token_ttl_secs);
             return Ok(build_external_token_response(
                 token,
                 expires,
@@ -398,6 +400,7 @@ fn finish_oauth_login(
                 email,
                 tenant_id,
                 email_verified,
+                session.refresh_token.clone(),
             ));
         }
     }

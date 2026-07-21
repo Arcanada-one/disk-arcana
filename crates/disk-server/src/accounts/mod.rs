@@ -8,7 +8,9 @@ mod jwt_service;
 mod mode;
 mod oauth;
 mod oauth_mode;
+mod oidc_client;
 pub mod routes;
+mod token_refresh;
 
 pub use email_verify::{
     deliver_verification, resend_verification, verify_email, EmailVerifyConfig,
@@ -21,3 +23,4 @@ pub use jwt_service::{JwtConfig, VerifiedAccess};
 pub use mode::AuthMode;
 pub use oauth::{oauth_callback, oauth_start, OAuthConfig};
 pub use oauth_mode::OAuthMode;
+pub use token_refresh::refresh_token;
