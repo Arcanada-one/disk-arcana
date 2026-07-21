@@ -5,6 +5,7 @@ mod commands;
 mod daemon;
 mod paths;
 mod share_init;
+mod snapshots_cmd;
 mod vault;
 mod versions_cmd;
 
@@ -75,6 +76,9 @@ enum Command {
 
     /// File version history — list and restore via health HTTP API (DISK-0020).
     Versions(VersionsArgs),
+
+    /// Point-in-time vault snapshots (DISK-0020 slice 4).
+    Snapshots(SnapshotsArgs),
 }
 
 /// `disk daemon <subcmd>` — wrapper.
@@ -339,6 +343,75 @@ pub struct VersionsRestoreArgs {
     pub token: Option<String>,
 }
 
+/// `disk snapshots <subcmd>` — vault-wide point-in-time captures.
+#[derive(clap::Args, Debug)]
+pub struct SnapshotsArgs {
+    #[command(subcommand)]
+    pub command: SnapshotsCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SnapshotsCommand {
+    /// Capture the current vault file index as a snapshot.
+    Create(SnapshotsCreateArgs),
+    /// List snapshots for a vault.
+    List(SnapshotsListArgs),
+    /// Show one snapshot and its file index.
+    Show(SnapshotsShowArgs),
+    /// Restore all live files from a snapshot.
+    Restore(SnapshotsRestoreArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct SnapshotsCreateArgs {
+    #[arg(long, default_value = "default")]
+    pub vault: String,
+    #[arg(long)]
+    pub label: Option<String>,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct SnapshotsListArgs {
+    #[arg(long, default_value = "default")]
+    pub vault: String,
+    #[arg(long, default_value_t = 20)]
+    pub limit: u32,
+    #[arg(long, default_value_t = 0)]
+    pub offset: u32,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct SnapshotsShowArgs {
+    #[arg(long)]
+    pub id: u64,
+    #[arg(long, default_value = "default")]
+    pub vault: String,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct SnapshotsRestoreArgs {
+    #[arg(long)]
+    pub id: u64,
+    #[arg(long, default_value = "default")]
+    pub vault: String,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
 /// `disk share <subcmd>` — wrapper for share management subcommands.
 #[derive(clap::Args, Debug)]
 pub struct ShareArgs {
@@ -586,6 +659,45 @@ async fn main() -> Result<()> {
                     &r.path,
                     &r.vault,
                     r.version_id,
+                )
+                .await
+            }
+        },
+        Some(Command::Snapshots(args)) => match args.command {
+            SnapshotsCommand::Create(c) => {
+                snapshots_cmd::run_snapshots_create(
+                    c.api.as_deref(),
+                    c.token.as_deref(),
+                    &c.vault,
+                    c.label.as_deref(),
+                )
+                .await
+            }
+            SnapshotsCommand::List(l) => {
+                snapshots_cmd::run_snapshots_list(
+                    l.api.as_deref(),
+                    l.token.as_deref(),
+                    &l.vault,
+                    l.limit,
+                    l.offset,
+                )
+                .await
+            }
+            SnapshotsCommand::Show(s) => {
+                snapshots_cmd::run_snapshots_show(
+                    s.api.as_deref(),
+                    s.token.as_deref(),
+                    &s.vault,
+                    s.id,
+                )
+                .await
+            }
+            SnapshotsCommand::Restore(r) => {
+                snapshots_cmd::run_snapshots_restore(
+                    r.api.as_deref(),
+                    r.token.as_deref(),
+                    &r.vault,
+                    r.id,
                 )
                 .await
             }
@@ -1250,6 +1362,29 @@ node_id_hint = "from-bf"
                 assert_eq!(r.version_id, 3);
             }
             other => panic!("expected versions restore, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_snapshots_create() {
+        let cli = Cli::try_parse_from([
+            "disk",
+            "snapshots",
+            "create",
+            "--vault",
+            "wiki",
+            "--label",
+            "cutover",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Command::Snapshots(SnapshotsArgs {
+                command: SnapshotsCommand::Create(c),
+            })) => {
+                assert_eq!(c.vault, "wiki");
+                assert_eq!(c.label.as_deref(), Some("cutover"));
+            }
+            other => panic!("expected snapshots create, got {other:?}"),
         }
     }
 

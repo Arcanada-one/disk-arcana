@@ -417,3 +417,24 @@ async fn migration_014_file_versions_table_exists() {
         "file_versions table must exist after migration 014; got {tables:?}"
     );
 }
+
+#[tokio::test]
+async fn migration_015_vault_snapshots_tables_exist() {
+    let dir = tempdir().expect("tempdir");
+    let db = MetaDb::open(&dir.path().join("vault-snapshots-schema.sqlite"))
+        .await
+        .expect("open");
+
+    let tables: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .fetch_all(db.pool())
+            .await
+            .expect("sqlite_master");
+
+    for required in ["vault_snapshots", "vault_snapshot_files"] {
+        assert!(
+            tables.iter().any(|t| t == required),
+            "{required} table must exist after migration 015; got {tables:?}"
+        );
+    }
+}

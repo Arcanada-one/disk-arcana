@@ -20,6 +20,7 @@ pub mod middleware;
 pub mod multi_node;
 pub mod publisher;
 pub mod services;
+pub mod snapshots;
 pub mod tls;
 pub mod versions;
 
@@ -50,6 +51,7 @@ pub use publisher::{
     PublisherVerifier, StubKeyFetcher, VerifyError,
 };
 pub use services::{AuthServiceImpl, SyncServiceImpl};
+pub use snapshots::{create_snapshot, get_snapshot, list_snapshots, restore_snapshot};
 pub use tls::{
     build_mtls_from_files, tls13_mtls_server_config, CertProvider, DevSelfSignedMtlsProvider,
     DevSelfSignedProvider, StaticPemProvider, TlsError,

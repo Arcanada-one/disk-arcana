@@ -13,6 +13,7 @@ mod dashboard;
 mod files;
 mod node_baseline;
 mod nodes;
+mod snapshots;
 mod tombstones;
 mod versions;
 
@@ -27,6 +28,7 @@ use sqlx::{
 use crate::error::MetaDbError;
 
 pub use accounts::{NewOAuthUser, UserAccount};
+pub use snapshots::{VaultSnapshotFileRow, VaultSnapshotRow};
 pub use versions::{FileVersionRow, FileVersionUpsert};
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
