@@ -248,13 +248,7 @@ mod integration_tests {
     use tempfile::tempdir;
     use tokio::net::TcpListener;
 
-    use super::*;
-    use crate::accounts::{
-        EmailVerifyConfig, EmailVerifyMode, JwksCache, JwtConfig, JwtMode, OAuthConfig, OAuthMode,
-    };
     use crate::health;
-
-    const TEST_KEY: &str = "01234567890123456789012345678901";
 
     async fn with_dashboard_server<F, Fut>(meta_db: MetaDb, exercise: F)
     where
