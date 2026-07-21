@@ -84,7 +84,9 @@ mod tests {
     #[tokio::test]
     async fn scheduled_prune_removes_expired_rows() {
         let dir = tempdir().unwrap();
-        let meta_db = MetaDb::open(&dir.path().join("sched.sqlite")).await.unwrap();
+        let meta_db = MetaDb::open(&dir.path().join("sched.sqlite"))
+            .await
+            .unwrap();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
@@ -92,7 +94,11 @@ mod tests {
         let retention = PlanTier::Free.trash_retention();
 
         meta_db
-            .upsert_file_scoped(Some("corp"), "default", &deleted("old.md", now - retention.max_age_secs - 10))
+            .upsert_file_scoped(
+                Some("corp"),
+                "default",
+                &deleted("old.md", now - retention.max_age_secs - 10),
+            )
             .await
             .unwrap();
         meta_db
@@ -100,9 +106,7 @@ mod tests {
             .await
             .unwrap();
 
-        let state = Arc::new(crate::accounts::routes::auth_http_state_for_tests(
-            meta_db,
-        ));
+        let state = Arc::new(crate::accounts::routes::auth_http_state_for_tests(meta_db));
 
         let pruned = prune_all_tenants(&state).await.unwrap();
         assert_eq!(pruned, 1);

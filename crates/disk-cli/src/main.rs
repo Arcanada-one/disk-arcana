@@ -797,22 +797,12 @@ async fn main() -> Result<()> {
                 .await
             }
             TrashCommand::Delete(d) => {
-                trash_cmd::run_trash_delete(
-                    d.api.as_deref(),
-                    d.token.as_deref(),
-                    &d.vault,
-                    &d.path,
-                )
-                .await
+                trash_cmd::run_trash_delete(d.api.as_deref(), d.token.as_deref(), &d.vault, &d.path)
+                    .await
             }
             TrashCommand::Empty(e) => {
-                trash_cmd::run_trash_empty(
-                    e.api.as_deref(),
-                    e.token.as_deref(),
-                    &e.vault,
-                    e.yes,
-                )
-                .await
+                trash_cmd::run_trash_empty(e.api.as_deref(), e.token.as_deref(), &e.vault, e.yes)
+                    .await
             }
         },
         None => {

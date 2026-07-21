@@ -202,9 +202,6 @@ pub async fn run_trash_empty(
         serde_json::json!({ "vault_id": vault, "confirm": true }),
     )
     .await?;
-    println!(
-        "{}",
-        data["message"].as_str().unwrap_or("trash emptied")
-    );
+    println!("{}", data["message"].as_str().unwrap_or("trash emptied"));
     Ok(())
 }
