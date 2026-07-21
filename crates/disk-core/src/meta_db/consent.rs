@@ -10,6 +10,8 @@ pub const TERMS_POLICY_VERSION: &str = "1.0";
 pub const PRIVACY_POLICY_VERSION: &str = "1.0";
 pub const CONSENT_TYPE_TERMS: &str = "terms_of_service";
 pub const CONSENT_TYPE_PRIVACY: &str = "privacy_policy";
+pub const CONSENT_TYPE_ANALYTICS: &str = "product_analytics";
+pub const ANALYTICS_POLICY_VERSION: &str = "1.0";
 
 /// One recorded consent event.
 #[derive(Debug, Clone, PartialEq, Eq)]

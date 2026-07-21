@@ -24,6 +24,7 @@ pub mod selective_sync;
 pub mod services;
 pub mod sharing;
 pub mod snapshots;
+pub mod telemetry;
 pub mod tls;
 pub mod trash;
 pub mod versions;
@@ -57,6 +58,7 @@ pub use publisher::{
 };
 pub use services::{AuthServiceImpl, SyncServiceImpl};
 pub use snapshots::{create_snapshot, get_snapshot, list_snapshots, restore_snapshot};
+pub use telemetry::{get_telemetry, get_telemetry_config, put_telemetry};
 pub use tls::{
     build_mtls_from_files, tls13_mtls_server_config, CertProvider, DevSelfSignedMtlsProvider,
     DevSelfSignedProvider, StaticPemProvider, TlsError,

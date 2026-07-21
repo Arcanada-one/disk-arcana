@@ -476,3 +476,22 @@ async fn migration_018_user_onboarding_table_exists() {
         "user_onboarding table must exist after migration 018; got {tables:?}"
     );
 }
+
+#[tokio::test]
+async fn migration_019_user_telemetry_table_exists() {
+    let dir = tempdir().expect("tempdir");
+    let db = MetaDb::open(&dir.path().join("telemetry-schema.sqlite"))
+        .await
+        .expect("open");
+
+    let tables: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .fetch_all(db.pool())
+            .await
+            .expect("sqlite_master");
+
+    assert!(
+        tables.iter().any(|t| t == "user_telemetry"),
+        "user_telemetry table must exist after migration 019; got {tables:?}"
+    );
+}
