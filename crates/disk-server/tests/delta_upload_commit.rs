@@ -318,6 +318,8 @@ async fn v_ac_5_pull_server_file_to_client() {
         deleted_at: None,
         node_id: "server-test".into(),
         encryption_nonce: None,
+        version_id: None,
+        parent_version_id: None,
     };
     meta_db.upsert_file(&file_meta).await.unwrap();
 

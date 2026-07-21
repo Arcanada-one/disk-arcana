@@ -24,13 +24,14 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use tonic::{Request, Response, Status, Streaming};
 
-use disk_core::meta_db::MetaDb;
+use disk_core::billing::{PlanTier, VersionRetention};
+use disk_core::meta_db::{FileVersionUpsert, MetaDb};
 use disk_core::path_guard;
 use disk_core::reconciler::ReconciliationEngine;
 use disk_core::tenant::enforce_node_tenant;
 use disk_core::types::{ActionType, FileMeta};
 use disk_core::vector_clock::VectorClock;
-use disk_core::TenantMetaRouter;
+use disk_core::{ContentBlobStore, TenantMetaRouter};
 use disk_proto::disk::{
     sync_service_server::SyncService, AclMismatchDetails, DeltaChunk, DeltaDownloadRequest,
     DeltaUploadRequest, DeltaUploadResponse, FileMetadata, SyncStateAck, SyncStateRequest,
@@ -82,11 +83,14 @@ pub struct SyncServiceImpl {
     pub publisher_verifier: Option<Arc<PublisherVerifier>>,
     /// Storage quota gate (DISK-0018). When `Some`, `DeltaUpload` checks plan limits.
     pub quota_enforcer: Option<QuotaEnforcer>,
+    /// Content-addressed store for superseded file bytes (DISK-0020).
+    pub version_blobs: ContentBlobStore,
 }
 
 impl SyncServiceImpl {
     /// Construct without ACL enforcement (legacy/test mode).
     pub fn new(store: AuthStore, root: std::path::PathBuf) -> Self {
+        let version_blobs = ContentBlobStore::new(root.join(".version-blobs"));
         Self {
             store,
             replay: Arc::new(ReplayGuard::new()),
@@ -98,6 +102,7 @@ impl SyncServiceImpl {
             #[cfg(feature = "publisher-verify")]
             publisher_verifier: None,
             quota_enforcer: None,
+            version_blobs,
         }
     }
 
@@ -108,6 +113,7 @@ impl SyncServiceImpl {
         acl_enforcer: AclEnforcer,
         audit: AuditEmitter,
     ) -> Self {
+        let version_blobs = ContentBlobStore::new(root.join(".version-blobs"));
         Self {
             store,
             replay: Arc::new(ReplayGuard::new()),
@@ -119,6 +125,7 @@ impl SyncServiceImpl {
             #[cfg(feature = "publisher-verify")]
             publisher_verifier: None,
             quota_enforcer: None,
+            version_blobs,
         }
     }
 
@@ -157,6 +164,20 @@ impl SyncServiceImpl {
     pub fn with_quota_enforcer(mut self, enforcer: QuotaEnforcer) -> Self {
         self.quota_enforcer = Some(enforcer);
         self
+    }
+
+    async fn version_retention_for_tenant(&self, tenant_id: Option<&str>) -> VersionRetention {
+        if let Some(enforcer) = &self.quota_enforcer {
+            let tier = enforcer
+                .router
+                .control()
+                .get_plan_tier(tenant_id, enforcer.default_tier)
+                .await
+                .unwrap_or(enforcer.default_tier);
+            tier.version_retention()
+        } else {
+            PlanTier::Free.version_retention()
+        }
     }
 
     /// Extract and validate the bearer session token from metadata.
@@ -554,6 +575,22 @@ impl SyncService for SyncServiceImpl {
             let target = path_guard::validate(candidate, &self.root)
                 .map_err(|e| Status::invalid_argument(format!("path guard: {e}")))?;
 
+            // Archive superseded bytes before overwrite (DISK-0020).
+            if target.exists() {
+                if let Ok(old_bytes) = std::fs::read(&target) {
+                    if let Some(ref router) = self.meta_router {
+                        if let Ok(db) = router.tenant_data(tenant.as_deref()).await {
+                            if let Ok(Some(old_meta)) = db
+                                .get_file_scoped(tenant.as_deref(), &share, file_path)
+                                .await
+                            {
+                                let _ = self.version_blobs.put(&old_meta.content_hash, &old_bytes);
+                            }
+                        }
+                    }
+                }
+            }
+
             // Ensure parent directory exists.
             if let Some(parent) = target.parent() {
                 std::fs::create_dir_all(parent)
@@ -626,11 +663,18 @@ impl SyncService for SyncServiceImpl {
                     deleted_at: None,
                     node_id: self.server_node_id.clone(),
                     encryption_nonce: None,
+                    version_id: None,
+                    parent_version_id: None,
+                };
+                let retention = self.version_retention_for_tenant(tenant.as_deref()).await;
+                let ctx = FileVersionUpsert {
+                    created_by: self.server_node_id.clone(),
+                    retention,
                 };
                 // Upsert failure is non-fatal: bytes are durable; next sync
                 // rebuilds the row from disk (convergent recovery).
                 let _ = db
-                    .upsert_file_scoped(tenant.as_deref(), &share, &meta)
+                    .upsert_file_scoped_versioned(tenant.as_deref(), &share, &meta, &ctx)
                     .await;
             }
         }
@@ -1057,6 +1101,16 @@ fn proto_to_file_meta(m: &FileMetadata) -> FileMeta {
         } else {
             Some(m.encryption_nonce.clone())
         },
+        version_id: if m.version_id == 0 {
+            None
+        } else {
+            Some(m.version_id)
+        },
+        parent_version_id: if m.parent_version_id == 0 {
+            None
+        } else {
+            Some(m.parent_version_id)
+        },
     }
 }
 
@@ -1226,6 +1280,8 @@ mod tests {
             deleted_at: None,
             node_id: "server".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         };
         db.upsert_file(&meta).await.unwrap();
 
@@ -1417,6 +1473,8 @@ mod tests {
             deleted_at: None,
             node_id: "server".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         };
         svc.meta_router
             .as_ref()
@@ -1468,6 +1526,8 @@ mod tests {
             deleted_at: None,
             node_id: "server".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         };
         // require_auth returns the node_label used at register_node time ("vac4-node").
         svc.meta_router
@@ -1534,6 +1594,8 @@ mod tests {
             deleted_at: Some(1_700_000_001),
             node_id: "server".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         };
         let db = svc.meta_router.as_ref().unwrap().control();
         db.upsert_file(&server_tomb).await.unwrap();
@@ -1604,6 +1666,8 @@ mod tests {
             deleted_at: None,
             node_id: "server".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         };
         let db = svc.meta_router.as_ref().unwrap().control();
         db.upsert_file(&file_meta).await.unwrap();
@@ -1683,6 +1747,8 @@ mod tests {
             deleted_at: None,
             node_id: "server".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         };
 
         let db_ref = svc.meta_router.as_ref().unwrap().control();
@@ -1777,6 +1843,8 @@ mod tests {
             deleted_at: None,
             node_id: "server".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         };
         let db_ref = svc.meta_router.as_ref().unwrap().control();
         // Server tombstone already in place (simulates fan-out already applied).
@@ -1874,6 +1942,8 @@ mod tests {
             deleted_at: None,
             node_id: "server".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         };
         let db = svc.meta_router.as_ref().unwrap().control();
         db.upsert_file(&synced_meta).await.unwrap();
@@ -1949,6 +2019,8 @@ mod tests {
             deleted_at: None,
             node_id: "server".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         };
         db_ref.upsert_file(&server_recreated).await.unwrap();
 
@@ -1964,6 +2036,8 @@ mod tests {
             deleted_at: Some(1_700_000_001),
             node_id: "server".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         };
         db_ref
             .upsert_node_baselines("rec-c", "default", &[c_baseline_tomb])
@@ -2044,6 +2118,8 @@ mod tests {
             deleted_at: None,
             node_id: "server".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         };
         db_ref.upsert_file(&server_recreated).await.unwrap();
 
@@ -2059,6 +2135,8 @@ mod tests {
             deleted_at: Some(1_700_000_001),
             node_id: "server".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         };
         db_ref
             .upsert_node_baselines("loss-c", "default", &[c_tomb_baseline])
@@ -2118,6 +2196,8 @@ mod tests {
             deleted_at: None,
             node_id: "server".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         }];
         let remote_client = vec![disk_core::types::FileMeta {
             path: std::path::PathBuf::from("vault/note.md"),
@@ -2130,6 +2210,8 @@ mod tests {
             deleted_at: None,
             node_id: "loss-c".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         }];
         let indexed_tomb = vec![disk_core::types::FileMeta {
             path: std::path::PathBuf::from("vault/note.md"),
@@ -2142,6 +2224,8 @@ mod tests {
             deleted_at: Some(1_700_000_001),
             node_id: "server".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         }];
         let actions = engine
             .reconcile(&local_server, &remote_client, &indexed_tomb)
@@ -2197,6 +2281,8 @@ mod tests {
             deleted_at: None,
             node_id: "server".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         };
         svc.meta_router
             .as_ref()
@@ -2219,6 +2305,8 @@ mod tests {
             deleted_at: None,
             node_id: "ct-node".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         };
         svc.meta_router
             .as_ref()

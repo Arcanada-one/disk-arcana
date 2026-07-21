@@ -10,23 +10,67 @@ use disk_core::billing::PlanTier;
 use disk_core::meta_db::MetaDb;
 use disk_core::{
     default_tenant_from_email, hash_password, new_user_id, normalize_email, sanitize_tenant_slug,
-    validate_email, verify_password,
+    validate_email, verify_password, ContentBlobStore, TenantMetaRouter,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::email_verify::{deliver_verification, EmailVerifyConfig, VerificationDelivery};
+use super::email_verify_mode::EmailVerifyMode;
+use super::jwks::JwksCache;
+use super::jwt_mode::JwtMode;
 use super::jwt_service::{JwtConfig, VerifiedAccess};
 use super::oauth::OAuthConfig;
+use super::oauth_mode::OAuthMode;
 
 #[derive(Clone)]
 pub struct AuthHttpState {
     pub meta_db: MetaDb,
+    pub tenant_router: disk_core::TenantMetaRouter,
+    pub sync_root: std::path::PathBuf,
+    pub version_blobs: disk_core::ContentBlobStore,
     /// Symmetric key for OAuth state + email verification HMAC (not bearer JWT in JWKS mode).
     pub signing_key: Vec<u8>,
     pub jwt: JwtConfig,
     pub oauth: OAuthConfig,
     pub email_verify: EmailVerifyConfig,
+}
+
+/// Build HTTP auth state for integration tests (DISK-0016+).
+pub fn auth_http_state_for_tests(meta_db: MetaDb) -> AuthHttpState {
+    let router = TenantMetaRouter::single(meta_db.clone());
+    let sync_root = std::env::temp_dir().join(format!("disk-sync-test-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&sync_root);
+    let version_blobs = ContentBlobStore::new(
+        std::env::temp_dir().join(format!("disk-version-blobs-{}", std::process::id())),
+    );
+    AuthHttpState {
+        meta_db,
+        tenant_router: router,
+        sync_root,
+        version_blobs,
+        signing_key: b"01234567890123456789012345678901".to_vec(),
+        jwt: JwtConfig {
+            mode: JwtMode::Local,
+            local_signing_key: b"01234567890123456789012345678901".to_vec(),
+            token_ttl_secs: 3600,
+            issuer: disk_core::DEFAULT_ISSUER.into(),
+            jwks: Arc::new(JwksCache::new("http://127.0.0.1:9/jwks")),
+        },
+        oauth: OAuthConfig {
+            mode: OAuthMode::Disabled,
+            issuer: None,
+            client_id: None,
+            client_secret: None,
+            redirect_uri: None,
+            public_base_url: None,
+        },
+        email_verify: EmailVerifyConfig {
+            mode: EmailVerifyMode::Disabled,
+            public_base_url: None,
+            token_ttl_secs: 86_400,
+        },
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -408,13 +452,12 @@ mod integration_tests {
         let addr: SocketAddr = listener.local_addr().unwrap();
         drop(listener);
 
-        let state = Arc::new(AuthHttpState {
-            meta_db,
-            signing_key: TEST_KEY.as_bytes().to_vec(),
-            jwt: local_jwt(),
-            oauth,
-            email_verify,
-        });
+        let mut bundle = auth_http_state_for_tests(meta_db);
+        bundle.oauth = oauth;
+        bundle.email_verify = email_verify;
+        bundle.signing_key = TEST_KEY.as_bytes().to_vec();
+        bundle.jwt = local_jwt();
+        let state = Arc::new(bundle);
 
         let server = health::serve(addr, None, Some(state), std::future::pending::<()>());
         tokio::pin!(server);
@@ -829,13 +872,10 @@ mod integration_tests {
             issuer: "https://auth.test".into(),
             jwks: Arc::new(JwksCache::new("http://127.0.0.1:9/jwks")),
         };
-        let state = Arc::new(AuthHttpState {
-            meta_db: db,
-            signing_key: TEST_KEY.as_bytes().to_vec(),
-            jwt,
-            oauth: disabled_oauth(),
-            email_verify: disabled_email_verify(),
-        });
+        let mut bundle = auth_http_state_for_tests(db);
+        bundle.signing_key = TEST_KEY.as_bytes().to_vec();
+        bundle.jwt = jwt;
+        let state = Arc::new(bundle);
 
         let server = health::serve(addr, None, Some(state), std::future::pending::<()>());
         tokio::pin!(server);

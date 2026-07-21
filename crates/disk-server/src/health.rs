@@ -13,6 +13,8 @@
 //! - `POST /compliance/delete-account` — DISK-0021 slice 2 right-to-erasure
 //! - `GET /compliance/sub-processors` — DISK-0021 slice 3 public registry
 //! - `GET /compliance/consents` — DISK-0021 slice 3 consent audit (when auth=enforce)
+//! - `GET /versions` — DISK-0020 file version history (when auth=enforce)
+//! - `POST /versions/restore` — DISK-0020 restore a historical revision
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -28,6 +30,7 @@ use crate::accounts::{
 use crate::billing::webhook::{stripe_webhook, WebhookState};
 use crate::compliance::{delete_account, export_data, list_consents, sub_processors};
 use crate::dashboard::{resolve_conflict, summary};
+use crate::versions::{list_versions, restore_version};
 
 /// Start the health HTTP server. Returns an error if the bind fails; otherwise
 /// drives the server until the provided `shutdown` future resolves.
@@ -71,7 +74,9 @@ pub async fn serve(
             .route("/dashboard/conflicts/:id/resolve", post(resolve_conflict))
             .route("/compliance/export", get(export_data))
             .route("/compliance/delete-account", post(delete_account))
-            .route("/compliance/consents", get(list_consents));
+            .route("/compliance/consents", get(list_consents))
+            .route("/versions", get(list_versions))
+            .route("/versions/restore", post(restore_version));
         app = app.merge(auth_router.with_state(state));
     }
 

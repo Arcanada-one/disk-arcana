@@ -18,6 +18,7 @@ pub mod archive;
 pub mod billing;
 pub mod config;
 pub mod conflict;
+pub mod content_store;
 pub mod delta;
 pub mod e2ee;
 pub mod error;
@@ -41,9 +42,10 @@ pub use accounts::{
 pub use billing::{
     check_node_capacity, check_storage_delta, check_vault_capacity, compute_v1_signature,
     parse_stripe_subscription_event, verify_stripe_webhook_signature, PlanTier, QuotaError,
-    QuotaLimits, StripeSigError, StripeSubscriptionEvent,
+    QuotaLimits, StripeSigError, StripeSubscriptionEvent, VersionRetention,
 };
 pub use config::Config;
+pub use content_store::{ContentBlobStore, ContentStoreError};
 pub use e2ee::{
     decrypt, encrypt, overlay_scanned_meta, random_salt, E2eeCachedWire, E2eeError, EncryptedBlob,
     UploadPayload, VaultKey, KEY_LEN, NONCE_LEN, SALT_LEN,

@@ -18,6 +18,8 @@ fn meta(path: &str, hash_byte: u8, size: u64) -> FileMeta {
         deleted_at: None,
         node_id: "node-A".into(),
         encryption_nonce: None,
+        version_id: None,
+        parent_version_id: None,
     }
 }
 
@@ -163,6 +165,8 @@ async fn node_baseline_upsert_and_load_round_trip() {
         deleted_at: None,
         node_id: "server".into(),
         encryption_nonce: None,
+        version_id: None,
+        parent_version_id: None,
     };
     let deleted_at_ts: i64 = 1_700_000_200;
     let tombstone = FileMeta {
@@ -176,6 +180,8 @@ async fn node_baseline_upsert_and_load_round_trip() {
         deleted_at: Some(deleted_at_ts),
         node_id: "client-baseline-test".into(),
         encryption_nonce: None,
+        version_id: None,
+        parent_version_id: None,
     };
 
     let baselines = vec![live.clone(), tombstone.clone()];
@@ -256,6 +262,8 @@ async fn files_rs_reads_back_deleted_flag() {
         deleted_at: Some(deleted_at_ts),
         node_id: "client-A".into(),
         encryption_nonce: None,
+        version_id: None,
+        parent_version_id: None,
     };
 
     db.upsert_file(&m).await.unwrap();
@@ -297,6 +305,8 @@ async fn files_rs_reads_back_deleted_flag() {
         deleted_at: None,
         node_id: "client-A".into(),
         encryption_nonce: None,
+        version_id: None,
+        parent_version_id: None,
     };
     db.upsert_file(&un_deleted).await.unwrap();
     let re_got = db.get_file("trash/gone.md").await.unwrap().unwrap();

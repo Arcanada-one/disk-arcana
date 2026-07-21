@@ -200,6 +200,8 @@ pub async fn import_state(
                 deleted_at: None,
                 node_id: node_id.to_string(),
                 encryption_nonce: None,
+                version_id: None,
+                parent_version_id: None,
             };
             db.upsert_file(&meta).await?;
             report.files_imported += 1;

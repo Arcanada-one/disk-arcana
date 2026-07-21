@@ -181,8 +181,13 @@ async fn main() -> anyhow::Result<()> {
             .clone()
             .expect("jwt key checked in ServerConfig::from_env");
         let key_bytes = key.into_bytes();
+        let tenant_router = meta_router.clone();
+        let version_blobs = disk_core::ContentBlobStore::new(cfg.sync_root.join(".version-blobs"));
         Some(Arc::new(disk_server::AuthHttpState {
             meta_db: meta_router.control(),
+            tenant_router,
+            sync_root: cfg.sync_root.clone(),
+            version_blobs,
             signing_key: key_bytes.clone(),
             jwt: disk_server::JwtConfig {
                 mode: cfg.jwt_mode,

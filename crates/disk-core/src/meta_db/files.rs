@@ -105,7 +105,7 @@ impl MetaDb {
         let row = sqlx::query(
             r#"
             SELECT path, content_hash, size, mtime_ns, inode, vector_clock, deleted, deleted_at,
-                   encryption_nonce
+                   encryption_nonce, version_id, parent_version_id
             FROM files
             WHERE tenant_id IS ?1 AND vault_id = ?2 AND path = ?3
             "#,
@@ -154,7 +154,7 @@ impl MetaDb {
         let rows = sqlx::query(
             r#"
             SELECT path, content_hash, size, mtime_ns, inode, vector_clock, deleted, deleted_at,
-                   encryption_nonce
+                   encryption_nonce, version_id, parent_version_id
             FROM files
             WHERE tenant_id IS ?1 AND vault_id = ?2
             ORDER BY path ASC
@@ -179,6 +179,8 @@ fn row_to_meta(row: sqlx::sqlite::SqliteRow) -> Result<FileMeta, MetaDbError> {
     let deleted_int: i64 = row.try_get("deleted")?;
     let deleted_at: Option<i64> = row.try_get("deleted_at")?;
     let encryption_nonce: Option<Vec<u8>> = row.try_get("encryption_nonce")?;
+    let version_id: Option<i64> = row.try_get("version_id")?;
+    let parent_version_id: Option<i64> = row.try_get("parent_version_id")?;
 
     if content_hash_blob.len() != 32 {
         return Err(MetaDbError::Invalid(format!(
@@ -202,6 +204,8 @@ fn row_to_meta(row: sqlx::sqlite::SqliteRow) -> Result<FileMeta, MetaDbError> {
         deleted_at,
         node_id: String::new(),
         encryption_nonce,
+        version_id: version_id.map(|v| v as u64),
+        parent_version_id: parent_version_id.map(|v| v as u64),
     })
 }
 
@@ -238,6 +242,8 @@ mod tests {
             deleted_at: None,
             node_id: "n".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         }
     }
 

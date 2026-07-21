@@ -90,6 +90,8 @@ impl FileScanner {
                 deleted_at: None,
                 node_id: self.node_id.clone(),
                 encryption_nonce: None,
+                version_id: None,
+                parent_version_id: None,
             });
         }
 

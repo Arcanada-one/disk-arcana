@@ -160,7 +160,28 @@
       </div>
 
       <div class="border border-slate-800 rounded-lg p-4">
-        <h2 class="font-medium mb-1">Privacy &amp; data</h2>
+        <h2 class="font-medium mb-1">File version history</h2>
+        <p class="text-sm text-slate-400 mb-3">List and restore prior revisions (retention depends on your plan tier).</p>
+        <div class="flex flex-wrap gap-2 items-end mb-3">
+          <label class="grid gap-1 text-sm">
+            <span class="text-slate-400">Vault</span>
+            <input id="version-vault" type="text" value="default"
+              class="bg-slate-900 border border-slate-700 rounded px-3 py-2 w-32">
+          </label>
+          <label class="grid gap-1 text-sm flex-1 min-w-[12rem]">
+            <span class="text-slate-400">Path</span>
+            <input id="version-path" type="text" placeholder="docs/readme.md"
+              class="bg-slate-900 border border-slate-700 rounded px-3 py-2 w-full">
+          </label>
+          <button id="version-list-btn" type="button"
+            class="text-sm border border-slate-700 rounded px-3 py-2 hover:border-emerald-500">
+            List versions
+          </button>
+        </div>
+        <ul id="version-list" class="text-xs text-slate-400 space-y-2 hidden"></ul>
+      </div>
+
+      <div class="border border-slate-800 rounded-lg p-4">
         <p class="text-sm text-slate-400 mb-3">Download a JSON export of your account and tenant metadata (GDPR portability).</p>
         <button id="export-data-btn" type="button"
           class="text-sm border border-slate-700 rounded px-3 py-1.5 hover:border-emerald-500">
@@ -598,6 +619,50 @@
         a.download = 'disk-arcana-export-' + (data.user?.tenant_id || 'tenant') + '.json';
         a.click();
         URL.revokeObjectURL(url);
+      } catch (err) {
+        showDashError(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    document.getElementById('version-list-btn').onclick = async () => {
+      const btn = document.getElementById('version-list-btn');
+      const list = document.getElementById('version-list');
+      const path = document.getElementById('version-path').value.trim();
+      const vault = document.getElementById('version-vault').value.trim() || 'default';
+      if (!path) {
+        showDashError('Enter a file path');
+        return;
+      }
+      btn.disabled = true;
+      clearDashError();
+      try {
+        const data = await api('/versions?path=' + encodeURIComponent(path) + '&vault_id=' + encodeURIComponent(vault));
+        if (!data.versions.length) {
+          list.innerHTML = '<li>No prior versions (current v' + (data.current_version_id || '?') + ').</li>';
+        } else {
+          list.innerHTML = data.versions.map(v =>
+            '<li class="flex flex-wrap items-center gap-2">' +
+            '<span>v' + v.version_id + ' · ' + formatDate(v.created_at) +
+            (v.blob_available ? '' : ' · blob missing') + '</span>' +
+            (v.blob_available
+              ? '<button type="button" data-version-id="' + v.version_id + '" class="version-restore text-emerald-400 hover:underline">Restore</button>'
+              : '') +
+            '</li>'
+          ).join('');
+          list.querySelectorAll('.version-restore').forEach(el => {
+            el.onclick = async () => {
+              if (!window.confirm('Restore version ' + el.dataset.versionId + '?')) return;
+              await api('/versions/restore', {
+                method: 'POST',
+                body: JSON.stringify({ path, vault_id: vault, version_id: Number(el.dataset.versionId) }),
+              });
+              await loadDashboard();
+            };
+          });
+        }
+        list.classList.remove('hidden');
       } catch (err) {
         showDashError(err.message);
       } finally {

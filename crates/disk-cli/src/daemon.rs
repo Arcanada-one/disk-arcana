@@ -835,6 +835,8 @@ client_key  = "/b"
             deleted_at: None,
             node_id: "arcana-ai".to_string(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         };
         db.upsert_node_baselines("arcana-ai", "wiki", std::slice::from_ref(&baseline))
             .await
