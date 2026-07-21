@@ -13,8 +13,17 @@ use crate::types::ConflictRecord;
 pub const DEFAULT_CONFLICT_TTL_SECS: i64 = 30 * 24 * 3600;
 
 impl MetaDb {
-    /// Insert a new conflict row; returns the freshly-assigned `id`.
+    /// Insert a new conflict row; returns the freshly-assigned `id` (legacy single-tenant).
     pub async fn create_conflict(&self, c: &ConflictRecord) -> Result<i64, MetaDbError> {
+        self.create_conflict_scoped(None, c).await
+    }
+
+    /// Tenant-scoped conflict insert (DISK-0017 slice 3).
+    pub async fn create_conflict_scoped(
+        &self,
+        tenant_id: Option<&str>,
+        c: &ConflictRecord,
+    ) -> Result<i64, MetaDbError> {
         let now = unix_now();
         let row = sqlx::query(
             r#"
@@ -22,10 +31,11 @@ impl MetaDb {
                 tenant_id, vault_id, path, conflict_type, local_hash,
                 remote_hash, base_hash, resolution, fork_path, resolved,
                 created_at, resolved_at
-            ) VALUES (NULL, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             RETURNING id
             "#,
         )
+        .bind(tenant_id)
         .bind(&c.vault_id)
         .bind(&c.path)
         .bind(&c.conflict_type)
