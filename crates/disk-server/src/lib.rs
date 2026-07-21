@@ -22,6 +22,7 @@ pub mod publisher;
 pub mod services;
 pub mod snapshots;
 pub mod tls;
+pub mod trash;
 pub mod versions;
 
 pub use acl::reload::{ReloadHandle, SessionInvalidate};
@@ -56,4 +57,5 @@ pub use tls::{
     build_mtls_from_files, tls13_mtls_server_config, CertProvider, DevSelfSignedMtlsProvider,
     DevSelfSignedProvider, StaticPemProvider, TlsError,
 };
+pub use trash::{list_trash, restore_trash};
 pub use versions::{list_versions, restore_version};

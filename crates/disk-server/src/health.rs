@@ -19,6 +19,8 @@
 //! - `POST /snapshots` — DISK-0020 slice 4 create vault snapshot
 //! - `GET /snapshots/:id` — DISK-0020 slice 4 snapshot detail
 //! - `POST /snapshots/:id/restore` — DISK-0020 slice 4 restore vault to snapshot
+//! - `GET /trash` — DISK-0024 list soft-deleted files (when auth=enforce)
+//! - `POST /trash/restore` — DISK-0024 undelete a file from trash
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -35,6 +37,7 @@ use crate::billing::webhook::{stripe_webhook, WebhookState};
 use crate::compliance::{delete_account, export_data, list_consents, sub_processors};
 use crate::dashboard::{resolve_conflict, summary};
 use crate::snapshots::{create_snapshot, get_snapshot, list_snapshots, restore_snapshot};
+use crate::trash::{list_trash, restore_trash};
 use crate::versions::{list_versions, restore_version};
 
 /// Start the health HTTP server. Returns an error if the bind fails; otherwise
@@ -84,7 +87,9 @@ pub async fn serve(
             .route("/versions/restore", post(restore_version))
             .route("/snapshots", get(list_snapshots).post(create_snapshot))
             .route("/snapshots/:id", get(get_snapshot))
-            .route("/snapshots/:id/restore", post(restore_snapshot));
+            .route("/snapshots/:id/restore", post(restore_snapshot))
+            .route("/trash", get(list_trash))
+            .route("/trash/restore", post(restore_trash));
         app = app.merge(auth_router.with_state(state));
     }
 

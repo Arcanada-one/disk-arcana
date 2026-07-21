@@ -90,6 +90,12 @@ pub struct SnapshotRetention {
     pub max_age_secs: i64,
 }
 
+/// Trash / recycle-bin retention (DISK-0024).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrashRetention {
+    pub max_age_secs: i64,
+}
+
 impl PlanTier {
     /// How many historical revisions to keep per file path.
     pub fn version_retention(self) -> VersionRetention {
@@ -122,6 +128,21 @@ impl PlanTier {
             },
             Self::Team => SnapshotRetention {
                 max_snapshots: 100,
+                max_age_secs: 365 * 24 * 3600,
+            },
+        }
+    }
+
+    /// How long soft-deleted files remain recoverable before permanent purge.
+    pub fn trash_retention(self) -> TrashRetention {
+        match self {
+            Self::Free => TrashRetention {
+                max_age_secs: 7 * 24 * 3600,
+            },
+            Self::Pro => TrashRetention {
+                max_age_secs: 90 * 24 * 3600,
+            },
+            Self::Team => TrashRetention {
                 max_age_secs: 365 * 24 * 3600,
             },
         }
