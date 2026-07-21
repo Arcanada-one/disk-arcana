@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Disk Arcana — Signing in…</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' }</script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased flex items-center justify-center">
+  <div class="text-center px-6">
+    <p id="status" class="text-slate-300">Completing sign-in…</p>
+    <p id="error" class="mt-4 text-sm text-red-400 hidden"></p>
+  </div>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const apiBase = (localStorage.getItem('diskApiBase') || location.origin).replace(/\/$/, '');
+    const tokenKey = 'diskAccessToken';
+    const refreshKey = 'diskRefreshToken';
+
+    function fail(msg) {
+      document.getElementById('status').textContent = 'Sign-in failed';
+      const err = document.getElementById('error');
+      err.textContent = msg;
+      err.classList.remove('hidden');
+    }
+
+    (async () => {
+      const code = params.get('code');
+      const state = params.get('state');
+      if (!code || !state) {
+        fail('Missing OAuth code or state');
+        return;
+      }
+      try {
+        const url = apiBase + '/auth/oauth/callback?code=' +
+          encodeURIComponent(code) + '&state=' + encodeURIComponent(state);
+        const res = await fetch(url);
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.error || res.statusText);
+        localStorage.setItem(tokenKey, body.access_token);
+        if (body.refresh_token) localStorage.setItem(refreshKey, body.refresh_token);
+        location.replace('index.html');
+      } catch (e) {
+        fail(e.message || String(e));
+      }
+    })();
+  </script>
+</body>
+</html>

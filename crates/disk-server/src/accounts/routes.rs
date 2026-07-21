@@ -623,6 +623,59 @@ mod integration_tests {
     }
 
     #[tokio::test]
+    async fn stub_oauth_browser_flow_round_trip() {
+        let dir = tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("auth-oauth-browser.sqlite"))
+            .await
+            .unwrap();
+        with_stub_oauth_server(db, |addr| async move {
+            let base = format!("http://{addr}");
+            let client = reqwest::Client::new();
+            let redirect_uri = "http://127.0.0.1/dashboard/oauth-callback.html".to_string();
+
+            let start: Value = client
+                .get(format!(
+                    "{base}/auth/oauth/start?flow=browser&redirect_uri={}",
+                    urlencoding::encode(&redirect_uri)
+                ))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+
+            let callback_url = start["authorization_url"].as_str().unwrap();
+            let oauth_state = start["state"].as_str().unwrap();
+            assert!(callback_url.starts_with(&redirect_uri));
+
+            let parsed = reqwest::Url::parse(callback_url).unwrap();
+            let code = parsed
+                .query_pairs()
+                .find(|(k, _)| k == "code")
+                .map(|(_, v)| v.to_string())
+                .unwrap();
+
+            let token: Value = client
+                .get(format!("{base}/auth/oauth/callback"))
+                .query(&[("code", code), ("state", oauth_state.to_string())])
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+
+            assert_eq!(token["token_type"], "Bearer");
+        })
+        .await;
+    }
+
+    #[tokio::test]
     async fn stub_email_verify_signup_and_confirm_round_trip() {
         let dir = tempdir().unwrap();
         let db = MetaDb::open(&dir.path().join("auth-email-verify.sqlite"))

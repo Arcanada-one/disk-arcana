@@ -8,6 +8,7 @@
 //! - `GET /auth/verify-email`, `POST /auth/resend-verification` — DISK-0016 slice 3 (when email verify active)
 //! - `POST /auth/refresh` — DISK-0016 slice 5 (when oauth=auth_arcana + jwt JWKS mode)
 //! - `GET /dashboard/summary` — DISK-0019 (when auth=enforce)
+//! - `POST /dashboard/conflicts/{id}/resolve` — DISK-0019 slice 2
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -21,7 +22,7 @@ use crate::accounts::{
     oauth_callback, oauth_start, refresh_token, resend_verification, verify_email,
 };
 use crate::billing::webhook::{stripe_webhook, WebhookState};
-use crate::dashboard::summary;
+use crate::dashboard::{resolve_conflict, summary};
 
 /// Start the health HTTP server. Returns an error if the bind fails; otherwise
 /// drives the server until the provided `shutdown` future resolves.
@@ -58,7 +59,9 @@ pub async fn serve(
                 .route("/auth/verify-email", get(verify_email))
                 .route("/auth/resend-verification", post(resend_verification));
         }
-        auth_router = auth_router.route("/dashboard/summary", get(summary));
+        auth_router = auth_router
+            .route("/dashboard/summary", get(summary))
+            .route("/dashboard/conflicts/:id/resolve", post(resolve_conflict));
         app = app.merge(auth_router.with_state(state));
     }
 

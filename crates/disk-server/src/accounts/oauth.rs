@@ -43,6 +43,9 @@ pub struct OAuthConfig {
 #[derive(Debug, Deserialize)]
 pub struct OAuthStartQuery {
     pub provider: Option<String>,
+    /// `browser` — embed `redirect_uri` in state for dashboard SPA callback.
+    pub flow: Option<String>,
+    pub redirect_uri: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -118,12 +121,21 @@ async fn oauth_start_inner(
         return Err((StatusCode::NOT_FOUND, "oauth disabled"));
     }
 
+    let browser_redirect = browser_redirect_from_query(&query)?;
     let provider = query.provider.unwrap_or_else(|| "auth_arcana".to_string());
-    let oauth_state = issue_oauth_state(&state.signing_key, &provider)?;
+    let oauth_state =
+        issue_oauth_state(&state.signing_key, &provider, browser_redirect.as_deref())?;
 
     let authorization_url = match state.oauth.mode {
-        OAuthMode::Stub => build_stub_authorization_url(state, &provider, &oauth_state)?,
-        OAuthMode::AuthArcana => build_auth_arcana_authorization_url(state, &oauth_state)?,
+        OAuthMode::Stub => build_stub_authorization_url(
+            state,
+            &provider,
+            &oauth_state,
+            browser_redirect.as_deref(),
+        )?,
+        OAuthMode::AuthArcana => {
+            build_auth_arcana_authorization_url(state, &oauth_state, browser_redirect.as_deref())?
+        }
         OAuthMode::Disabled => return Err((StatusCode::NOT_FOUND, "oauth disabled")),
     };
 
@@ -153,8 +165,8 @@ async fn oauth_callback_inner(
                 .state
                 .as_deref()
                 .ok_or((StatusCode::BAD_REQUEST, "missing state"))?;
-            verify_oauth_state(&state.signing_key, state_param)?;
-            exchange_auth_arcana_code(state, &query.code).await?
+            let browser_redirect = verify_oauth_state(&state.signing_key, state_param)?;
+            exchange_auth_arcana_code(state, &query.code, browser_redirect.as_deref()).await?
         }
         OAuthMode::Disabled => return Err((StatusCode::NOT_FOUND, "oauth disabled")),
     };
@@ -166,7 +178,20 @@ fn build_stub_authorization_url(
     state: &AuthHttpState,
     provider: &str,
     oauth_state: &str,
+    browser_redirect: Option<&str>,
 ) -> Result<String, (StatusCode, &'static str)> {
+    let subject = format!("stub-{}", random_hex(8));
+    let email = format!("{subject}@stub.oauth.local");
+    let code = encode_stub_code(provider, &subject, &email);
+
+    if let Some(redirect_base) = browser_redirect {
+        return Ok(format!(
+            "{redirect_base}?code={}&state={}",
+            urlencoding::encode(&code),
+            urlencoding::encode(oauth_state)
+        ));
+    }
+
     let base = state
         .oauth
         .public_base_url
@@ -191,6 +216,7 @@ fn build_stub_authorization_url(
 fn build_auth_arcana_authorization_url(
     state: &AuthHttpState,
     oauth_state: &str,
+    browser_redirect: Option<&str>,
 ) -> Result<String, (StatusCode, &'static str)> {
     let issuer = state.oauth.issuer.as_deref().ok_or((
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -200,10 +226,12 @@ fn build_auth_arcana_authorization_url(
         StatusCode::INTERNAL_SERVER_ERROR,
         "oauth client_id not configured",
     ))?;
-    let redirect_uri = state.oauth.redirect_uri.as_deref().ok_or((
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "oauth redirect_uri not configured",
-    ))?;
+    let redirect_uri = browser_redirect
+        .or(state.oauth.redirect_uri.as_deref())
+        .ok_or((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "oauth redirect_uri not configured",
+        ))?;
 
     let issuer = issuer.trim_end_matches('/');
     Ok(format!(
@@ -217,6 +245,7 @@ fn build_auth_arcana_authorization_url(
 async fn exchange_auth_arcana_code(
     state: &AuthHttpState,
     code: &str,
+    redirect_uri_override: Option<&str>,
 ) -> Result<OAuthExchange, (StatusCode, &'static str)> {
     let client_id = state.oauth.client_id.as_deref().ok_or((
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -226,10 +255,12 @@ async fn exchange_auth_arcana_code(
         StatusCode::INTERNAL_SERVER_ERROR,
         "oauth client_secret not configured",
     ))?;
-    let redirect_uri = state.oauth.redirect_uri.as_deref().ok_or((
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "oauth redirect_uri not configured",
-    ))?;
+    let redirect_uri = redirect_uri_override
+        .or(state.oauth.redirect_uri.as_deref())
+        .ok_or((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "oauth redirect_uri not configured",
+        ))?;
 
     let discovery = fetch_oidc_discovery(&state.oauth).await?;
 
@@ -452,34 +483,94 @@ fn parse_stub_code(code: &str) -> Result<OAuthIdentity, (StatusCode, &'static st
 fn issue_oauth_state(
     signing_key: &[u8],
     provider: &str,
+    browser_redirect: Option<&str>,
 ) -> Result<String, (StatusCode, &'static str)> {
     let mut nonce = [0u8; 16];
     rand::rng().fill_bytes(&mut nonce);
     let nonce_hex = hex::encode(nonce);
     let exp = unix_now() + 600;
-    let payload = format!("{provider}:{nonce_hex}:{exp}");
+    let payload = if let Some(redirect) = browser_redirect {
+        let enc = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(redirect.as_bytes());
+        format!("{provider}:{nonce_hex}:{exp}:{enc}")
+    } else {
+        format!("{provider}:{nonce_hex}:{exp}")
+    };
     let sig = sign_state(signing_key, &payload)
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "state issue failed"))?;
     Ok(format!("{payload}.{sig}"))
 }
 
-fn verify_oauth_state(signing_key: &[u8], state: &str) -> Result<(), (StatusCode, &'static str)> {
+fn verify_oauth_state(
+    signing_key: &[u8],
+    state: &str,
+) -> Result<Option<String>, (StatusCode, &'static str)> {
     let (payload, sig) = state
         .rsplit_once('.')
         .ok_or((StatusCode::BAD_REQUEST, "invalid state"))?;
     let expected =
         sign_state(signing_key, payload).map_err(|_| (StatusCode::BAD_REQUEST, "invalid state"))?;
     if subtle::ConstantTimeEq::ct_eq(expected.as_bytes(), sig.as_bytes()).into() {
-        let exp: i64 = payload
-            .rsplit_once(':')
-            .and_then(|(_, exp)| exp.parse().ok())
+        let mut parts = payload.splitn(4, ':');
+        let _provider = parts
+            .next()
+            .ok_or((StatusCode::BAD_REQUEST, "invalid state"))?;
+        let _nonce = parts
+            .next()
+            .ok_or((StatusCode::BAD_REQUEST, "invalid state"))?;
+        let exp: i64 = parts
+            .next()
+            .and_then(|v| v.parse().ok())
             .ok_or((StatusCode::BAD_REQUEST, "invalid state"))?;
         if unix_now() > exp {
             return Err((StatusCode::BAD_REQUEST, "state expired"));
         }
-        Ok(())
+        let redirect = parts
+            .next()
+            .map(|enc| {
+                base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .decode(enc)
+                    .map_err(|_| (StatusCode::BAD_REQUEST, "invalid state"))
+                    .and_then(|bytes| {
+                        String::from_utf8(bytes)
+                            .map_err(|_| (StatusCode::BAD_REQUEST, "invalid state"))
+                    })
+            })
+            .transpose()?;
+        Ok(redirect)
     } else {
         Err((StatusCode::BAD_REQUEST, "invalid state"))
+    }
+}
+
+fn browser_redirect_from_query(
+    query: &OAuthStartQuery,
+) -> Result<Option<String>, (StatusCode, &'static str)> {
+    let flow = query.flow.as_deref().unwrap_or("");
+    if flow != "browser" {
+        if query.redirect_uri.is_some() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "redirect_uri requires flow=browser",
+            ));
+        }
+        return Ok(None);
+    }
+    let redirect = query.redirect_uri.as_deref().ok_or((
+        StatusCode::BAD_REQUEST,
+        "flow=browser requires redirect_uri",
+    ))?;
+    validate_browser_redirect(redirect)?;
+    Ok(Some(redirect.to_owned()))
+}
+
+fn validate_browser_redirect(uri: &str) -> Result<(), (StatusCode, &'static str)> {
+    if uri.starts_with("https://")
+        || uri.starts_with("http://127.0.0.1")
+        || uri.starts_with("http://localhost")
+    {
+        Ok(())
+    } else {
+        Err((StatusCode::BAD_REQUEST, "invalid redirect_uri"))
     }
 }
 
@@ -528,7 +619,7 @@ mod tests {
     #[test]
     fn oauth_state_round_trip() {
         let key = b"01234567890123456789012345678901";
-        let state = issue_oauth_state(key, "google").unwrap();
+        let state = issue_oauth_state(key, "google", None).unwrap();
         verify_oauth_state(key, &state).unwrap();
     }
 }

@@ -50,6 +50,11 @@
         <button type="submit" class="mt-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded px-4 py-2 text-sm font-medium">Create account</button>
       </form>
       <p id="auth-error" class="mt-4 text-sm text-red-400 hidden"></p>
+      <div class="mt-6 pt-6 border-t border-slate-800 max-w-md">
+        <button id="oauth-login" type="button" class="w-full border border-slate-700 hover:border-emerald-500 text-sm rounded px-4 py-2">
+          Continue with OAuth
+        </button>
+      </div>
       <p class="mt-6 text-xs text-slate-500">API base: <code id="api-base-label" class="text-slate-300"></code></p>
     </section>
 
@@ -99,6 +104,7 @@
     document.getElementById('api-base-label').textContent = apiBase;
 
     const tokenKey = 'diskAccessToken';
+    const refreshKey = 'diskRefreshToken';
     const authPanel = document.getElementById('auth-panel');
     const dashPanel = document.getElementById('dashboard-panel');
     const authError = document.getElementById('auth-error');
@@ -130,6 +136,10 @@
       return body;
     }
 
+    function dashboardCallbackUrl() {
+      return new URL('oauth-callback.html', location.href).href.split('?')[0];
+    }
+
     function showDashboard(data) {
       authPanel.classList.add('hidden');
       dashPanel.classList.remove('hidden');
@@ -157,10 +167,38 @@
 
       const conflictList = document.getElementById('conflict-list');
       conflictList.innerHTML = data.conflicts.length
-        ? data.conflicts.map(c => '<li><code>' + c.vault_id + '</code> / ' + c.path +
-            '<br><span class="text-slate-500">' + c.conflict_type +
-            (c.fork_path ? ' → ' + c.fork_path : '') + '</span></li>').join('')
+        ? data.conflicts.map(c => {
+            const id = c.id;
+            return '<li class="border border-slate-800 rounded p-3">' +
+              '<code>' + c.vault_id + '</code> / ' + c.path +
+              '<br><span class="text-slate-500">' + c.conflict_type +
+              (c.fork_path ? ' → ' + c.fork_path : '') + '</span>' +
+              '<div class="mt-2 flex flex-wrap gap-2">' +
+              ['keep-local', 'keep-remote', 'fork-remote'].map(action =>
+                '<button type="button" data-conflict-id="' + id + '" data-action="' + action +
+                '" class="resolve-btn text-xs border border-slate-700 rounded px-2 py-1 hover:border-emerald-500">' +
+                action + '</button>').join('') +
+              '</div></li>';
+          }).join('')
         : '<li class="text-slate-500">No unresolved conflicts</li>';
+
+      conflictList.querySelectorAll('.resolve-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const conflictId = btn.getAttribute('data-conflict-id');
+          const action = btn.getAttribute('data-action');
+          btn.disabled = true;
+          try {
+            await api('/dashboard/conflicts/' + conflictId + '/resolve', {
+              method: 'POST',
+              body: JSON.stringify({ action }),
+            });
+            await loadDashboard();
+          } catch (err) {
+            showError(err.message);
+            btn.disabled = false;
+          }
+        });
+      });
     }
 
     async function loadDashboard() {
@@ -219,8 +257,22 @@
 
     document.getElementById('logout-btn').onclick = () => {
       localStorage.removeItem(tokenKey);
+      localStorage.removeItem(refreshKey);
       dashPanel.classList.add('hidden');
       authPanel.classList.remove('hidden');
+    };
+
+    document.getElementById('oauth-login').onclick = async () => {
+      clearError();
+      try {
+        const redirectUri = dashboardCallbackUrl();
+        const start = await api(
+          '/auth/oauth/start?flow=browser&redirect_uri=' + encodeURIComponent(redirectUri)
+        );
+        window.location = start.authorization_url;
+      } catch (err) {
+        showError(err.message);
+      }
     };
 
     (async () => {
