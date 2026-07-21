@@ -415,6 +415,10 @@ pub struct PendingTokenArgs {
     #[arg(long, default_value_t = 3600)]
     pub ttl_secs: u64,
 
+    /// SaaS tenant id to bind the enrolled node (DISK-0017).
+    #[arg(long)]
+    pub tenant: Option<String>,
+
     /// Admin bearer token (overrides `DISK_ADMIN_TOKEN` env var).
     #[arg(long)]
     pub admin_token: Option<String>,
@@ -629,7 +633,12 @@ async fn run_admin_pending_token(args: PendingTokenArgs) -> Result<()> {
             .context("connect to enrollment endpoint")?;
 
     let resp = client
-        .issue_pending_token(&admin_token, &args.hostname, args.ttl_secs)
+        .issue_pending_token(
+            &admin_token,
+            &args.hostname,
+            args.ttl_secs,
+            args.tenant.as_deref(),
+        )
         .await
         .context("IssuePendingToken RPC failed")?;
 

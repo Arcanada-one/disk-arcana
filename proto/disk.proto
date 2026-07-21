@@ -179,6 +179,7 @@ service SyncService {
 message EnrollmentTokenRequest {
   string node_id_hint = 1;
   uint64 ttl_seconds  = 2;  // default 3600 (1h), max 86400 (24h)
+  string tenant_id    = 3;  // DISK-0017 — SaaS tenant binding
 }
 
 message EnrollmentTokenResponse {

@@ -98,11 +98,13 @@ impl EnrollmentClient {
         admin_token: &str,
         hostname: &str,
         ttl_secs: u64,
+        tenant_id: Option<&str>,
     ) -> Result<EnrollmentTokenResponse, EnrollmentError> {
         let mut client = EnrollmentServiceClient::new(self.channel.clone());
         let mut req = Request::new(EnrollmentTokenRequest {
             node_id_hint: hostname.to_owned(),
             ttl_seconds: ttl_secs,
+            tenant_id: tenant_id.unwrap_or("").to_owned(),
         });
         let admin: MetadataValue<tonic::metadata::Ascii> =
             admin_token
@@ -111,6 +113,15 @@ impl EnrollmentClient {
                     EnrollmentError::InvalidMetadata(e.to_string())
                 })?;
         req.metadata_mut().insert(ADMIN_TOKEN_METADATA_KEY, admin);
+
+        if let Some(t) = tenant_id.filter(|s| !s.is_empty()) {
+            let tenant: MetadataValue<tonic::metadata::Ascii> =
+                t.parse()
+                    .map_err(|e: tonic::metadata::errors::InvalidMetadataValue| {
+                        EnrollmentError::InvalidMetadata(e.to_string())
+                    })?;
+            req.metadata_mut().insert("x-disk-tenant", tenant);
+        }
 
         Ok(client.issue_pending_token(req).await?.into_inner())
     }

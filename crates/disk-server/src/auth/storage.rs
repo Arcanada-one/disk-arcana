@@ -163,6 +163,14 @@ impl AuthStore {
         self.inner.nodes.contains_key(node_id)
     }
 
+    /// Tenant bound at registration (DISK-0017). `None` = legacy single-tenant.
+    pub fn node_tenant(&self, node_id: &str) -> Option<String> {
+        self.inner
+            .nodes
+            .get(node_id)
+            .and_then(|e| e.tenant_id.clone())
+    }
+
     /// Return the number of active sessions.
     pub fn session_count(&self) -> usize {
         self.inner.sessions.len()

@@ -201,6 +201,7 @@ async fn connect(fx: &Fixture) -> DiskClient {
         client_key_pem: None,
         node_id: NODE_ID.into(),
         api_key: None,
+        tenant_id: None,
     })
     .await
     .expect("connect");

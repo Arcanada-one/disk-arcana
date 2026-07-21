@@ -47,6 +47,8 @@ pub struct ClientConfig {
     pub node_id: String,
     /// API key (obtained after `register_node`).
     pub api_key: Option<String>,
+    /// SaaS tenant id sent as `x-disk-tenant` on sync RPCs (DISK-0017).
+    pub tenant_id: Option<String>,
 }
 
 /// High-level client wrapping tonic stubs.
@@ -55,6 +57,7 @@ pub struct DiskClient {
     channel: Channel,
     pub node_id: String,
     pub api_key: Option<String>,
+    tenant_id: Option<String>,
     session_token: Arc<tokio::sync::RwLock<Option<String>>>,
 }
 
@@ -106,8 +109,24 @@ impl DiskClient {
             channel,
             node_id: config.node_id,
             api_key: config.api_key,
+            tenant_id: config.tenant_id,
             session_token: Arc::new(tokio::sync::RwLock::new(None)),
         })
+    }
+
+    fn insert_tenant_metadata<T>(
+        req: &mut Request<T>,
+        tenant_id: Option<&str>,
+    ) -> Result<(), ClientError> {
+        if let Some(t) = tenant_id.filter(|s| !s.is_empty()) {
+            let value: MetadataValue<tonic::metadata::Ascii> =
+                t.parse()
+                    .map_err(|e: tonic::metadata::errors::InvalidMetadataValue| {
+                        ClientError::MetadataError(format!("x-disk-tenant: {e}"))
+                    })?;
+            req.metadata_mut().insert("x-disk-tenant", value);
+        }
+        Ok(())
     }
 
     /// Build a `DiskClient` without establishing a TCP connection.
@@ -144,6 +163,7 @@ impl DiskClient {
             channel,
             node_id: config.node_id,
             api_key: config.api_key,
+            tenant_id: config.tenant_id,
             session_token: Arc::new(tokio::sync::RwLock::new(None)),
         })
     }
@@ -155,15 +175,15 @@ impl DiskClient {
         platform: &str,
     ) -> Result<String, ClientError> {
         let mut client = AuthServiceClient::new(self.channel.clone());
-        let resp = client
-            .register_node(Request::new(NodeRegisterRequest {
-                node_id: self.node_id.clone(),
-                display_name: display_name.to_owned(),
-                platform: platform.to_owned(),
-                ..Default::default()
-            }))
-            .await?
-            .into_inner();
+        let mut req = Request::new(NodeRegisterRequest {
+            node_id: self.node_id.clone(),
+            display_name: display_name.to_owned(),
+            platform: platform.to_owned(),
+            tenant_id: self.tenant_id.clone().unwrap_or_default(),
+            ..Default::default()
+        });
+        Self::insert_tenant_metadata(&mut req, self.tenant_id.as_deref())?;
+        let resp = client.register_node(req).await?.into_inner();
         Ok(resp.api_key)
     }
 
@@ -232,7 +252,7 @@ impl DiskClient {
             session_token: token.clone(),
             files,
             node_clock,
-            tenant_id: String::new(),
+            tenant_id: self.tenant_id.clone().unwrap_or_default(),
             vault_id: String::new(),
         });
 
@@ -250,6 +270,7 @@ impl DiskClient {
                     ClientError::MetadataError(format!("x-disk-share: {e}"))
                 })?;
         req.metadata_mut().insert("x-disk-share", share_value);
+        Self::insert_tenant_metadata(&mut req, self.tenant_id.as_deref())?;
 
         let resp = client.exchange_state(req).await?.into_inner();
         Ok(resp)
@@ -333,6 +354,7 @@ impl DiskClient {
         let mut req = Request::new(stream);
         req.metadata_mut().insert("authorization", bearer_val);
         req.metadata_mut().insert("x-disk-share", share_val);
+        Self::insert_tenant_metadata(&mut req, self.tenant_id.as_deref())?;
 
         let resp = client.delta_upload(req).await?.into_inner();
 
@@ -385,6 +407,7 @@ impl DiskClient {
                     ClientError::MetadataError(format!("x-disk-share: {e}"))
                 })?;
         req.metadata_mut().insert("x-disk-share", share_value);
+        Self::insert_tenant_metadata(&mut req, self.tenant_id.as_deref())?;
 
         use tokio_stream::StreamExt;
         let mut stream = client.delta_download(req).await?.into_inner();
@@ -410,7 +433,9 @@ mod tests {
             client_key_pem: None,
             node_id: "test-node".into(),
             api_key: Some("arc_disk_KEY".into()),
+            tenant_id: Some("acme".into()),
         };
+        assert_eq!(cfg.tenant_id.as_deref(), Some("acme"));
         assert_eq!(cfg.node_id, "test-node");
         assert!(cfg.api_key.is_some());
     }

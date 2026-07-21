@@ -294,3 +294,26 @@ async fn migration_007_tenant_vaults_table_exists() {
         "tenant_vaults table must exist after migration 007; got {tables:?}"
     );
 }
+
+#[tokio::test]
+async fn migration_008_pending_enrollments_tenant_column() {
+    let dir = tempdir().expect("tempdir");
+    let db = MetaDb::open(&dir.path().join("enroll-tenant-schema.sqlite"))
+        .await
+        .expect("open");
+
+    let names: Vec<String> = sqlx::query_as::<_, (i64, String, String, i64, Option<String>, i64)>(
+        "PRAGMA table_info(pending_enrollments)",
+    )
+    .fetch_all(db.pool())
+    .await
+    .expect("table_info")
+    .into_iter()
+    .map(|row| row.1)
+    .collect();
+
+    assert!(
+        names.iter().any(|c| c == "tenant_id"),
+        "pending_enrollments.tenant_id must exist after migration 008; got {names:?}"
+    );
+}

@@ -221,6 +221,7 @@ async fn ac1_download_file_sends_share_header() {
         client_key_pem: None,
         node_id: "test-node".into(),
         api_key: None,
+        tenant_id: None,
     })
     .await
     .expect("DiskClient::connect");
@@ -284,6 +285,7 @@ async fn ac2_remote_sync_execute_downloads_file_with_share_header() {
         client_key_pem: None,
         node_id: "sync-node".into(),
         api_key: None,
+        tenant_id: None,
     })
     .await
     .expect("DiskClient::connect");
