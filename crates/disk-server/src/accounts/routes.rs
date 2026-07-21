@@ -50,6 +50,8 @@ pub struct AuthTokenResponse {
     pub expires_in: u64,
     pub user: UserProfile,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub verification_token: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verification_url: Option<String>,
@@ -97,7 +99,7 @@ async fn signup_inner(
     if !state.jwt.mode.allows_local_issue() {
         return Err((
             StatusCode::FORBIDDEN,
-            "password signup disabled in auth_arcana jwt mode",
+            "password signup disabled; use /auth/oauth/start",
         ));
     }
 
@@ -147,7 +149,7 @@ async fn login_inner(
     if !state.jwt.mode.allows_local_issue() {
         return Err((
             StatusCode::FORBIDDEN,
-            "password login disabled in auth_arcana jwt mode",
+            "password login disabled; use /auth/oauth/start",
         ));
     }
 
@@ -249,6 +251,7 @@ pub(crate) fn build_token_response(
             tenant_id: tenant_id.to_owned(),
             email_verified,
         },
+        refresh_token: None,
         verification_token: None,
         verification_url: None,
     })
@@ -261,6 +264,7 @@ pub(crate) fn build_external_token_response(
     email: &str,
     tenant_id: &str,
     email_verified: bool,
+    refresh_token: Option<String>,
 ) -> AuthTokenResponse {
     AuthTokenResponse {
         access_token,
@@ -272,6 +276,7 @@ pub(crate) fn build_external_token_response(
             tenant_id: tenant_id.to_owned(),
             email_verified,
         },
+        refresh_token,
         verification_token: None,
         verification_url: None,
     }
@@ -726,5 +731,78 @@ mod integration_tests {
             assert!(resend["verification_token"].is_string());
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn refresh_not_mounted_for_stub_oauth() {
+        let dir = tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("auth-refresh-stub.sqlite"))
+            .await
+            .unwrap();
+        with_stub_oauth_server(db, |addr| async move {
+            let base = format!("http://{addr}");
+            let client = reqwest::Client::new();
+
+            let resp = client
+                .post(format!("{base}/auth/refresh"))
+                .json(&serde_json::json!({ "refresh_token": "rt-stub" }))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), 404);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn password_login_forbidden_in_auth_arcana_jwt_mode() {
+        let dir = tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("auth-arcana-mode.sqlite"))
+            .await
+            .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr: SocketAddr = listener.local_addr().unwrap();
+        drop(listener);
+
+        let jwt = JwtConfig {
+            mode: JwtMode::AuthArcana,
+            local_signing_key: TEST_KEY.as_bytes().to_vec(),
+            token_ttl_secs: 3600,
+            issuer: "https://auth.test".into(),
+            jwks: Arc::new(JwksCache::new("http://127.0.0.1:9/jwks")),
+        };
+        let state = Arc::new(AuthHttpState {
+            meta_db: db,
+            signing_key: TEST_KEY.as_bytes().to_vec(),
+            jwt,
+            oauth: disabled_oauth(),
+            email_verify: disabled_email_verify(),
+        });
+
+        let server = health::serve(addr, None, Some(state), std::future::pending::<()>());
+        tokio::pin!(server);
+
+        tokio::select! {
+            result = &mut server => panic!("health server exited early: {result:?}"),
+            () = async {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                let base = format!("http://{addr}");
+                let resp = reqwest::Client::new()
+                    .post(format!("{base}/auth/login"))
+                    .json(&serde_json::json!({
+                        "email": "a@example.com",
+                        "password": "secret"
+                    }))
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(resp.status(), 403);
+                let body: Value = resp.json().await.unwrap();
+                assert!(body["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("/auth/oauth/start"));
+            } => {}
+        }
     }
 }

@@ -24,9 +24,9 @@ pub use acl::reload::{ReloadHandle, SessionInvalidate};
 pub use config::{CaMode, ConfigError, RegisterNodeMode, ServerConfig};
 
 pub use accounts::{
-    oauth_callback, oauth_start, resend_verification, routes::AuthHttpState, verify_email,
-    AuthMode, EmailVerifyConfig, EmailVerifyMode, JwksCache, JwtConfig, JwtMode, OAuthConfig,
-    OAuthMode,
+    oauth_callback, oauth_start, refresh_token, resend_verification, routes::AuthHttpState,
+    verify_email, AuthMode, EmailVerifyConfig, EmailVerifyMode, JwksCache, JwtConfig, JwtMode,
+    OAuthConfig, OAuthMode,
 };
 pub use acl::{
     load_from_yaml, AclEnforcer, AclError, AclLoadError, AclState, AclYamlFile, AlwaysFailVerifier,
