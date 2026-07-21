@@ -72,11 +72,11 @@ impl AuthService for AuthServiceImpl {
             Err(crate::auth::storage::AuthError::Unauthenticated) => {
                 Err(Status::unauthenticated("invalid node_id or api_key"))
             }
-            Err(crate::auth::storage::AuthError::RateLimited {
-                retry_after_secs,
-            }) => Err(Status::resource_exhausted(format!(
-                "too many failed auth attempts; retry after {retry_after_secs}s"
-            ))),
+            Err(crate::auth::storage::AuthError::RateLimited { retry_after_secs }) => {
+                Err(Status::resource_exhausted(format!(
+                    "too many failed auth attempts; retry after {retry_after_secs}s"
+                )))
+            }
             Err(e) => Err(Status::internal(e.to_string())),
         }
     }

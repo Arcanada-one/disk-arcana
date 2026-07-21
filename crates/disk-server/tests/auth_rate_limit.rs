@@ -43,8 +43,7 @@ async fn authenticate_rate_limited_resource_exhausted() {
         .unwrap_err();
     assert_eq!(err.code(), Code::ResourceExhausted);
     assert!(
-        err.message()
-            .contains("retry after"),
+        err.message().contains("retry after"),
         "expected retry hint in message: {}",
         err.message()
     );

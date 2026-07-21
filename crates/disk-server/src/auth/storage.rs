@@ -103,9 +103,11 @@ impl AuthStore {
     ) -> Result<(SessionToken, i64), AuthError> {
         let now = unix_now_secs();
         if let Some(limiter) = &self.inner.limiter {
-            limiter.check(node_id, now).map_err(|e| AuthError::RateLimited {
-                retry_after_secs: e.retry_after_secs,
-            })?;
+            limiter
+                .check(node_id, now)
+                .map_err(|e| AuthError::RateLimited {
+                    retry_after_secs: e.retry_after_secs,
+                })?;
         }
 
         let authed = match self.inner.nodes.get(node_id) {
@@ -284,15 +286,11 @@ mod tests {
             .expect("register");
 
         for _ in 0..3 {
-            let err = store
-                .authenticate("node-rl", "arc_disk_WRONG")
-                .unwrap_err();
+            let err = store.authenticate("node-rl", "arc_disk_WRONG").unwrap_err();
             assert_eq!(err, AuthError::Unauthenticated);
         }
 
-        let err = store
-            .authenticate("node-rl", "arc_disk_WRONG")
-            .unwrap_err();
+        let err = store.authenticate("node-rl", "arc_disk_WRONG").unwrap_err();
         assert!(matches!(err, AuthError::RateLimited { .. }));
     }
 
@@ -311,7 +309,9 @@ mod tests {
         store
             .authenticate("node-rl2", "arc_disk_WRONG")
             .unwrap_err();
-        store.authenticate("node-rl2", key.as_str()).expect("auth ok");
+        store
+            .authenticate("node-rl2", key.as_str())
+            .expect("auth ok");
 
         // Counter cleared — two more failures should trigger block on third.
         store
