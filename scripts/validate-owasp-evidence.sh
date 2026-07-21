@@ -29,6 +29,7 @@ check crates/disk-server/src/auth/rate_limit.rs
 check crates/disk-server/tests/auth_rate_limit.rs
 check crates/disk-server/tests/enrollment_expired_token.rs
 check crates/disk-server/tests/enrollment_token_replay.rs
+check crates/disk-server/tests/enrollment_rate_limit.rs
 check crates/disk-server/tests/it_enrollment_real_binary.rs
 check crates/disk-server/tests/it_main_boot_wiring.rs
 check docs/design/DISK-0044-enrollment-bootstrap.md
@@ -63,4 +64,4 @@ if [ "$missing" -ne 0 ]; then
     exit 1
 fi
 
-printf 'OWASP evidence validation OK (%s paths)\n' 28
+printf 'OWASP evidence validation OK (%s paths)\n' 29

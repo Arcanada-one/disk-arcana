@@ -57,6 +57,7 @@ See also `SECURITY.md` § Phase 3 threat model (V-7 … V-14).
 | T2.6 | Enrollment token TTL enforced | verified | `crates/disk-server/tests/enrollment_expired_token.rs` |
 | T2.7 | Enrollment token single-use (replay blocked) | verified | `crates/disk-server/tests/enrollment_token_replay.rs` |
 | T2.8 | Cold-boot enroll without cert (DISK-0044) | verified | Dual listener DISK-0037: `main.rs` `build_tls_public_only` + `:9445`; `it_enrollment_real_binary.rs`; design `docs/design/DISK-0044-enrollment-bootstrap.md` |
+| T2.9 | Public `Enroll` brute-force rate limiting (`:9445`) | verified | `auth/rate_limit.rs` `DEFAULT_ENROLL_MAX_FAILURES`; `enrollment/mod.rs`; `tests/enrollment_rate_limit.rs` |
 
 ### T3 — Authorization (ACL)
 

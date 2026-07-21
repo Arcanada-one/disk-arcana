@@ -52,7 +52,8 @@ mitigations:
   - Opaque-token bearer auth (32-byte random, single-use, hostname-bound, TTL ≤ 86400 s)
   - admin RPCs gated by `x-disk-admin-token` metadata bearer (Unauthenticated on missing)
   - Audit emit on every Enroll attempt (success/fail) via AuditEmitter
-  - Operator firewall MAY remain open for `:9445` (acceptable risk); rate-limit ticket tracked separately
+  - Per-peer-IP failed `Enroll` rate limit (10 / 60 s default) — `enrollment/mod.rs` + `auth/rate_limit.rs`
+  - Operator firewall MAY remain open for `:9445` (acceptable risk); edge rate-limit still recommended (T6.3)
   - No `ServerTlsConfig::client_ca_root` — client-cert absence is the contract, not a gap
 review_owner: Pavel Valentov
 related_task: DISK-0037, DISK-0044
@@ -74,8 +75,7 @@ related_task: DISK-0006 R5
 - macOS / Linux installers' filesystem permissions — see DISK-RB-001.
 - AUTH-0085 (`/v1/internal-ca/issue` upstream) — separate exposure ticket
   on Auth Arcana side.
-- Rate limiting / abuse mitigation on `:9445` — separate backlog ticket;
-  acceptable risk for the current round given token semantics.
+- Connection rate limiting at edge (Cloudflare / firewall) — operator policy (T6.3).
 
 ## Review
 

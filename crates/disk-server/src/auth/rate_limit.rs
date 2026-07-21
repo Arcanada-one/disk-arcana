@@ -5,8 +5,10 @@ use std::time::Duration;
 
 use dashmap::DashMap;
 
-/// Default: 5 failed attempts per node per minute.
+/// Default: 5 failed attempts per node per minute (`Authenticate`).
 pub const DEFAULT_MAX_FAILURES: u32 = 5;
+/// Default: 10 failed `Enroll` attempts per peer IP per minute (`:9445`).
+pub const DEFAULT_ENROLL_MAX_FAILURES: u32 = 10;
 pub const DEFAULT_WINDOW: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
