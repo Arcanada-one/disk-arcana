@@ -7,6 +7,7 @@
 mod accounts;
 mod billing;
 pub mod conflicts;
+mod dashboard;
 mod files;
 mod node_baseline;
 mod nodes;

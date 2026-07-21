@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Disk Arcana — Dashboard</title>
+  <meta name="robots" content="noindex">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' }</script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
+  <div class="max-w-4xl mx-auto px-6 py-10">
+    <header class="mb-8 flex items-center justify-between gap-4">
+      <div>
+        <p class="text-sm text-emerald-400 font-medium">Disk Arcana</p>
+        <h1 class="text-2xl font-bold tracking-tight">Tenant Dashboard</h1>
+      </div>
+      <a href="../" class="text-sm text-slate-400 hover:text-slate-200">← Home</a>
+    </header>
+
+    <section id="auth-panel" class="border border-slate-800 rounded-lg p-6 mb-8">
+      <div class="flex gap-4 mb-6 text-sm">
+        <button id="tab-login" type="button" class="text-emerald-400 font-medium">Log in</button>
+        <button id="tab-signup" type="button" class="text-slate-400 hover:text-slate-200">Sign up</button>
+      </div>
+      <form id="login-form" class="grid gap-3 max-w-md">
+        <label class="grid gap-1 text-sm">
+          <span class="text-slate-400">Email</span>
+          <input id="login-email" type="email" required class="bg-slate-900 border border-slate-700 rounded px-3 py-2">
+        </label>
+        <label class="grid gap-1 text-sm">
+          <span class="text-slate-400">Password</span>
+          <input id="login-password" type="password" required minlength="8" class="bg-slate-900 border border-slate-700 rounded px-3 py-2">
+        </label>
+        <button type="submit" class="mt-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded px-4 py-2 text-sm font-medium">Log in</button>
+      </form>
+      <form id="signup-form" class="hidden grid gap-3 max-w-md">
+        <label class="grid gap-1 text-sm">
+          <span class="text-slate-400">Email</span>
+          <input id="signup-email" type="email" required class="bg-slate-900 border border-slate-700 rounded px-3 py-2">
+        </label>
+        <label class="grid gap-1 text-sm">
+          <span class="text-slate-400">Password</span>
+          <input id="signup-password" type="password" required minlength="8" class="bg-slate-900 border border-slate-700 rounded px-3 py-2">
+        </label>
+        <label class="grid gap-1 text-sm">
+          <span class="text-slate-400">Tenant ID (optional)</span>
+          <input id="signup-tenant" type="text" pattern="[a-z0-9][a-z0-9-]*" class="bg-slate-900 border border-slate-700 rounded px-3 py-2" placeholder="auto from email">
+        </label>
+        <button type="submit" class="mt-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded px-4 py-2 text-sm font-medium">Create account</button>
+      </form>
+      <p id="auth-error" class="mt-4 text-sm text-red-400 hidden"></p>
+      <p class="mt-6 text-xs text-slate-500">API base: <code id="api-base-label" class="text-slate-300"></code></p>
+    </section>
+
+    <section id="dashboard-panel" class="hidden space-y-6">
+      <div class="flex items-center justify-between gap-4">
+        <p id="user-line" class="text-slate-300"></p>
+        <button id="logout-btn" type="button" class="text-sm text-slate-400 hover:text-slate-200">Log out</button>
+      </div>
+
+      <div class="grid gap-4 sm:grid-cols-3">
+        <div class="border border-slate-800 rounded-lg p-4">
+          <h2 class="text-sm text-slate-400 mb-1">Plan</h2>
+          <p id="plan-tier" class="text-xl font-semibold capitalize"></p>
+          <p id="storage-usage" class="text-sm text-slate-400 mt-2"></p>
+        </div>
+        <div class="border border-slate-800 rounded-lg p-4">
+          <h2 class="text-sm text-slate-400 mb-1">Devices</h2>
+          <p id="nodes-usage" class="text-xl font-semibold"></p>
+        </div>
+        <div class="border border-slate-800 rounded-lg p-4">
+          <h2 class="text-sm text-slate-400 mb-1">Vaults</h2>
+          <p id="vaults-usage" class="text-xl font-semibold"></p>
+        </div>
+      </div>
+
+      <div class="border border-slate-800 rounded-lg p-4">
+        <h2 class="font-medium mb-3">Vaults</h2>
+        <ul id="vault-list" class="text-sm text-slate-300 space-y-1"></ul>
+      </div>
+
+      <div class="border border-slate-800 rounded-lg p-4">
+        <h2 class="font-medium mb-3">Devices</h2>
+        <ul id="device-list" class="text-sm text-slate-300 space-y-1"></ul>
+      </div>
+
+      <div class="border border-slate-800 rounded-lg p-4">
+        <h2 class="font-medium mb-3">Unresolved conflicts</h2>
+        <ul id="conflict-list" class="text-sm text-slate-300 space-y-2"></ul>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const apiBase = (params.get('api') || localStorage.getItem('diskApiBase') || location.origin).replace(/\/$/, '');
+    localStorage.setItem('diskApiBase', apiBase);
+    document.getElementById('api-base-label').textContent = apiBase;
+
+    const tokenKey = 'diskAccessToken';
+    const authPanel = document.getElementById('auth-panel');
+    const dashPanel = document.getElementById('dashboard-panel');
+    const authError = document.getElementById('auth-error');
+
+    function showError(msg) {
+      authError.textContent = msg;
+      authError.classList.remove('hidden');
+    }
+    function clearError() {
+      authError.classList.add('hidden');
+    }
+
+    function formatBytes(n) {
+      if (n < 1024) return n + ' B';
+      const units = ['KiB', 'MiB', 'GiB', 'TiB'];
+      let v = n;
+      let i = -1;
+      do { v /= 1024; i++; } while (v >= 1024 && i < units.length - 1);
+      return v.toFixed(1) + ' ' + units[i];
+    }
+
+    async function api(path, opts = {}) {
+      const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
+      const token = localStorage.getItem(tokenKey);
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+      const res = await fetch(apiBase + path, Object.assign({}, opts, { headers }));
+      const body = res.headers.get('content-type')?.includes('json') ? await res.json() : null;
+      if (!res.ok) throw new Error(body?.error || res.statusText);
+      return body;
+    }
+
+    function showDashboard(data) {
+      authPanel.classList.add('hidden');
+      dashPanel.classList.remove('hidden');
+      document.getElementById('user-line').textContent =
+        data.user.email + ' · tenant ' + data.user.tenant_id +
+        (data.user.email_verified ? '' : ' · email not verified');
+      document.getElementById('plan-tier').textContent = data.billing.plan_tier;
+      document.getElementById('storage-usage').textContent =
+        formatBytes(data.billing.storage_bytes) + ' / ' + formatBytes(data.billing.storage_limit_bytes);
+      document.getElementById('nodes-usage').textContent =
+        data.billing.nodes_count + ' / ' + data.billing.nodes_limit;
+      document.getElementById('vaults-usage').textContent =
+        data.billing.vaults_count + ' / ' + data.billing.vaults_limit;
+
+      const vaultList = document.getElementById('vault-list');
+      vaultList.innerHTML = data.vaults.length
+        ? data.vaults.map(v => '<li><code>' + v.vault_id + '</code></li>').join('')
+        : '<li class="text-slate-500">No vaults yet</li>';
+
+      const deviceList = document.getElementById('device-list');
+      deviceList.innerHTML = data.devices.length
+        ? data.devices.map(d => '<li><code>' + d.node_id + '</code> · ' +
+            (d.display_name || 'unnamed') + ' · ' + (d.platform || 'unknown') + '</li>').join('')
+        : '<li class="text-slate-500">No devices registered</li>';
+
+      const conflictList = document.getElementById('conflict-list');
+      conflictList.innerHTML = data.conflicts.length
+        ? data.conflicts.map(c => '<li><code>' + c.vault_id + '</code> / ' + c.path +
+            '<br><span class="text-slate-500">' + c.conflict_type +
+            (c.fork_path ? ' → ' + c.fork_path : '') + '</span></li>').join('')
+        : '<li class="text-slate-500">No unresolved conflicts</li>';
+    }
+
+    async function loadDashboard() {
+      const data = await api('/dashboard/summary');
+      showDashboard(data);
+    }
+
+    document.getElementById('tab-login').onclick = () => {
+      document.getElementById('login-form').classList.remove('hidden');
+      document.getElementById('signup-form').classList.add('hidden');
+      document.getElementById('tab-login').className = 'text-emerald-400 font-medium';
+      document.getElementById('tab-signup').className = 'text-slate-400 hover:text-slate-200';
+      clearError();
+    };
+    document.getElementById('tab-signup').onclick = () => {
+      document.getElementById('signup-form').classList.remove('hidden');
+      document.getElementById('login-form').classList.add('hidden');
+      document.getElementById('tab-signup').className = 'text-emerald-400 font-medium';
+      document.getElementById('tab-login').className = 'text-slate-400 hover:text-slate-200';
+      clearError();
+    };
+
+    document.getElementById('login-form').onsubmit = async (e) => {
+      e.preventDefault();
+      clearError();
+      try {
+        const body = {
+          email: document.getElementById('login-email').value,
+          password: document.getElementById('login-password').value,
+        };
+        const res = await api('/auth/login', { method: 'POST', body: JSON.stringify(body) });
+        localStorage.setItem(tokenKey, res.access_token);
+        await loadDashboard();
+      } catch (err) {
+        showError(err.message);
+      }
+    };
+
+    document.getElementById('signup-form').onsubmit = async (e) => {
+      e.preventDefault();
+      clearError();
+      try {
+        const body = {
+          email: document.getElementById('signup-email').value,
+          password: document.getElementById('signup-password').value,
+        };
+        const tenant = document.getElementById('signup-tenant').value.trim();
+        if (tenant) body.tenant_id = tenant;
+        const res = await api('/auth/signup', { method: 'POST', body: JSON.stringify(body) });
+        localStorage.setItem(tokenKey, res.access_token);
+        await loadDashboard();
+      } catch (err) {
+        showError(err.message);
+      }
+    };
+
+    document.getElementById('logout-btn').onclick = () => {
+      localStorage.removeItem(tokenKey);
+      dashPanel.classList.add('hidden');
+      authPanel.classList.remove('hidden');
+    };
+
+    (async () => {
+      const token = localStorage.getItem(tokenKey);
+      if (!token) return;
+      try {
+        await loadDashboard();
+      } catch {
+        localStorage.removeItem(tokenKey);
+      }
+    })();
+  </script>
+</body>
+</html>
