@@ -5,6 +5,7 @@
 //! `conflicts` tables and wires up `BEGIN ... COMMIT` batch transactions.
 
 mod accounts;
+mod agents;
 mod billing;
 pub mod compliance;
 pub mod conflicts;
@@ -33,6 +34,7 @@ use sqlx::{
 use crate::error::MetaDbError;
 
 pub use accounts::{NewOAuthUser, UserAccount};
+pub use agents::{AgentWriteRevision, NewAgentWebhook, RevisionBumpOutcome};
 pub use sharing::{VaultInviteRow, VaultMemberRow, VaultShareRole};
 pub use snapshots::{VaultSnapshotFileRow, VaultSnapshotRow};
 pub use trash::TrashRow;

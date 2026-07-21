@@ -495,3 +495,24 @@ async fn migration_019_user_telemetry_table_exists() {
         "user_telemetry table must exist after migration 019; got {tables:?}"
     );
 }
+
+#[tokio::test]
+async fn migration_020_agent_api_tables_exist() {
+    let dir = tempdir().expect("tempdir");
+    let db = MetaDb::open(&dir.path().join("agent-api-schema.sqlite"))
+        .await
+        .expect("open");
+
+    let tables: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .fetch_all(db.pool())
+            .await
+            .expect("sqlite_master");
+
+    for required in ["agent_webhooks", "agent_write_revisions"] {
+        assert!(
+            tables.iter().any(|t| t == required),
+            "{required} table must exist after migration 020; got {tables:?}"
+        );
+    }
+}
