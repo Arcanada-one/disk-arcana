@@ -1,6 +1,6 @@
 # DISK-0015 — E2EE scaffold
 
-**Status:** slice 3 on DEVS — ExchangeState ciphertext overlay + MetaDb wire index.  
+**Status:** slice 4 on DEVS — `disk vault unlock` / keychain UX.  
 **Parent:** DISK-0001 §4.7 (future paid / SaaS feature).  
 **Tracking:** DISK-0015 in Datarim backlog.
 
@@ -8,22 +8,13 @@
 
 | Slice | In scope | Out of scope |
 |-------|----------|--------------|
-| 1 (merged #57) | `disk_core::e2ee` primitives, unit tests | Wire integration |
-| 2 (merged #58) | `UploadPayload`, encrypt-on-upload, MetaDb `encryption_nonce` | ExchangeState reconcile |
-| 3 (this PR) | `overlay_scanned_meta`, MetaDb + in-memory wire cache, stable ciphertext hash across cycles | Keychain UX, multi-device escrow |
-| 4+ | `disk vault unlock`, SaaS billing | — |
+| 1 (merged #57) | `disk_core::e2ee` primitives | Wire integration |
+| 2 (merged #58) | encrypt-on-upload, MetaDb nonce | ExchangeState reconcile |
+| 3 (merged #59) | ExchangeState ciphertext overlay | Keychain UX |
+| 4 (this PR) | `disk vault unlock|lock|status`, keychain store, daemon `resolve_vault_key` | SaaS billing, multi-device escrow |
+| 5+ | Commercial MVP billing | — |
 
-## Crypto contract
-
-- **Algorithm:** XChaCha20-Poly1305 (24-byte random nonce per blob).
-- **Key derivation:** Argon2id (`m=19456`, `t=2`, `p=1`) from passphrase + 16-byte salt.
-- **Vault key:** 32-byte secret; lives in OS keychain or operator-local config — never on server.
-- **Wire hint:** `FileMetadata.encryption_nonce` (proto field 10). When non-empty:
-  - Delta bytes on the wire are ciphertext.
-  - `content_hash` = `blake3(ciphertext)`, not plaintext.
-- **Server:** stores opaque bytes; zero-knowledge — no decrypt path in `disk-server`.
-
-## Operator config
+## Operator workflow (slice 4)
 
 ```toml
 [vault]
@@ -31,45 +22,45 @@ e2ee_enabled = true
 ```
 
 ```bash
-export DISK_VAULT_PASSPHRASE='operator-chosen-secret'
-export DISK_VAULT_SALT='00112233445566778899aabbccddeeff'  # 16-byte hex
+# One-time (or after lock): derive key and store in OS keychain / {state_dir}/keys fallback
+disk vault unlock --passphrase 'your-secret'
+
+# Check state
+disk vault status
+
+# Remove key material from keychain
+disk vault lock
 ```
 
-When `e2ee_enabled = true` but env vars are missing or invalid, the daemon logs a warning and uploads remain plaintext.
+Dev/CI override (unchanged): `DISK_VAULT_PASSPHRASE` + `DISK_VAULT_SALT` env vars take precedence over keychain.
+
+## Crypto contract
+
+- **Algorithm:** XChaCha20-Poly1305 (24-byte random nonce per blob).
+- **Key derivation:** Argon2id from passphrase + 16-byte salt.
+- **Key storage:** derived 32-byte key + salt in OS keychain (`e2ee.<node_id>`) or `{state_dir}/keys/` file fallback — never the raw passphrase.
+- **Wire:** `content_hash` = `blake3(ciphertext)` when `encryption_nonce` is set.
 
 ## ExchangeState overlay (slice 3)
 
-Local scan indexes **plaintext** `content_hash`. Because XChaCha20 uses a random nonce, re-encrypting unchanged files would rotate the ciphertext hash every cycle.
+Before `ExchangeState`, unchanged files reuse cached `(ciphertext hash, nonce)` from MetaDb / in-memory cache when `(mtime_ns, plaintext size)` match.
 
-Before `ExchangeState`, when E2EE is active:
-
-1. Load wire index from MetaDb (`files.encryption_nonce` rows) and an in-memory cache.
-2. For each scanned file, if `(mtime_ns, plaintext size)` matches the cache → reuse stored `(content_hash, encryption_nonce)`.
-3. Otherwise read plaintext, encrypt once, and update MetaDb + cache.
-
-Upload path persists the same `(mtime_ns, plaintext size, ciphertext hash, nonce)` tuple.
-
-## API (`crates/disk-core/src/e2ee/`)
+## API
 
 ```rust
-UploadPayload::from_plaintext(bytes)
-UploadPayload::from_plaintext_encrypted(bytes, &VaultKey) -> Result<UploadPayload, E2eeError>
-overlay_scanned_meta(scanned, &VaultKey, cached, plaintext) -> Result<Option<E2eeCachedWire>, E2eeError>
-VaultKey::derive_from_passphrase(passphrase, salt) -> Result<VaultKey, E2eeError>
+disk vault unlock|lock|status   // CLI
+resolve_vault_key(node_id, state_dir) -> Option<VaultKey>
+unlock_vault_key(passphrase, node_id, state_dir, salt_override)
+overlay_scanned_meta(...)       // slice 3
 ```
-
-Client env loader: `disk_client::load_vault_key_from_env()`.
 
 ## Tests
 
-- `crates/disk-core/src/e2ee/exchange_overlay.rs` — cache hit/miss unit tests
-- `crates/disk-core/src/e2ee/` — encrypt unit tests
-- `crates/disk-core/tests/e2ee_round_trip.rs` — ciphertext vs plaintext hash contract
-- `crates/disk-client/src/vault_key.rs` — env derivation
-- `crates/disk-core/tests/metadata_lifecycle.rs` — `encryption_nonce` MetaDb round-trip
+- `crates/disk-client/src/vault_key.rs` — unlock/lock round-trip
+- `crates/disk-cli/tests/it_vault_unlock.rs` — CLI integration
+- `crates/disk-core/src/e2ee/exchange_overlay.rs` — overlay unit tests
 
 ## References
 
-- `proto/disk.proto` — `FileMetadata.encryption_nonce`
-- `CONTRIBUTING.md` — forward-compat field rules
-- `SECURITY.md` — never log `encryption_nonce` or keys
+- `crates/disk-client/src/keychain.rs` — `KeyStore` / `detect_or_file`
+- `SECURITY.md` — never log passphrases, keys, or `encryption_nonce`

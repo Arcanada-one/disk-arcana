@@ -22,6 +22,7 @@ tracing-subscriber = { workspace = true }
 anyhow             = { workspace = true }
 rand               = { workspace = true }
 hex                = "0.4"
+rpassword            = "7.3"
 reqwest            = { workspace = true }
 serde_json         = { workspace = true }
 prettydiff         = "0.9"

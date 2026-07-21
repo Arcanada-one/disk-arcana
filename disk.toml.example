@@ -15,7 +15,8 @@ api_key = "REPLACE_ME"
 
 [vault]
 # Client-side E2EE (DISK-0015). When true, uploads encrypt before DeltaUpload.
-# Requires DISK_VAULT_PASSPHRASE and DISK_VAULT_SALT (hex) in the environment.
+# Unlock once: `disk vault unlock` (stores derived key in OS keychain).
+# Dev/CI override: DISK_VAULT_PASSPHRASE + DISK_VAULT_SALT (hex) env vars.
 e2ee_enabled = false
 
 [filter]

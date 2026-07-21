@@ -35,7 +35,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use disk_client::config::{spawn_config_watcher, ConfigWatcher, Direction, DiskConfig};
 use disk_client::connection::DiskClient;
-use disk_client::load_vault_key_from_env;
+use disk_client::resolve_vault_key;
 use disk_client::rest_api::{serve, DaemonState, ShareSnapshot};
 use disk_client::sync_loop::{LoopState, LoopTrigger, RemoteSync, SyncLoop, POLL_INTERVAL};
 use disk_client::BlobCache;
@@ -182,14 +182,15 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
     let node_id_for_loop = node_id.clone();
 
     let e2ee_key = if cfg.vault.e2ee_enabled {
-        match load_vault_key_from_env() {
+        match resolve_vault_key(&node_id, &args.state_dir) {
             Ok(Some(key)) => {
                 tracing::info!("daemon: client-side E2EE enabled for uploads");
                 Some(key)
             }
             Ok(None) => {
                 tracing::warn!(
-                    "daemon: vault.e2ee_enabled=true but DISK_VAULT_PASSPHRASE unset; \
+                    "daemon: vault.e2ee_enabled=true but no key found; \
+                     run `disk vault unlock` or set DISK_VAULT_PASSPHRASE + DISK_VAULT_SALT; \
                      uploads remain plaintext"
                 );
                 None
@@ -197,7 +198,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
             Err(e) => {
                 tracing::warn!(
                     error = %e,
-                    "daemon: failed to derive vault key; uploads remain plaintext"
+                    "daemon: failed to load vault key; uploads remain plaintext"
                 );
                 None
             }
