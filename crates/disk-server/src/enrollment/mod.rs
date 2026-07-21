@@ -473,7 +473,7 @@ mod tests {
         let req = Request::new(EnrollmentTokenRequest {
             node_id_hint: "node-1".into(),
             ttl_seconds: 0,
-        tenant_id: String::new(),
+            tenant_id: String::new(),
         });
         let err = svc.issue_pending_token(req).await.unwrap_err();
         assert_eq!(err.code(), tonic::Code::Unauthenticated);
@@ -487,7 +487,7 @@ mod tests {
         let req = admin_request(EnrollmentTokenRequest {
             node_id_hint: "node-2".into(),
             ttl_seconds: 3600,
-        tenant_id: String::new(),
+            tenant_id: String::new(),
         });
 
         let resp = svc.issue_pending_token(req).await.unwrap();
@@ -515,7 +515,7 @@ mod tests {
             .issue_pending_token(admin_request(EnrollmentTokenRequest {
                 node_id_hint: "node-3".into(),
                 ttl_seconds: 3600,
-            tenant_id: String::new(),
+                tenant_id: String::new(),
             }))
             .await
             .unwrap();
@@ -554,7 +554,7 @@ mod tests {
             .issue_pending_token(admin_request(EnrollmentTokenRequest {
                 node_id_hint: "node-4".into(),
                 ttl_seconds: 3600,
-            tenant_id: String::new(),
+                tenant_id: String::new(),
             }))
             .await
             .unwrap()
@@ -661,7 +661,7 @@ mod tests {
             .issue_pending_token(admin_request(EnrollmentTokenRequest {
                 node_id_hint: "node-6".into(),
                 ttl_seconds: 3600,
-            tenant_id: String::new(),
+                tenant_id: String::new(),
             }))
             .await
             .unwrap()

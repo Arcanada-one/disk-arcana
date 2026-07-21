@@ -394,7 +394,7 @@ async fn enroll_through_public_listener_succeeds() {
     let mut issue_req = Request::new(EnrollmentTokenRequest {
         node_id_hint: "cold-boot-node".into(),
         ttl_seconds: 600,
-    tenant_id: String::new(),
+        tenant_id: String::new(),
     });
     issue_req
         .metadata_mut()
@@ -465,7 +465,7 @@ async fn admin_rpc_via_public_listener_returns_permission_denied() {
     let req = Request::new(EnrollmentTokenRequest {
         node_id_hint: "attacker".into(),
         ttl_seconds: 60,
-    tenant_id: String::new(),
+        tenant_id: String::new(),
     });
 
     let err = client
@@ -496,7 +496,7 @@ async fn register_node_with_issued_cert_via_mtls() {
     let mut issue_req = Request::new(EnrollmentTokenRequest {
         node_id_hint: "phase-b-node".into(),
         ttl_seconds: 600,
-    tenant_id: String::new(),
+        tenant_id: String::new(),
     });
     issue_req
         .metadata_mut()

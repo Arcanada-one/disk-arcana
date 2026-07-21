@@ -154,15 +154,9 @@ async fn missing_header_inherits_bound_tenant() {
     let token = register_and_auth(&ch, "inherit-node", "tenant-a").await;
     let mut sync = SyncServiceClient::new(ch);
 
-    sync.delta_upload(upload_req(
-        "inherit.bin",
-        b"ok",
-        &token,
-        None,
-        "default",
-    ))
-    .await
-    .unwrap();
+    sync.delta_upload(upload_req("inherit.bin", b"ok", &token, None, "default"))
+        .await
+        .unwrap();
 
     let stored = meta_check
         .get_file_scoped(Some("tenant-a"), "default", "inherit.bin")

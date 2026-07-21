@@ -54,7 +54,7 @@ async fn token_used_twice_returns_replay() {
         .issue_pending_token(admin_request(EnrollmentTokenRequest {
             node_id_hint: "replay-node".into(),
             ttl_seconds: 3600,
-        tenant_id: String::new(),
+            tenant_id: String::new(),
         }))
         .await
         .unwrap()
@@ -93,7 +93,7 @@ async fn revoked_token_enrolls_with_revoked_error() {
         .issue_pending_token(admin_request(EnrollmentTokenRequest {
             node_id_hint: "revoke-before-enroll".into(),
             ttl_seconds: 3600,
-        tenant_id: String::new(),
+            tenant_id: String::new(),
         }))
         .await
         .unwrap()
