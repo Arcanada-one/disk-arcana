@@ -287,6 +287,83 @@
       </div>
 
       <div class="border border-slate-800 rounded-lg p-4 overflow-x-auto">
+        <h2 class="font-medium mb-1">Vault sharing</h2>
+        <p id="sharing-hint" class="text-sm text-slate-400 mb-3">
+          Invite collaborators with viewer or editor access. Share the invite link once — it is shown only at creation.
+        </p>
+        <div class="flex flex-wrap gap-2 items-end mb-3">
+          <label class="grid gap-1 text-sm">
+            <span class="text-slate-400">Vault</span>
+            <select id="sharing-vault"
+              class="bg-slate-900 border border-slate-700 rounded px-3 py-2 min-w-[8rem]">
+              <option value="default">default</option>
+            </select>
+          </label>
+          <label class="grid gap-1 text-sm">
+            <span class="text-slate-400">Role</span>
+            <select id="sharing-role"
+              class="bg-slate-900 border border-slate-700 rounded px-3 py-2">
+              <option value="viewer">viewer</option>
+              <option value="editor">editor</option>
+            </select>
+          </label>
+          <label class="grid gap-1 text-sm">
+            <span class="text-slate-400">TTL (hours)</span>
+            <input id="sharing-ttl" type="number" min="1" max="720" value="168"
+              class="bg-slate-900 border border-slate-700 rounded px-3 py-2 w-24">
+          </label>
+          <button id="sharing-invite-btn" type="button"
+            class="text-sm border border-emerald-700 text-emerald-300 rounded px-3 py-2 hover:border-emerald-500">
+            Create invite
+          </button>
+          <button id="sharing-refresh-btn" type="button"
+            class="text-sm border border-slate-700 rounded px-3 py-2 hover:border-emerald-500">
+            Refresh
+          </button>
+        </div>
+        <div id="sharing-accept-panel" class="mb-4 hidden border border-slate-800 rounded p-3">
+          <p class="text-sm text-slate-300 mb-2">You have a vault invite link. Accept to join as a collaborator.</p>
+          <button id="sharing-accept-btn" type="button"
+            class="text-sm border border-emerald-700 text-emerald-300 rounded px-3 py-1.5 hover:border-emerald-500">
+            Accept invite
+          </button>
+        </div>
+        <p id="sharing-loading" class="text-sm text-slate-400 hidden mb-2">Loading sharing data…</p>
+        <p id="sharing-success" class="text-sm text-emerald-400 hidden mb-2"></p>
+        <div id="sharing-token-box" class="hidden mb-3 border border-amber-900/50 bg-amber-950/20 rounded p-3 text-sm">
+          <p class="text-amber-200 mb-1 font-medium">Copy this invite now — it will not be shown again.</p>
+          <p class="text-slate-300 break-all"><code id="sharing-token-value"></code></p>
+          <p id="sharing-url-value" class="text-slate-400 text-xs mt-1 break-all"></p>
+        </div>
+        <h3 class="text-sm font-medium text-slate-300 mb-2">Pending invites</h3>
+        <table id="sharing-invites-table" class="w-full text-sm text-left hidden mb-4">
+          <thead class="text-slate-400 border-b border-slate-800">
+            <tr>
+              <th class="py-2 pr-3 font-medium">ID</th>
+              <th class="py-2 pr-3 font-medium">Role</th>
+              <th class="py-2 pr-3 font-medium">Expires</th>
+              <th class="py-2 font-medium">Status</th>
+            </tr>
+          </thead>
+          <tbody id="sharing-invites-list" class="text-slate-300"></tbody>
+        </table>
+        <p id="sharing-invites-empty" class="text-sm text-slate-500 hidden mb-4">No pending invites.</p>
+        <h3 class="text-sm font-medium text-slate-300 mb-2">Collaborators</h3>
+        <table id="sharing-members-table" class="w-full text-sm text-left hidden">
+          <thead class="text-slate-400 border-b border-slate-800">
+            <tr>
+              <th class="py-2 pr-3 font-medium">User</th>
+              <th class="py-2 pr-3 font-medium">Email</th>
+              <th class="py-2 pr-3 font-medium">Role</th>
+              <th class="py-2 font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="sharing-members-list" class="text-slate-300"></tbody>
+        </table>
+        <p id="sharing-members-empty" class="text-sm text-slate-500 hidden">No external collaborators yet.</p>
+      </div>
+
+      <div class="border border-slate-800 rounded-lg p-4 overflow-x-auto">
         <h2 class="font-medium mb-1">Recycle bin</h2>
         <p id="trash-retention-hint" class="text-sm text-slate-400 mb-3">
           Soft-deleted files you can still restore. Retention depends on your plan tier.
@@ -380,6 +457,12 @@
     const versionPage = { offset: 0, limit: 10, hasMore: false, total: 0 };
     const snapshotPage = { offset: 0, limit: 10, hasMore: false, total: 0 };
     const trashPage = { offset: 0, limit: 10, hasMore: false, total: 0 };
+    const pendingInviteKey = 'diskPendingInvite';
+    let pendingInviteToken = params.get('sharing_accept') || localStorage.getItem(pendingInviteKey) || '';
+    if (params.get('sharing_accept')) {
+      localStorage.setItem(pendingInviteKey, params.get('sharing_accept'));
+      pendingInviteToken = params.get('sharing_accept');
+    }
 
     const tokenKey = 'diskAccessToken';
     const refreshKey = 'diskRefreshToken';
@@ -637,6 +720,17 @@
       populateVaultSelect('version-vault', data.vaults);
       populateVaultSelect('snapshot-vault', data.vaults);
       populateVaultSelect('trash-vault', data.vaults);
+      populateVaultSelect('sharing-vault', data.vaults);
+      updateSharingAcceptPanel();
+    }
+
+    function updateSharingAcceptPanel() {
+      const panel = document.getElementById('sharing-accept-panel');
+      if (pendingInviteToken) {
+        panel.classList.remove('hidden');
+      } else {
+        panel.classList.add('hidden');
+      }
     }
 
     function populateVaultSelect(selectId, vaults) {
@@ -1029,6 +1123,117 @@
       }
     }
 
+    function sharingInviteRowHtml(inv) {
+      const status = inv.redeemed
+        ? '<span class="text-slate-500">redeemed</span>'
+        : '<span class="text-emerald-400">pending</span>';
+      return '<tr class="border-b border-slate-800/60">' +
+        '<td class="py-2 pr-3"><code class="text-xs">' + escapeHtml(inv.invite_id) + '</code></td>' +
+        '<td class="py-2 pr-3 text-slate-400">' + escapeHtml(inv.role) + '</td>' +
+        '<td class="py-2 pr-3 text-slate-400">' + formatDate(inv.expires_at) + '</td>' +
+        '<td class="py-2">' + status + '</td></tr>';
+    }
+
+    function sharingMemberRowHtml(member, vault) {
+      return '<tr class="border-b border-slate-800/60">' +
+        '<td class="py-2 pr-3"><code class="text-xs">' + escapeHtml(member.user_id) + '</code></td>' +
+        '<td class="py-2 pr-3 text-slate-400">' + escapeHtml(member.email) + '</td>' +
+        '<td class="py-2 pr-3 text-slate-400">' + escapeHtml(member.role) + '</td>' +
+        '<td class="py-2">' +
+          '<button type="button" data-member-id="' + escapeHtml(member.user_id) + '" data-vault="' +
+          escapeHtml(vault) +
+          '" class="sharing-remove text-xs border border-red-900 text-red-300 rounded px-2 py-0.5 hover:bg-red-950/40">Remove</button>' +
+        '</td></tr>';
+    }
+
+    function bindSharingRemove(vault) {
+      document.querySelectorAll('.sharing-remove').forEach(el => {
+        el.onclick = async () => {
+          const userId = el.dataset.memberId;
+          if (!window.confirm('Remove collaborator ' + userId + ' from vault "' + vault + '"?')) return;
+          el.disabled = true;
+          clearDashError();
+          document.getElementById('sharing-success').classList.add('hidden');
+          try {
+            await api('/sharing/members/remove', {
+              method: 'POST',
+              body: JSON.stringify({ vault_id: vault, user_id: userId }),
+            });
+            const ok = document.getElementById('sharing-success');
+            ok.textContent = 'Removed collaborator ' + userId;
+            ok.classList.remove('hidden');
+            await loadSharing(vault);
+          } catch (err) {
+            showDashError(err.message);
+            el.disabled = false;
+          }
+        };
+      });
+    }
+
+    async function acceptSharingInvite() {
+      if (!pendingInviteToken) return;
+      clearDashError();
+      const res = await api('/sharing/invites/accept', {
+        method: 'POST',
+        body: JSON.stringify({ token: pendingInviteToken }),
+      });
+      pendingInviteToken = '';
+      localStorage.removeItem(pendingInviteKey);
+      updateSharingAcceptPanel();
+      const ok = document.getElementById('sharing-success');
+      ok.textContent = res.message || 'Invite accepted';
+      ok.classList.remove('hidden');
+      if (res.vault_id) {
+        document.getElementById('sharing-vault').value = res.vault_id;
+        await loadSharing(res.vault_id);
+      }
+    }
+
+    async function loadSharing(vault) {
+      const loading = document.getElementById('sharing-loading');
+      const invitesTable = document.getElementById('sharing-invites-table');
+      const invitesEmpty = document.getElementById('sharing-invites-empty');
+      const membersTable = document.getElementById('sharing-members-table');
+      const membersEmpty = document.getElementById('sharing-members-empty');
+      const success = document.getElementById('sharing-success');
+      loading.classList.remove('hidden');
+      invitesTable.classList.add('hidden');
+      invitesEmpty.classList.add('hidden');
+      membersTable.classList.add('hidden');
+      membersEmpty.classList.add('hidden');
+      success.classList.add('hidden');
+      clearDashError();
+      try {
+        const qs = new URLSearchParams({ vault_id: vault });
+        const [invites, members] = await Promise.all([
+          api('/sharing/invites?' + qs.toString()),
+          api('/sharing/members?' + qs.toString()),
+        ]);
+
+        const pendingInvites = (invites.invites || []).filter(i => !i.redeemed);
+        if (!pendingInvites.length) {
+          invitesEmpty.textContent = 'No pending invites for vault "' + vault + '".';
+          invitesEmpty.classList.remove('hidden');
+        } else {
+          document.getElementById('sharing-invites-list').innerHTML =
+            pendingInvites.map(sharingInviteRowHtml).join('');
+          invitesTable.classList.remove('hidden');
+        }
+
+        if (!members.members || !members.members.length) {
+          membersEmpty.classList.remove('hidden');
+        } else {
+          document.getElementById('sharing-members-list').innerHTML =
+            members.members.map(m => sharingMemberRowHtml(m, vault)).join('');
+          membersTable.classList.remove('hidden');
+          bindSharingRemove(vault);
+        }
+      } finally {
+        loading.classList.add('hidden');
+      }
+    }
+
     function escapeHtml(s) {
       return String(s)
         .replace(/&/g, '&amp;')
@@ -1344,6 +1549,67 @@
       }
     };
 
+    document.getElementById('sharing-invite-btn').onclick = async () => {
+      const btn = document.getElementById('sharing-invite-btn');
+      const vault = document.getElementById('sharing-vault').value.trim() || 'default';
+      const role = document.getElementById('sharing-role').value;
+      const ttl = parseInt(document.getElementById('sharing-ttl').value, 10) || 168;
+      btn.disabled = true;
+      clearDashError();
+      document.getElementById('sharing-success').classList.add('hidden');
+      document.getElementById('sharing-token-box').classList.add('hidden');
+      try {
+        const res = await api('/sharing/invites', {
+          method: 'POST',
+          body: JSON.stringify({ vault_id: vault, role, ttl_hours: ttl }),
+        });
+        const ok = document.getElementById('sharing-success');
+        ok.textContent = 'Invite created for vault "' + vault + '" (' + role + ')';
+        ok.classList.remove('hidden');
+        document.getElementById('sharing-token-value').textContent = res.invite_token || '';
+        const urlEl = document.getElementById('sharing-url-value');
+        if (res.invite_url) {
+          urlEl.textContent = res.invite_url;
+          urlEl.classList.remove('hidden');
+        } else {
+          urlEl.textContent = '';
+          urlEl.classList.add('hidden');
+        }
+        document.getElementById('sharing-token-box').classList.remove('hidden');
+        await loadSharing(vault);
+      } catch (err) {
+        showDashError(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    document.getElementById('sharing-refresh-btn').onclick = async () => {
+      const btn = document.getElementById('sharing-refresh-btn');
+      const vault = document.getElementById('sharing-vault').value.trim() || 'default';
+      btn.disabled = true;
+      try {
+        await loadSharing(vault);
+      } catch (err) {
+        showDashError(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    document.getElementById('sharing-accept-btn').onclick = async () => {
+      const btn = document.getElementById('sharing-accept-btn');
+      btn.disabled = true;
+      clearDashError();
+      try {
+        await acceptSharingInvite();
+      } catch (err) {
+        showDashError(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
     document.getElementById('delete-account-btn').onclick = async () => {
       const btn = document.getElementById('delete-account-btn');
       const confirmEmail = document.getElementById('delete-confirm-email').value.trim();
@@ -1379,13 +1645,20 @@
       const prefilledVault = params.get('version_vault');
       const prefilledSnapshotVault = params.get('snapshot_vault');
       const prefilledTrashVault = params.get('trash_vault');
+      const prefilledSharingVault = params.get('sharing_vault');
       if (prefilledPath) document.getElementById('version-path').value = prefilledPath;
       if (prefilledVault) document.getElementById('version-vault').value = prefilledVault;
       if (prefilledSnapshotVault) document.getElementById('snapshot-vault').value = prefilledSnapshotVault;
       if (prefilledTrashVault) document.getElementById('trash-vault').value = prefilledTrashVault;
+      if (prefilledSharingVault) document.getElementById('sharing-vault').value = prefilledSharingVault;
 
       const token = localStorage.getItem(tokenKey);
-      if (!token) return;
+      if (!token) {
+        if (pendingInviteToken) {
+          showAuthError('Sign in to accept the vault invite.');
+        }
+        return;
+      }
       try {
         await loadDashboard();
         if (prefilledPath) {
@@ -1405,6 +1678,11 @@
           await loadTrash(
             prefilledTrashVault || document.getElementById('trash-vault').value || 'default',
             0
+          );
+        }
+        if (params.get('sharing') === '1' || prefilledSharingVault || pendingInviteToken) {
+          await loadSharing(
+            prefilledSharingVault || document.getElementById('sharing-vault').value || 'default'
           );
         }
       } catch {
