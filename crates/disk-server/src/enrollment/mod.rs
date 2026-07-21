@@ -28,6 +28,8 @@ use std::env;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::auth::rate_limit::{AuthAttemptLimiter, SharedAuthAttemptLimiter};
+
 use rand::RngCore;
 use sqlx::SqlitePool;
 use tonic::{Request, Response, Status};
@@ -78,15 +80,36 @@ pub struct EnrollmentServiceImpl {
     ca: Arc<dyn CaClient>,
     /// Admin token override for testing. If `None`, read from env `DISK_ADMIN_TOKEN`.
     admin_token_override: Option<String>,
+    /// Per-peer-IP failed `Enroll` rate limiter for the public `:9445` listener.
+    enroll_limiter: Option<SharedAuthAttemptLimiter>,
 }
 
 impl EnrollmentServiceImpl {
     pub fn new(pool: SqlitePool, audit: AuditEmitter, ca: Arc<dyn CaClient>) -> Self {
+        Self::with_rate_limiter(
+            pool,
+            audit,
+            ca,
+            Some(Arc::new(AuthAttemptLimiter::new(
+                crate::auth::rate_limit::DEFAULT_ENROLL_MAX_FAILURES,
+                crate::auth::rate_limit::DEFAULT_WINDOW,
+            ))),
+        )
+    }
+
+    /// Create a service with an optional per-peer failed-enroll rate limiter.
+    pub fn with_rate_limiter(
+        pool: SqlitePool,
+        audit: AuditEmitter,
+        ca: Arc<dyn CaClient>,
+        enroll_limiter: Option<SharedAuthAttemptLimiter>,
+    ) -> Self {
         Self {
             pool,
             audit,
             ca,
             admin_token_override: None,
+            enroll_limiter,
         }
     }
 
@@ -117,6 +140,37 @@ impl EnrollmentServiceImpl {
             return Err(Status::unauthenticated("invalid admin token"));
         }
         Ok(())
+    }
+
+    fn peer_key<T>(request: &Request<T>) -> String {
+        request
+            .remote_addr()
+            .map(|addr| addr.ip().to_string())
+            .unwrap_or_else(|| "unknown".to_string())
+    }
+
+    fn check_enroll_rate_limit_peer(&self, peer: &str, now_secs: u64) -> Result<(), Status> {
+        let Some(limiter) = &self.enroll_limiter else {
+            return Ok(());
+        };
+        limiter.check(peer, now_secs).map_err(|e| {
+            Status::resource_exhausted(format!(
+                "too many failed enroll attempts; retry after {}s",
+                e.retry_after_secs
+            ))
+        })
+    }
+
+    fn record_enroll_failure_peer(&self, peer: &str, now_secs: u64) {
+        if let Some(limiter) = &self.enroll_limiter {
+            limiter.record_failure(peer, now_secs);
+        }
+    }
+
+    fn clear_enroll_failures_peer(&self, peer: &str) {
+        if let Some(limiter) = &self.enroll_limiter {
+            limiter.clear(peer);
+        }
     }
 }
 
@@ -184,6 +238,9 @@ impl EnrollmentService for EnrollmentServiceImpl {
         request: Request<EnrollRequest>,
     ) -> Result<Response<EnrollResponse>, Status> {
         let now_ms = unix_now_ms()?;
+        let now_secs = now_ms / 1_000;
+        let peer = Self::peer_key(&request);
+        self.check_enroll_rate_limit_peer(&peer, now_secs)?;
         let req = request.into_inner();
 
         let token_hash = blake3::hash(&req.opaque_token);
@@ -200,6 +257,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
 
         let (expires_at, consumed_at, revoked_at) = match row {
             None => {
+                self.record_enroll_failure_peer(&peer, now_secs);
                 let _ = self
                     .audit
                     .emit(AuditEvent::new(AuditKind::EnrollmentPending).with_payload(
@@ -214,6 +272,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
         };
 
         if revoked_at.is_some() {
+            self.record_enroll_failure_peer(&peer, now_secs);
             let _ = self
                 .audit
                 .emit(AuditEvent::new(AuditKind::EnrollmentRevoked))
@@ -224,6 +283,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
         }
 
         if consumed_at.is_some() {
+            self.record_enroll_failure_peer(&peer, now_secs);
             let _ =
                 self.audit
                     .emit(AuditEvent::new(AuditKind::EnrollmentPending).with_payload(
@@ -236,6 +296,7 @@ impl EnrollmentService for EnrollmentServiceImpl {
         }
 
         if (expires_at as u64) < now_ms {
+            self.record_enroll_failure_peer(&peer, now_secs);
             let _ = self
                 .audit
                 .emit(AuditEvent::new(AuditKind::EnrollmentTokenExpired))
@@ -306,6 +367,8 @@ impl EnrollmentService for EnrollmentServiceImpl {
                     .with_payload(&serde_json::json!({ "node_id_hint": req.node_id_hint })),
             )
             .await;
+
+        self.clear_enroll_failures_peer(&peer);
 
         Ok(Response::new(EnrollResponse {
             client_cert_pem: cert.client_cert_pem,
