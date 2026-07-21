@@ -9,6 +9,7 @@
 //! - `POST /auth/refresh` — DISK-0016 slice 5 (when oauth=auth_arcana + jwt JWKS mode)
 //! - `GET /dashboard/summary` — DISK-0019 (when auth=enforce)
 //! - `POST /dashboard/conflicts/{id}/resolve` — DISK-0019 slice 2
+//! - `GET /compliance/export` — DISK-0021 GDPR data export (when auth=enforce)
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -22,6 +23,7 @@ use crate::accounts::{
     oauth_callback, oauth_start, refresh_token, resend_verification, verify_email,
 };
 use crate::billing::webhook::{stripe_webhook, WebhookState};
+use crate::compliance::export_data;
 use crate::dashboard::{resolve_conflict, summary};
 
 /// Start the health HTTP server. Returns an error if the bind fails; otherwise
@@ -61,7 +63,8 @@ pub async fn serve(
         }
         auth_router = auth_router
             .route("/dashboard/summary", get(summary))
-            .route("/dashboard/conflicts/:id/resolve", post(resolve_conflict));
+            .route("/dashboard/conflicts/:id/resolve", post(resolve_conflict))
+            .route("/compliance/export", get(export_data));
         app = app.merge(auth_router.with_state(state));
     }
 
