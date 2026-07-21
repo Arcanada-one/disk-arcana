@@ -13,6 +13,7 @@ mod dashboard;
 mod files;
 mod node_baseline;
 mod nodes;
+mod sharing;
 mod snapshots;
 mod tombstones;
 mod trash;
@@ -29,6 +30,7 @@ use sqlx::{
 use crate::error::MetaDbError;
 
 pub use accounts::{NewOAuthUser, UserAccount};
+pub use sharing::{VaultInviteRow, VaultMemberRow, VaultShareRole};
 pub use snapshots::{VaultSnapshotFileRow, VaultSnapshotRow};
 pub use trash::TrashRow;
 pub use versions::{FileVersionRow, FileVersionUpsert};

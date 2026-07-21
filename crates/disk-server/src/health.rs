@@ -23,6 +23,11 @@
 //! - `POST /trash/restore` — DISK-0024 undelete a file from trash
 //! - `POST /trash/delete` — DISK-0024 permanently delete one trashed file
 //! - `POST /trash/empty` — DISK-0024 permanently empty vault recycle bin
+//! - `POST /sharing/invites` — DISK-0022 create vault invite link
+//! - `GET /sharing/invites` — DISK-0022 list pending invites
+//! - `POST /sharing/invites/accept` — DISK-0022 accept invite token
+//! - `GET /sharing/members` — DISK-0022 list vault collaborators
+//! - `POST /sharing/members/remove` — DISK-0022 revoke collaborator access
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -38,6 +43,7 @@ use crate::accounts::{
 use crate::billing::webhook::{stripe_webhook, WebhookState};
 use crate::compliance::{delete_account, export_data, list_consents, sub_processors};
 use crate::dashboard::{resolve_conflict, summary};
+use crate::sharing::{accept_invite, create_invite, list_invites, list_members, remove_member};
 use crate::snapshots::{create_snapshot, get_snapshot, list_snapshots, restore_snapshot};
 use crate::trash::{delete_trash, empty_trash, list_trash, restore_trash};
 use crate::versions::{list_versions, restore_version};
@@ -93,7 +99,11 @@ pub async fn serve(
             .route("/trash", get(list_trash))
             .route("/trash/restore", post(restore_trash))
             .route("/trash/delete", post(delete_trash))
-            .route("/trash/empty", post(empty_trash));
+            .route("/trash/empty", post(empty_trash))
+            .route("/sharing/invites", get(list_invites).post(create_invite))
+            .route("/sharing/invites/accept", post(accept_invite))
+            .route("/sharing/members", get(list_members))
+            .route("/sharing/members/remove", post(remove_member));
         crate::trash::scheduler::spawn_periodic_prune(state.clone());
         app = app.merge(auth_router.with_state(state));
     }

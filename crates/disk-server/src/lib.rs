@@ -20,6 +20,7 @@ pub mod middleware;
 pub mod multi_node;
 pub mod publisher;
 pub mod services;
+pub mod sharing;
 pub mod snapshots;
 pub mod tls;
 pub mod trash;
