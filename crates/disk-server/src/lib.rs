@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod accounts;
 pub mod acl;
 pub mod audit;
 pub mod auth;
@@ -22,6 +23,7 @@ pub mod tls;
 pub use acl::reload::{ReloadHandle, SessionInvalidate};
 pub use config::{CaMode, ConfigError, RegisterNodeMode, ServerConfig};
 
+pub use accounts::{routes::AuthHttpState, AuthMode};
 pub use acl::{
     load_from_yaml, AclEnforcer, AclError, AclLoadError, AclState, AclYamlFile, AlwaysFailVerifier,
     CertFingerprint, EnforcedRole, EnforcementTable, GpgVerifier, LoadOutcome, NoopVerifier,

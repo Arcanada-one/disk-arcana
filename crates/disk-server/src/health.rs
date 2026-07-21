@@ -3,6 +3,7 @@
 //! Binds to `DISK_HEALTH_BIND_ADDR` (default `0.0.0.0:9446`) and exposes:
 //! - `GET /health` — liveness probe
 //! - `POST /billing/stripe/webhook` — DISK-0018 Stripe stub (when mode=stripe)
+//! - `POST /auth/signup`, `POST /auth/login`, `GET /auth/me` — DISK-0016 (when auth=enforce)
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -11,6 +12,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
 
+use crate::accounts::routes::{login, me, signup, AuthHttpState};
 use crate::billing::webhook::{stripe_webhook, WebhookState};
 
 /// Start the health HTTP server. Returns an error if the bind fails; otherwise
@@ -18,6 +20,7 @@ use crate::billing::webhook::{stripe_webhook, WebhookState};
 pub async fn serve(
     addr: SocketAddr,
     webhook: Option<Arc<WebhookState>>,
+    auth: Option<Arc<AuthHttpState>>,
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()> {
     let mut app = Router::new().route("/health", get(health_handler));
@@ -26,6 +29,14 @@ pub async fn serve(
             "/billing/stripe/webhook",
             post(stripe_webhook).with_state(state),
         );
+    }
+    if let Some(state) = auth {
+        let auth_router = Router::new()
+            .route("/auth/signup", post(signup))
+            .route("/auth/login", post(login))
+            .route("/auth/me", get(me))
+            .with_state(state);
+        app = app.merge(auth_router);
     }
 
     let listener = tokio::net::TcpListener::bind(addr)
@@ -63,7 +74,7 @@ mod tests {
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         tokio::spawn(async move {
-            serve(addr, None, async move {
+            serve(addr, None, None, async move {
                 let _ = shutdown_rx.await;
             })
             .await
