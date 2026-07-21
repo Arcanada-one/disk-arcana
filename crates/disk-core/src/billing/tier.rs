@@ -83,6 +83,13 @@ pub struct VersionRetention {
     pub max_age_secs: i64,
 }
 
+/// Point-in-time vault snapshot retention (DISK-0020 slice 4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SnapshotRetention {
+    pub max_snapshots: u32,
+    pub max_age_secs: i64,
+}
+
 impl PlanTier {
     /// How many historical revisions to keep per file path.
     pub fn version_retention(self) -> VersionRetention {
@@ -97,6 +104,24 @@ impl PlanTier {
             },
             Self::Team => VersionRetention {
                 max_versions: 100,
+                max_age_secs: 365 * 24 * 3600,
+            },
+        }
+    }
+
+    /// How many vault-wide snapshots to keep per tenant vault.
+    pub fn snapshot_retention(self) -> SnapshotRetention {
+        match self {
+            Self::Free => SnapshotRetention {
+                max_snapshots: 2,
+                max_age_secs: 7 * 24 * 3600,
+            },
+            Self::Pro => SnapshotRetention {
+                max_snapshots: 20,
+                max_age_secs: 90 * 24 * 3600,
+            },
+            Self::Team => SnapshotRetention {
+                max_snapshots: 100,
                 max_age_secs: 365 * 24 * 3600,
             },
         }

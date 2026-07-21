@@ -15,6 +15,10 @@
 //! - `GET /compliance/consents` — DISK-0021 slice 3 consent audit (when auth=enforce)
 //! - `GET /versions` — DISK-0020 file version history (when auth=enforce)
 //! - `POST /versions/restore` — DISK-0020 restore a historical revision
+//! - `GET /snapshots` — DISK-0020 slice 4 vault snapshot list (when auth=enforce)
+//! - `POST /snapshots` — DISK-0020 slice 4 create vault snapshot
+//! - `GET /snapshots/:id` — DISK-0020 slice 4 snapshot detail
+//! - `POST /snapshots/:id/restore` — DISK-0020 slice 4 restore vault to snapshot
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -30,6 +34,7 @@ use crate::accounts::{
 use crate::billing::webhook::{stripe_webhook, WebhookState};
 use crate::compliance::{delete_account, export_data, list_consents, sub_processors};
 use crate::dashboard::{resolve_conflict, summary};
+use crate::snapshots::{create_snapshot, get_snapshot, list_snapshots, restore_snapshot};
 use crate::versions::{list_versions, restore_version};
 
 /// Start the health HTTP server. Returns an error if the bind fails; otherwise
@@ -76,7 +81,10 @@ pub async fn serve(
             .route("/compliance/delete-account", post(delete_account))
             .route("/compliance/consents", get(list_consents))
             .route("/versions", get(list_versions))
-            .route("/versions/restore", post(restore_version));
+            .route("/versions/restore", post(restore_version))
+            .route("/snapshots", get(list_snapshots).post(create_snapshot))
+            .route("/snapshots/:id", get(get_snapshot))
+            .route("/snapshots/:id/restore", post(restore_snapshot));
         app = app.merge(auth_router.with_state(state));
     }
 
