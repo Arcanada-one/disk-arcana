@@ -134,6 +134,18 @@ impl AuthStore {
     pub fn session_count(&self) -> usize {
         self.inner.sessions.len()
     }
+
+    /// Insert a session with explicit expiry (tests only).
+    #[cfg(test)]
+    pub fn insert_test_session(&self, token: SessionToken, node_id: &str, expires_at: u64) {
+        self.inner.sessions.insert(
+            token,
+            SessionEntry {
+                node_id: node_id.to_owned(),
+                expires_at,
+            },
+        );
+    }
 }
 
 impl Default for AuthStore {
@@ -224,6 +236,15 @@ mod tests {
         let store = AuthStore::new();
         let fake = SessionToken::generate();
         assert!(store.validate_session(&fake).is_none());
+    }
+
+    #[test]
+    fn validate_expired_session_returns_none_and_evicts() {
+        let store = AuthStore::new();
+        let token = SessionToken::generate();
+        store.insert_test_session(token.clone(), "node-x", 1);
+        assert!(store.validate_session(&token).is_none());
+        assert_eq!(store.session_count(), 0);
     }
 
     #[test]

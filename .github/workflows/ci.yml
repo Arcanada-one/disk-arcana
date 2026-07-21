@@ -83,6 +83,8 @@ jobs:
         run: bash crates/disk-client/lints/check_loopback_bind.sh .
       - name: install.sh syntax (DISK-0010)
         run: sh -n scripts/install.sh
+      - name: OWASP evidence paths (DISK-0012)
+        run: bash scripts/validate-owasp-evidence.sh
       - name: Obsidian plugin unit tests (DISK-0008)
         run: |
           set -euo pipefail
