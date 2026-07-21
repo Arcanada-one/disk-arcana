@@ -18,7 +18,7 @@ use std::str::FromStr;
 pub use reload::{spawn_config_watcher, ConfigSnapshot, ConfigWatcher, ReloadStatus};
 pub use schema::{
     Direction, DiskConfig, FilterMode, FilterSection, NodeDefault, NodeSection, PublisherSection,
-    ServerSection, ShareSection, TelemetrySection, VaultSection,
+    ServerSection, ShareSection, TelemetrySection, VaultSection, LanSyncSection,
 };
 pub use validate::{validate, ConfigError};
 
@@ -405,5 +405,27 @@ path = "{}"
             ConfigError::Validation(msg) => assert!(msg.contains("intended_direction")),
             other => panic!("expected Validation, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn lan_sync_section_defaults_disabled() {
+        let cfg = DiskConfig::from_str(MINIMAL).unwrap();
+        assert!(!cfg.lan_sync.enabled);
+        assert_eq!(cfg.lan_sync.advertise_port, 9447);
+    }
+
+    #[test]
+    fn lan_sync_section_parses_enabled() {
+        let mut toml = MINIMAL.to_string();
+        toml.push_str(
+            r#"
+[lan_sync]
+enabled = true
+advertise_port = 9555
+"#,
+        );
+        let cfg = DiskConfig::from_str(&toml).unwrap();
+        assert!(cfg.lan_sync.enabled);
+        assert_eq!(cfg.lan_sync.advertise_port, 9555);
     }
 }

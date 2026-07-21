@@ -35,6 +35,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use disk_client::config::{spawn_config_watcher, ConfigWatcher, Direction, DiskConfig};
 use disk_client::connection::DiskClient;
+use disk_client::lan_sync::{parse_server_port, spawn_lan_discovery, LanPeerRegistry};
 use disk_client::resolve_vault_key;
 use disk_client::rest_api::{serve, DaemonState, ShareSnapshot};
 use disk_client::sync_loop::{LoopState, LoopTrigger, RemoteSync, SyncLoop, POLL_INTERVAL};
@@ -171,6 +172,27 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
         state.with_vault_roots(share_roots)
     } else {
         state
+    };
+
+    let lan_registry = LanPeerRegistry::new(cfg.lan_sync.enabled, &node_id);
+    let state = state.with_lan_peers(Arc::clone(&lan_registry));
+    let (lan_shutdown_tx, lan_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let lan_discovery_handle = if cfg.lan_sync.enabled {
+        tracing::info!(
+            port = cfg.lan_sync.advertise_port,
+            "daemon: LAN sync discovery enabled"
+        );
+        Some(spawn_lan_discovery(
+            lan_registry,
+            node_id.clone(),
+            cfg.node.tenant_id.clone(),
+            cfg.lan_sync.advertise_port,
+            parse_server_port(&cfg.server.address),
+            lan_shutdown_rx,
+        ))
+    } else {
+        drop(lan_shutdown_rx);
+        None
     };
 
     // ── Spawn per-share sync-loop tasks (DISK-0043) ──────────────────────
@@ -528,6 +550,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
 
     let shutdown_fut = async move {
         let _ = shutdown_rx.await;
+        let _ = lan_shutdown_tx.send(());
     };
 
     let local = serve(state, args.status_bind, shutdown_fut)
@@ -543,6 +566,9 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
         h.abort();
     }
     if let Some(h) = maintenance_handle {
+        h.abort();
+    }
+    if let Some(h) = lan_discovery_handle {
         h.abort();
     }
     tracing::info!("disk daemon shutdown complete");

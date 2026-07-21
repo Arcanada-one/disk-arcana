@@ -42,6 +42,8 @@ pub struct DiskConfig {
     pub shares: Vec<ShareSection>,
     #[serde(default)]
     pub telemetry: TelemetrySection,
+    #[serde(default)]
+    pub lan_sync: LanSyncSection,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -162,6 +164,28 @@ pub struct TelemetrySection {
     pub opt_in: bool,
     #[serde(default)]
     pub health_base_url: Option<String>,
+}
+
+/// `[lan_sync]` section — LAN peer discovery for P2P acceleration (DISK-0027).
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct LanSyncSection {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_lan_advertise_port")]
+    pub advertise_port: u16,
+}
+
+impl Default for LanSyncSection {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            advertise_port: default_lan_advertise_port(),
+        }
+    }
+}
+
+fn default_lan_advertise_port() -> u16 {
+    9447
 }
 
 fn default_true() -> bool {
