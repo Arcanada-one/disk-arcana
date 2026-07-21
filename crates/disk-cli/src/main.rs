@@ -5,6 +5,7 @@ mod commands;
 mod daemon;
 mod paths;
 mod share_init;
+mod vault;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -67,6 +68,9 @@ enum Command {
 
     /// Create, inspect, or restore indexed `.disk-archive` folder snapshots.
     Archive(ArchiveArgs),
+
+    /// E2EE vault key unlock / lock (OS keychain).
+    Vault(vault::VaultArgs),
 }
 
 /// `disk daemon <subcmd>` — wrapper.
@@ -482,6 +486,11 @@ async fn main() -> Result<()> {
             ArchiveCommand::Create(c) => archive_cmd::run_create(c.source, c.output),
             ArchiveCommand::List(l) => archive_cmd::run_list(l.archive),
             ArchiveCommand::Restore(r) => archive_cmd::run_restore(r.archive, r.destination),
+        },
+        Some(Command::Vault(args)) => match args.command {
+            vault::VaultCommand::Unlock(u) => vault::run_unlock(u),
+            vault::VaultCommand::Lock(l) => vault::run_lock(l),
+            vault::VaultCommand::Status(s) => vault::run_status(s),
         },
         None => {
             let version = env!("CARGO_PKG_VERSION");

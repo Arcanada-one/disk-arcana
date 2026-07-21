@@ -103,7 +103,7 @@ fn default_tls_mode() -> String {
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct VaultSection {
     /// When true, uploads encrypt plaintext before `DeltaUpload`.
-    /// Requires `DISK_VAULT_PASSPHRASE` + `DISK_VAULT_SALT` env vars at runtime.
+    /// Requires `disk vault unlock` (keychain) or `DISK_VAULT_PASSPHRASE` + `DISK_VAULT_SALT` env.
     #[serde(default)]
     pub e2ee_enabled: bool,
 }
