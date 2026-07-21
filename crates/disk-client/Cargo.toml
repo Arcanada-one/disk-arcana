@@ -42,6 +42,7 @@ time               = { workspace = true }
 walkdir            = { workspace = true }
 blake3             = { workspace = true }
 tempfile           = "3"
+reqwest            = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

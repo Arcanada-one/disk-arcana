@@ -15,10 +15,12 @@ pub mod keychain;
 pub mod mtls;
 pub mod rest_api;
 pub mod sync_loop;
+pub mod telemetry;
 pub mod vault_key;
 pub mod watcher;
 
 pub use blob_cache::BlobCache;
+pub use config::TelemetrySection;
 pub use config::{spawn_config_watcher, ConfigSnapshot, ConfigWatcher, ReloadStatus};
 pub use conflict_writer::{apply_conflict, write_fork, ConflictApplyOutcome, ForkWriteError};
 pub use connection::{ClientConfig, ClientError, DiskClient};
@@ -43,6 +45,7 @@ pub use sync_loop::{
     classify_client_error, classify_tonic_status, Backoff, LoopError, LoopState, LoopTrigger,
     RemoteSync, SyncLoop, SyncTransport, BACKOFF_BASE, BACKOFF_CAP, BACKOFF_JITTER, POLL_INTERVAL,
 };
+pub use telemetry::{default_health_base, sync_outcome_label, ClientTelemetry};
 pub use vault_key::{
     e2ee_keystore_label, load_vault_key_from_env, load_vault_key_from_keystore, lock_vault_key,
     resolve_vault_key, unlock_vault_key, vault_key_status, VaultKeyError, VaultLockState,

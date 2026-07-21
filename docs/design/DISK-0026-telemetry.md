@@ -1,6 +1,6 @@
 # DISK-0026 — Telemetry & Product Analytics (PostHog opt-in)
 
-**Status:** slice 1 on DEVS — dashboard PostHog opt-in + onboarding funnel events.  
+**Status:** slice 1 merged path — dashboard PostHog opt-in; slice 2 on DEVS — CLI daemon telemetry.  
 **Parent:** DISK-0001 commercial / SaaS track.  
 **Tracking:** DISK-0026 in Datarim backlog.
 
@@ -8,8 +8,8 @@
 
 | Slice | In scope | Out of scope |
 |-------|----------|--------------|
-| 1 (this PR) | `user_telemetry` table, `GET/PUT /telemetry`, public `GET /telemetry/config`, dashboard opt-in toggle, PostHog JS loader (EU host default), onboarding funnel events, consent audit + sub-processor registry | CLI `disk.toml` anonymous telemetry sender, server-side event ingestion, cookie banner |
-| 2+ | Client daemon opt-in events (`[telemetry] opt_in` in `disk.toml`), ops metrics export | Marketing attribution, session replay |
+| 1 (merged #96) | `user_telemetry` table, `GET/PUT /telemetry`, public `GET /telemetry/config`, dashboard opt-in toggle, PostHog JS loader (EU host default), onboarding funnel events, consent audit + sub-processor registry | CLI `disk.toml` anonymous telemetry sender, server-side event ingestion, cookie banner |
+| 2 (this PR) | `[telemetry] opt_in` in client `disk.toml`, daemon PostHog capture (`client_daemon_started`, `client_sync_cycle`), install-id persistence, health URL derivation | Ops metrics export, marketing attribution, session replay |
 
 ## Privacy model
 
@@ -34,6 +34,20 @@
 | `DISK_POSTHOG_PROJECT_KEY` | Enables analytics when set (exposed to dashboard via `/telemetry/config`) |
 | `DISK_POSTHOG_API_HOST` | Ingest host (default `https://eu.i.posthog.com`) |
 
+## Client daemon (slice 2)
+
+When `[telemetry] opt_in = true` in the enrolled-node `disk.toml`:
+
+| Event | When |
+|-------|------|
+| `client_daemon_started` | Daemon foreground start (`share_count`) |
+| `client_sync_cycle` | After each sync-loop iteration (`share`, `outcome`, `trigger`) |
+
+- **Install ID:** `{state_dir}/.telemetry-install-id` (random hex, no PII)
+- **Config fetch:** `GET {health_base}/telemetry/config` before first capture
+- **Health base:** `[telemetry].health_base_url` or `http://{server_host}:9446`
+- **Fail-soft:** telemetry errors are logged at `debug` and never block sync
+
 ## Dashboard events (PostHog)
 
 | Event | When |
@@ -53,6 +67,7 @@ Funnel dedupe uses `localStorage` key `disk_telemetry_funnel:{user_id}`.
 ## Tests
 
 - `crates/disk-core/src/meta_db/telemetry.rs` — get/upsert unit tests
+- `crates/disk-client/src/telemetry.rs` — health URL + install-id unit tests
 - `crates/disk-server/src/telemetry/routes.rs` — HTTP round-trip + consent recording
 - `crates/disk-core/tests/schema_smoke.rs` — migration 019 table exists
 

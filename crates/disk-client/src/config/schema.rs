@@ -40,6 +40,8 @@ pub struct DiskConfig {
     pub vault: VaultSection,
     #[serde(default, rename = "share")]
     pub shares: Vec<ShareSection>,
+    #[serde(default)]
+    pub telemetry: TelemetrySection,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -151,6 +153,15 @@ pub struct PublisherSection {
     /// instead of dropping the artefact silently.
     #[serde(default = "default_true")]
     pub quarantine_on_failure: bool,
+}
+
+/// `[telemetry]` section — anonymous PostHog events from the daemon (DISK-0026).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+pub struct TelemetrySection {
+    #[serde(default)]
+    pub opt_in: bool,
+    #[serde(default)]
+    pub health_base_url: Option<String>,
 }
 
 fn default_true() -> bool {

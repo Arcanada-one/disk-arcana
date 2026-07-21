@@ -18,7 +18,7 @@ use std::str::FromStr;
 pub use reload::{spawn_config_watcher, ConfigSnapshot, ConfigWatcher, ReloadStatus};
 pub use schema::{
     Direction, DiskConfig, FilterMode, FilterSection, NodeDefault, NodeSection, PublisherSection,
-    ServerSection, ShareSection, VaultSection,
+    ServerSection, ShareSection, TelemetrySection, VaultSection,
 };
 pub use validate::{validate, ConfigError};
 
