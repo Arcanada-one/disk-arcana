@@ -25,6 +25,7 @@
 //! | `DISK_ACL_SIG_PATH` | Path to the detached `.asc` GPG signature for the ACL YAML (production). When absent and neither `DISK_ACL_ALLOW_UNSIGNED` nor `DISK_USE_STUB_CA` is `1`, the binary panics (fail-closed). |
 //! | `DISK_ACL_GNUPGHOME` | Override `GNUPGHOME` for the GPG verifier. |
 //! | `DISK_HEALTH_BIND_ADDR` | HTTP health listener bind address. Default `0.0.0.0:9446`. |
+//! | `DISK_REGISTER_NODE_MODE` | `RegisterNode` gate: `open` (dev), `enrolled` (prod default), `disabled`, or `admin`. |
 //!
 //! Missing required vars surface as `ConfigError::MissingEnv` so the binary
 //! refuses to start (fail-closed per Appendix A).
@@ -69,6 +70,36 @@ pub enum CaMode {
     Offline,
 }
 
+/// Production gate for `AuthService::RegisterNode`.
+///
+/// - `Open`: legacy dev/test — no extra checks (in-memory registration only).
+/// - `Enrolled` (production default when `DISK_CA_MODE` is not `stub`): peer
+///   mTLS cert must match an active `node_certs` row for the requested `node_id`.
+/// - `Disabled`: always reject (bootstrap via admin tooling only).
+/// - `Admin`: require `x-disk-admin-token` bearer (same as enrollment admin RPCs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegisterNodeMode {
+    Open,
+    Enrolled,
+    Disabled,
+    Admin,
+}
+
+impl RegisterNodeMode {
+    fn parse(raw: &str) -> Result<Self, ConfigError> {
+        match raw.to_ascii_lowercase().as_str() {
+            "open" => Ok(Self::Open),
+            "enrolled" => Ok(Self::Enrolled),
+            "disabled" => Ok(Self::Disabled),
+            "admin" => Ok(Self::Admin),
+            other => Err(ConfigError::InvalidValue(
+                "DISK_REGISTER_NODE_MODE",
+                format!("unknown value '{other}'; expected open, enrolled, disabled, or admin"),
+            )),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     pub bind_addr: SocketAddr,
@@ -100,6 +131,8 @@ pub struct ServerConfig {
     /// verification. Implied by `use_stub_ca` for backward compatibility.
     /// Production MUST leave this unset and provide `DISK_ACL_SIG_PATH`.
     pub acl_allow_unsigned: bool,
+    /// `RegisterNode` production gate (OWASP T2.10).
+    pub register_node_mode: RegisterNodeMode,
 }
 
 impl ServerConfig {
@@ -156,6 +189,17 @@ impl ServerConfig {
             }
         };
 
+        let register_node_mode = match std::env::var("DISK_REGISTER_NODE_MODE").ok().as_deref() {
+            None => {
+                if ca_mode == CaMode::Stub {
+                    RegisterNodeMode::Open
+                } else {
+                    RegisterNodeMode::Enrolled
+                }
+            }
+            Some(raw) => RegisterNodeMode::parse(raw)?,
+        };
+
         Ok(Self {
             bind_addr,
             enrollment_bind_addr,
@@ -180,6 +224,7 @@ impl ServerConfig {
             // DISK_CA_MODE=offline does NOT imply allow-unsigned (fail-closed).
             acl_allow_unsigned: use_stub_ca_legacy
                 || std::env::var("DISK_ACL_ALLOW_UNSIGNED").ok().as_deref() == Some("1"),
+            register_node_mode,
         })
     }
 }
@@ -228,6 +273,7 @@ mod tests {
             "DISK_USE_STUB_CA",
             "DISK_ACL_ALLOW_UNSIGNED",
             "DISK_CA_MODE",
+            "DISK_REGISTER_NODE_MODE",
             "OPS_BOT_URL",
         ] {
             std::env::remove_var(v);
@@ -466,5 +512,34 @@ mod tests {
             matches!(err, ConfigError::InvalidValue("DISK_CA_MODE", _)),
             "expected InvalidValue(DISK_CA_MODE, _), got {err:?}"
         );
+    }
+
+    #[test]
+    fn register_node_mode_defaults_enrolled_for_http_ca() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_env();
+        set_required();
+        let cfg = ServerConfig::from_env().unwrap();
+        assert_eq!(cfg.register_node_mode, RegisterNodeMode::Enrolled);
+    }
+
+    #[test]
+    fn register_node_mode_defaults_open_for_stub_ca() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_env();
+        set_required();
+        std::env::set_var("DISK_USE_STUB_CA", "1");
+        let cfg = ServerConfig::from_env().unwrap();
+        assert_eq!(cfg.register_node_mode, RegisterNodeMode::Open);
+    }
+
+    #[test]
+    fn register_node_mode_explicit_override() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_env();
+        set_required();
+        std::env::set_var("DISK_REGISTER_NODE_MODE", "disabled");
+        let cfg = ServerConfig::from_env().unwrap();
+        assert_eq!(cfg.register_node_mode, RegisterNodeMode::Disabled);
     }
 }

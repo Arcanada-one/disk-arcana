@@ -10,17 +10,40 @@ use disk_proto::disk::{
     NodeRegisterResponse,
 };
 
-use crate::auth::AuthStore;
+use crate::auth::{check_register_gate, AuthStore};
+use crate::config::RegisterNodeMode;
+use sqlx::SqlitePool;
 
 /// Concrete `AuthService` implementation.
 #[derive(Debug, Clone)]
 pub struct AuthServiceImpl {
     pub store: AuthStore,
+    register_mode: RegisterNodeMode,
+    pool: Option<SqlitePool>,
+    admin_token: Option<String>,
 }
 
 impl AuthServiceImpl {
     pub fn new(store: AuthStore) -> Self {
-        Self { store }
+        Self {
+            store,
+            register_mode: RegisterNodeMode::Open,
+            pool: None,
+            admin_token: None,
+        }
+    }
+
+    /// Wire production `RegisterNode` gate (OWASP T2.10).
+    pub fn with_register_gate(
+        mut self,
+        mode: RegisterNodeMode,
+        pool: SqlitePool,
+        admin_token: Option<String>,
+    ) -> Self {
+        self.register_mode = mode;
+        self.pool = Some(pool);
+        self.admin_token = admin_token;
+        self
     }
 }
 
@@ -30,16 +53,25 @@ impl AuthService for AuthServiceImpl {
         &self,
         request: Request<NodeRegisterRequest>,
     ) -> Result<Response<NodeRegisterResponse>, Status> {
-        let req = request.into_inner();
-        let node_id = req.node_id.trim();
-        let display_name = req.display_name.trim();
-        let platform = req.platform.trim();
-
+        let node_id = request.get_ref().node_id.trim().to_owned();
         if node_id.is_empty() {
             return Err(Status::invalid_argument("node_id must not be empty"));
         }
 
-        match self.store.register_node(node_id, display_name, platform) {
+        check_register_gate(
+            self.register_mode,
+            self.pool.as_ref(),
+            self.admin_token.as_deref(),
+            &request,
+            &node_id,
+        )
+        .await?;
+
+        let req = request.into_inner();
+        let display_name = req.display_name.trim();
+        let platform = req.platform.trim();
+
+        match self.store.register_node(&node_id, display_name, platform) {
             Ok(api_key) => {
                 let registered_at = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -47,7 +79,7 @@ impl AuthService for AuthServiceImpl {
                     .as_secs() as i64;
                 Ok(Response::new(NodeRegisterResponse {
                     api_key: api_key.as_str().to_owned(),
-                    assigned_id: node_id.to_owned(),
+                    assigned_id: node_id.clone(),
                     registered_at,
                 }))
             }

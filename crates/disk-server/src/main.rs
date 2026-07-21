@@ -140,7 +140,12 @@ async fn main() -> anyhow::Result<()> {
     // Admin RPCs remain gated by `require_admin()` metadata check — the public
     // listener returns PermissionDenied because external clients lack
     // `x-disk-admin-token`.
-    let auth_svc = AuthServiceServer::new(AuthServiceImpl::new(auth_store.clone()));
+    let auth_svc =
+        AuthServiceServer::new(AuthServiceImpl::new(auth_store.clone()).with_register_gate(
+            cfg.register_node_mode,
+            pool.clone(),
+            cfg.admin_token.clone(),
+        ));
     let sync_svc = SyncServiceServer::new(
         SyncServiceImpl::with_acl(
             auth_store.clone(),

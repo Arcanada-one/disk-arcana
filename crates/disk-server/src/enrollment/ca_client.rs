@@ -166,6 +166,11 @@ impl CaClient for HttpCaClient {
 // Stub implementation for unit/integration tests
 // ---------------------------------------------------------------------------
 
+/// Valid PEM certificate block for tests (DER payload is arbitrary bytes).
+pub fn stub_cert_pem(der_seed: u8) -> Vec<u8> {
+    pem::encode(&pem::Pem::new("CERTIFICATE", vec![der_seed; 48])).into_bytes()
+}
+
 /// Configurable test double. Always returns a fixed cert pair or an error.
 pub struct StubCaClient {
     result: std::sync::Mutex<Option<Result<IssuedCert, CaError>>>,
@@ -261,19 +266,20 @@ mod tests {
     fn from_env_with_token_constructs_client() {
         // Uses the stub — we simply construct a StubCaClient here to verify
         // the stub API (from_env test requires env var which we cannot set safely).
-        let stub = StubCaClient::ok(b"CERT".to_vec(), b"CA".to_vec());
+        let stub = StubCaClient::ok(stub_cert_pem(0x44), b"CA".to_vec());
         // Verify stub doesn't panic on construction.
         drop(stub);
     }
 
     #[tokio::test]
     async fn stub_client_ok_returns_cert() {
-        let stub = StubCaClient::ok(b"CERT-PEM".to_vec(), b"CA-CHAIN".to_vec());
+        let cert_pem = stub_cert_pem(0x55);
+        let stub = StubCaClient::ok(cert_pem.clone(), b"CA-CHAIN".to_vec());
         let result = stub
             .issue_cert(b"-----BEGIN CSR-----\nfake\n-----END CSR-----")
             .await;
         let cert = result.expect("expected Ok");
-        assert_eq!(cert.client_cert_pem, b"CERT-PEM");
+        assert_eq!(cert.client_cert_pem, cert_pem);
         assert_eq!(cert.ca_chain_pem, b"CA-CHAIN");
     }
 
