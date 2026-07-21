@@ -19,8 +19,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::Sha256;
 
+use super::jwt_mode::JwtMode;
 use super::oauth_mode::OAuthMode;
-use super::routes::{build_token_response, AuthHttpState, AuthTokenResponse};
+use super::routes::{
+    build_external_token_response, build_token_response, AuthHttpState, AuthTokenResponse,
+};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -51,6 +54,13 @@ pub struct OAuthCallbackQuery {
 pub struct OAuthStartResponse {
     pub authorization_url: String,
     pub state: String,
+}
+
+#[derive(Debug, Clone)]
+struct OAuthExchange {
+    identity: OAuthIdentity,
+    access_token: Option<String>,
+    expires_in: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -112,8 +122,12 @@ async fn oauth_callback_inner(
         return Err((StatusCode::NOT_FOUND, "oauth disabled"));
     }
 
-    let identity = match state.oauth.mode {
-        OAuthMode::Stub => parse_stub_code(&query.code)?,
+    let exchange = match state.oauth.mode {
+        OAuthMode::Stub => OAuthExchange {
+            identity: parse_stub_code(&query.code)?,
+            access_token: None,
+            expires_in: None,
+        },
         OAuthMode::AuthArcana => {
             let state_param = query
                 .state
@@ -125,7 +139,7 @@ async fn oauth_callback_inner(
         OAuthMode::Disabled => return Err((StatusCode::NOT_FOUND, "oauth disabled")),
     };
 
-    login_or_create_oauth_user(state, identity).await
+    login_or_create_oauth_user(state, exchange).await
 }
 
 fn build_stub_authorization_url(
@@ -183,7 +197,7 @@ fn build_auth_arcana_authorization_url(
 async fn exchange_auth_arcana_code(
     state: &AuthHttpState,
     code: &str,
-) -> Result<OAuthIdentity, (StatusCode, &'static str)> {
+) -> Result<OAuthExchange, (StatusCode, &'static str)> {
     let issuer = state.oauth.issuer.as_deref().ok_or((
         StatusCode::INTERNAL_SERVER_ERROR,
         "oauth issuer not configured",
@@ -241,11 +255,13 @@ async fn exchange_auth_arcana_code(
 
     let access_token = token_resp["access_token"]
         .as_str()
-        .ok_or((StatusCode::BAD_GATEWAY, "access_token missing"))?;
+        .ok_or((StatusCode::BAD_GATEWAY, "access_token missing"))?
+        .to_owned();
+    let expires_in = token_resp["expires_in"].as_u64();
 
     let userinfo: serde_json::Value = reqwest::Client::new()
         .get(userinfo_endpoint)
-        .bearer_auth(access_token)
+        .bearer_auth(&access_token)
         .send()
         .await
         .map_err(|_| (StatusCode::BAD_GATEWAY, "userinfo failed"))?
@@ -265,18 +281,27 @@ async fn exchange_auth_arcana_code(
         .to_owned();
     let email_verified = userinfo["email_verified"].as_bool().unwrap_or(false);
 
-    Ok(OAuthIdentity {
-        provider: "auth_arcana".to_owned(),
-        subject,
-        email: normalize_email(&email),
-        email_verified,
+    Ok(OAuthExchange {
+        identity: OAuthIdentity {
+            provider: "auth_arcana".to_owned(),
+            subject,
+            email: normalize_email(&email),
+            email_verified,
+        },
+        access_token: Some(access_token),
+        expires_in,
     })
 }
 
 async fn login_or_create_oauth_user(
     state: &AuthHttpState,
-    identity: OAuthIdentity,
+    exchange: OAuthExchange,
 ) -> Result<AuthTokenResponse, (StatusCode, &'static str)> {
+    let OAuthExchange {
+        identity,
+        access_token,
+        expires_in,
+    } = exchange;
     if !validate_email(&identity.email) {
         return Err((StatusCode::BAD_REQUEST, "invalid email from oauth"));
     }
@@ -287,12 +312,14 @@ async fn login_or_create_oauth_user(
         .await
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error"))?
     {
-        return build_token_response(
+        return finish_oauth_login(
             state,
             &user.id,
             &user.email,
             &user.tenant_id,
             user.email_verified,
+            access_token.clone(),
+            expires_in,
         );
     }
 
@@ -321,12 +348,14 @@ async fn login_or_create_oauth_user(
                 .await
                 .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error"))?
             {
-                return build_token_response(
+                return finish_oauth_login(
                     state,
                     &user.id,
                     &user.email,
                     &user.tenant_id,
                     user.email_verified,
+                    access_token.clone(),
+                    expires_in,
                 );
             }
             return Err((StatusCode::CONFLICT, "email already registered"));
@@ -339,13 +368,40 @@ async fn login_or_create_oauth_user(
         .set_plan_tier(Some(&tenant_id), PlanTier::Free)
         .await;
 
-    build_token_response(
+    finish_oauth_login(
         state,
         &user_id,
         &identity.email,
         &tenant_id,
         identity.email_verified,
+        access_token,
+        expires_in,
     )
+}
+
+fn finish_oauth_login(
+    state: &AuthHttpState,
+    user_id: &str,
+    email: &str,
+    tenant_id: &str,
+    email_verified: bool,
+    access_token: Option<String>,
+    expires_in: Option<u64>,
+) -> Result<AuthTokenResponse, (StatusCode, &'static str)> {
+    if state.jwt.mode == JwtMode::AuthArcana {
+        if let Some(token) = access_token {
+            let expires = expires_in.unwrap_or(state.jwt.token_ttl_secs);
+            return Ok(build_external_token_response(
+                token,
+                expires,
+                user_id,
+                email,
+                tenant_id,
+                email_verified,
+            ));
+        }
+    }
+    build_token_response(state, user_id, email, tenant_id, email_verified)
 }
 
 fn encode_stub_code(provider: &str, subject: &str, email: &str) -> String {

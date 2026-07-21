@@ -1,6 +1,8 @@
-//! Interim HS256 JWT for SaaS accounts (DISK-0016).
+//! Interim HS256 JWT for SaaS accounts (DISK-0016 slice 1).
 //!
-//! Migrates to Auth Arcana JWKS verification in a later slice.
+//! Production bearer verification migrates to Auth Arcana JWKS via
+//! `disk-server::JwtConfig` (DISK-0016 slice 4). This module remains the
+//! local issuer for `DISK_JWT_MODE=local|dual`.
 
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};

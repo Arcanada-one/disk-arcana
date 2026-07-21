@@ -1248,6 +1248,7 @@ dependencies = [
  "ed25519-dalek",
  "hex",
  "hmac",
+ "jsonwebtoken",
  "libc",
  "notify",
  "pem",
