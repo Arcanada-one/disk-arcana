@@ -6,11 +6,9 @@
 //!
 //! **`GET /conflicts`** — returns all unresolved conflict rows as JSON.
 //!
-//! **`POST /conflicts/{path}`** — resolves the conflict at the given
-//! percent-decoded vault-relative path.  The request body is a JSON object
-//! with a single `action` field (e.g. `{"action": "keep-local"}`).  The
-//! `path` URL segment is percent-decoded and validated against path-traversal
-//! before any DB operation is performed.
+//! **`POST /conflicts/{vault_id}/{path}`** — share-qualified resolve (multi-share daemons).
+//! Legacy **`POST /conflicts/{path}`** remains for single-share setups; returns `409`
+//! when the same path exists on multiple shares.
 //!
 //! ## File operations per action
 //!
@@ -687,6 +685,43 @@ mod tests {
         let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
         let items: Vec<ConflictListItem> = serde_json::from_slice(&body).unwrap();
         assert!(items.is_empty(), "conflict must be gone after resolve");
+    }
+
+    #[tokio::test]
+    async fn unqualified_resolve_returns_409_when_path_ambiguous() {
+        let db_dir = tempfile::tempdir().unwrap();
+        let wiki = tempfile::tempdir().unwrap();
+        let docs = tempfile::tempdir().unwrap();
+        let db = MetaDb::open(&db_dir.path().join("meta.db")).await.unwrap();
+        let (state, _, _) = DaemonState::new("test-node", "v0");
+        let roots = std::collections::HashMap::from([
+            ("wiki".to_string(), wiki.path().to_path_buf()),
+            ("docs".to_string(), docs.path().to_path_buf()),
+        ]);
+        let state = state.with_meta_db(db).with_vault_roots(roots);
+
+        for (vault, root) in [("wiki", wiki.path()), ("docs", docs.path())] {
+            let mut rec = sample_conflict_record("notes/todo.md");
+            rec.vault_id = vault.into();
+            state
+                .meta_db()
+                .unwrap()
+                .create_conflict(&rec)
+                .await
+                .unwrap();
+            std::fs::create_dir_all(root.join("notes")).unwrap();
+            std::fs::write(root.join("notes/todo.md"), b"local").unwrap();
+        }
+
+        let app = super::super::router(state);
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/conflicts/notes%2Ftodo.md")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"action":"keep-local"}"#))
+            .unwrap();
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
     }
 
     #[tokio::test]

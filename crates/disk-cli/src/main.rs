@@ -187,7 +187,7 @@ pub enum ConflictsCommand {
 /// `disk conflicts list [--vault <name>] [--addr <ip:port>]`.
 #[derive(clap::Args, Debug)]
 pub struct ConflictsListArgs {
-    /// Filter by vault name (reserved for future use).
+    /// Filter listed conflicts to one share/vault name.
     #[arg(long)]
     pub vault: Option<String>,
 
@@ -196,12 +196,16 @@ pub struct ConflictsListArgs {
     pub addr: Option<std::net::SocketAddr>,
 }
 
-/// `disk conflicts show <path> [--addr <ip:port>]` — side-by-side diff.
+/// `disk conflicts show <path> [--vault <name>] [--addr <ip:port>]` — side-by-side diff.
 #[derive(clap::Args, Debug)]
 pub struct ConflictsShowArgs {
     /// Vault-relative path of the conflict to show.
     #[arg(long)]
     pub path: String,
+
+    /// Share/vault name when the same path exists on multiple shares.
+    #[arg(long)]
+    pub vault: Option<String>,
 
     /// Daemon REST address. Defaults to `127.0.0.1:9444`.
     #[arg(long)]
@@ -214,6 +218,10 @@ pub struct ResolveArgs {
     /// Vault-relative path of the conflict to resolve. Mutually exclusive with `--all`.
     #[arg(long, conflicts_with = "all")]
     pub path: Option<String>,
+
+    /// Share/vault name when resolving a single path (required when ambiguous).
+    #[arg(long)]
+    pub vault: Option<String>,
 
     /// Resolve all unresolved conflicts with the given action. Mutually exclusive with `--path`.
     #[arg(long, conflicts_with = "path")]
@@ -459,11 +467,16 @@ async fn main() -> Result<()> {
             ConfigCommand::Reload(c) => commands::run_config_reload(c.addr).await,
         },
         Some(Command::Conflicts(args)) => match args.command {
-            ConflictsCommand::List(l) => commands::run_conflicts_list(l.addr).await,
-            ConflictsCommand::Resolve(r) => {
-                commands::run_conflicts_resolve(r.addr, r.path, r.all, r.action.as_str()).await
+            ConflictsCommand::List(l) => {
+                commands::run_conflicts_list(l.addr, l.vault.as_deref()).await
             }
-            ConflictsCommand::Show(s) => commands::run_conflicts_show(s.addr, &s.path).await,
+            ConflictsCommand::Resolve(r) => {
+                commands::run_conflicts_resolve(r.addr, r.vault, r.path, r.all, r.action.as_str())
+                    .await
+            }
+            ConflictsCommand::Show(s) => {
+                commands::run_conflicts_show(s.addr, s.vault.as_deref(), &s.path).await
+            }
         },
         Some(Command::Archive(args)) => match args.command {
             ArchiveCommand::Create(c) => archive_cmd::run_create(c.source, c.output),
@@ -1058,11 +1071,12 @@ node_id_hint = "from-bf"
         let addr = Some(local_addr);
 
         // run_conflicts_list should succeed (no assertion on output, just no error).
-        commands::run_conflicts_list(addr).await.unwrap();
+        commands::run_conflicts_list(addr, None).await.unwrap();
 
         // run_conflicts_resolve for the specific path.
         commands::run_conflicts_resolve(
             addr,
+            None,
             Some("notes/roundtrip.md".into()),
             false,
             "keep-local",
