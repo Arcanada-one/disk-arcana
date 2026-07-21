@@ -10,6 +10,7 @@
 |-------|----------|--------------|
 | 1 (merged #64) | `resolve_tenant_id`, scoped MetaDb CRUD, `nodes.tenant_id` on RegisterNode, `files` upsert via `x-disk-tenant` + `x-disk-share` | Per-tenant DB isolation, session tenant binding, quotas per tenant row in nodes |
 | 2 (merged) | Session tenant validation, client daemon tenant header, enrollment tenant | Per-tenant DB isolation |
+| 3 (this PR) | Scoped `exchange_state` MetaDb path, baselines + conflicts tenant bind | Separate DB files per tenant |
 
 ## Tenant resolution
 

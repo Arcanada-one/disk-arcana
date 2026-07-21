@@ -13,10 +13,25 @@ use crate::error::MetaDbError;
 use crate::types::FileMeta;
 use crate::vector_clock::VectorClock;
 
+fn tenant_key(tenant_id: Option<&str>) -> &str {
+    tenant_id.unwrap_or("")
+}
+
 impl MetaDb {
-    /// Load all baseline entries for a `(node_id, vault_id)` pair.
+    /// Load all baseline entries for a `(node_id, vault_id)` pair (legacy single-tenant).
     pub async fn load_node_baseline(
         &self,
+        node_id: &str,
+        vault_id: &str,
+    ) -> Result<Vec<FileMeta>, MetaDbError> {
+        self.load_node_baseline_scoped(None, node_id, vault_id)
+            .await
+    }
+
+    /// Tenant-scoped baseline load (DISK-0017 slice 3).
+    pub async fn load_node_baseline_scoped(
+        &self,
+        tenant_id: Option<&str>,
         node_id: &str,
         vault_id: &str,
     ) -> Result<Vec<FileMeta>, MetaDbError> {
@@ -25,10 +40,11 @@ impl MetaDb {
             SELECT path, content_hash, size, mtime_ns, vector_clock,
                    deleted, deleted_at, node_id_writer
             FROM node_baselines
-            WHERE node_id = ?1 AND vault_id = ?2
+            WHERE tenant_key = ?1 AND node_id = ?2 AND vault_id = ?3
             ORDER BY path ASC
             "#,
         )
+        .bind(tenant_key(tenant_id))
         .bind(node_id)
         .bind(vault_id)
         .fetch_all(&self.pool)
@@ -37,13 +53,21 @@ impl MetaDb {
         rows.into_iter().map(baseline_row_to_meta).collect()
     }
 
-    /// Upsert baseline entries inside a single transaction.
-    ///
-    /// Existing rows with matching `(node_id, vault_id, path)` are replaced.
-    /// `content_hash` is stored as NULL for tombstone entries (`deleted=true`)
-    /// where the hash is meaningless — though callers may still pass a hash.
+    /// Upsert baseline entries inside a single transaction (legacy single-tenant).
     pub async fn upsert_node_baselines(
         &self,
+        node_id: &str,
+        vault_id: &str,
+        baselines: &[FileMeta],
+    ) -> Result<(), MetaDbError> {
+        self.upsert_node_baselines_scoped(None, node_id, vault_id, baselines)
+            .await
+    }
+
+    /// Tenant-scoped baseline upsert (DISK-0017 slice 3).
+    pub async fn upsert_node_baselines_scoped(
+        &self,
+        tenant_id: Option<&str>,
         node_id: &str,
         vault_id: &str,
         baselines: &[FileMeta],
@@ -65,10 +89,11 @@ impl MetaDb {
             sqlx::query(
                 r#"
                 INSERT INTO node_baselines (
-                    node_id, vault_id, path, content_hash, size, mtime_ns,
-                    vector_clock, deleted, deleted_at, node_id_writer, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-                ON CONFLICT(node_id, vault_id, path) DO UPDATE SET
+                    tenant_key, node_id, vault_id, path, content_hash, size, mtime_ns,
+                    vector_clock, deleted, deleted_at, node_id_writer, updated_at,
+                    tenant_id
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                ON CONFLICT(tenant_key, node_id, vault_id, path) DO UPDATE SET
                     content_hash   = excluded.content_hash,
                     size           = excluded.size,
                     mtime_ns       = excluded.mtime_ns,
@@ -76,9 +101,11 @@ impl MetaDb {
                     deleted        = excluded.deleted,
                     deleted_at     = excluded.deleted_at,
                     node_id_writer = excluded.node_id_writer,
-                    updated_at     = excluded.updated_at
+                    updated_at     = excluded.updated_at,
+                    tenant_id      = excluded.tenant_id
                 "#,
             )
+            .bind(tenant_key(tenant_id))
             .bind(node_id)
             .bind(vault_id)
             .bind(path_str)
@@ -90,6 +117,7 @@ impl MetaDb {
             .bind(meta.deleted_at)
             .bind(&meta.node_id)
             .bind(now)
+            .bind(tenant_id)
             .execute(&mut *tx)
             .await?;
         }
@@ -158,4 +186,57 @@ fn unix_now() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::FileMeta;
+    use crate::vector_clock::VectorClock;
+    use std::path::PathBuf;
+    use tempfile::tempdir;
+
+    fn sample_meta(path: &str, hash_byte: u8) -> FileMeta {
+        FileMeta {
+            path: PathBuf::from(path),
+            content_hash: [hash_byte; 32],
+            size: 4,
+            mtime_ns: 1,
+            inode: None,
+            vector_clock: VectorClock::default(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "server".into(),
+            encryption_nonce: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn baseline_rows_isolated_per_tenant() {
+        let dir = tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("baseline-tenant.sqlite"))
+            .await
+            .unwrap();
+        let a = sample_meta("doc/a.txt", 0xAA);
+        let b = sample_meta("doc/a.txt", 0xBB);
+        db.upsert_node_baselines_scoped(Some("tenant-a"), "node-1", "default", &[a])
+            .await
+            .unwrap();
+        db.upsert_node_baselines_scoped(Some("tenant-b"), "node-1", "default", &[b])
+            .await
+            .unwrap();
+
+        let only_a = db
+            .load_node_baseline_scoped(Some("tenant-a"), "node-1", "default")
+            .await
+            .unwrap();
+        assert_eq!(only_a.len(), 1);
+        assert_eq!(only_a[0].content_hash, [0xAA; 32]);
+
+        let only_b = db
+            .load_node_baseline_scoped(Some("tenant-b"), "node-1", "default")
+            .await
+            .unwrap();
+        assert_eq!(only_b[0].content_hash, [0xBB; 32]);
+    }
 }

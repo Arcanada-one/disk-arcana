@@ -317,3 +317,25 @@ async fn migration_008_pending_enrollments_tenant_column() {
         "pending_enrollments.tenant_id must exist after migration 008; got {names:?}"
     );
 }
+
+#[tokio::test]
+async fn migration_009_node_baselines_tenant_index() {
+    let dir = tempdir().expect("tempdir");
+    let db = MetaDb::open(&dir.path().join("baseline-index-schema.sqlite"))
+        .await
+        .expect("open");
+
+    let indexes: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='node_baselines'",
+    )
+    .fetch_all(db.pool())
+    .await
+    .expect("sqlite_master indexes");
+
+    assert!(
+        indexes
+            .iter()
+            .any(|n| n == "idx_node_baselines_tenant_scope"),
+        "idx_node_baselines_tenant_scope must exist after migration 009; got {indexes:?}"
+    );
+}

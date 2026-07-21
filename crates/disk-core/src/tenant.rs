@@ -41,6 +41,26 @@ pub fn enforce_node_tenant(
     }
 }
 
+/// Tenant + vault scope for MetaDb queries (DISK-0017 slice 3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TenantScope {
+    pub tenant_id: Option<String>,
+    pub vault_id: String,
+}
+
+impl TenantScope {
+    pub fn new(tenant_id: Option<&str>, vault_id: impl Into<String>) -> Self {
+        Self {
+            tenant_id: tenant_id.map(str::to_owned),
+            vault_id: vault_id.into(),
+        }
+    }
+
+    pub fn tenant_id(&self) -> Option<&str> {
+        self.tenant_id.as_deref()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,5 +112,12 @@ mod tests {
             Some("any".into())
         );
         assert_eq!(enforce_node_tenant(None, None).unwrap(), None);
+    }
+
+    #[test]
+    fn tenant_scope_holds_ids() {
+        let scope = TenantScope::new(Some("acme"), "wiki");
+        assert_eq!(scope.tenant_id(), Some("acme"));
+        assert_eq!(scope.vault_id, "wiki");
     }
 }

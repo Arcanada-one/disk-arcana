@@ -52,7 +52,7 @@ pub use path_guard::validate as validate_path;
 pub use platform::FileIdentity;
 pub use reconciler::ReconciliationEngine;
 pub use scanner::FileScanner;
-pub use tenant::{enforce_node_tenant, resolve_tenant_id, TenantViolation};
+pub use tenant::{enforce_node_tenant, resolve_tenant_id, TenantScope, TenantViolation};
 pub use tombstone::{Tombstone, DEFAULT_TTL_SECS};
 pub use types::{
     ActionType, ConflictKind, ConflictRecord, ConflictReport, FileMeta, NodeId, RenamePair,

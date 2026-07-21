@@ -684,7 +684,7 @@ impl SyncService for SyncServiceImpl {
         request: Request<SyncStateRequest>,
     ) -> Result<Response<SyncStateResponse>, Status> {
         let node_id = self.require_auth(request.metadata())?;
-        let _tenant = self
+        let tenant = self
             .resolve_session_tenant(request.metadata(), &node_id)
             .await?;
         let share = Self::extract_share(request.metadata());
@@ -723,9 +723,9 @@ impl SyncService for SyncServiceImpl {
         // via the DeleteLocal branch of resolve_one.
         let (server_files, client_files, db) = if let Some(ref db) = self.meta_db {
             let server = db
-                .list_all_files()
+                .list_files_scoped(tenant.as_deref(), &share)
                 .await
-                .map_err(|e| Status::internal(format!("meta_db list_all_files: {e}")))?;
+                .map_err(|e| Status::internal(format!("meta_db list_files_scoped: {e}")))?;
             let client: Vec<FileMeta> = req.files.iter().map(proto_to_file_meta).collect();
             (server, client, db)
         } else {
@@ -734,10 +734,10 @@ impl SyncService for SyncServiceImpl {
             return Ok(Response::new(SyncStateResponse::default()));
         };
 
-        // Load the persistent per-client baseline for this node.
-        let vault_id = "default";
+        // Load the persistent per-client baseline for this node (tenant-scoped).
+        let vault_id = share.as_str();
         let baseline = db
-            .load_node_baseline(&node_id, vault_id)
+            .load_node_baseline_scoped(tenant.as_deref(), &node_id, vault_id)
             .await
             .map_err(|e| Status::internal(format!("baseline load: {e}")))?;
 
@@ -832,7 +832,10 @@ impl SyncService for SyncServiceImpl {
                         created_at: 0,
                         resolved_at: None,
                     };
-                    if let Err(e) = db.create_conflict(&conflict_record).await {
+                    if let Err(e) = db
+                        .create_conflict_scoped(tenant.as_deref(), &conflict_record)
+                        .await
+                    {
                         tracing::warn!(
                             path = %action.path.display(),
                             error = %e,
@@ -881,7 +884,7 @@ impl SyncService for SyncServiceImpl {
                             deleted_at: Some(now_secs),
                             ..m.clone()
                         };
-                        db.upsert_file(&tombstone)
+                        db.upsert_file_scoped(tenant.as_deref(), vault_id, &tombstone)
                             .await
                             .map_err(|e| Status::internal(format!("tombstone upsert: {e}")))?;
                     }
@@ -897,7 +900,7 @@ impl SyncService for SyncServiceImpl {
         // the client; no silent fallback to an empty baseline (which would
         // re-introduce the original empty-indexed bug on the next sync pass).
         let new_baseline = build_post_sync_baseline(&server_files, &actions);
-        db.upsert_node_baselines(&node_id, vault_id, &new_baseline)
+        db.upsert_node_baselines_scoped(tenant.as_deref(), &node_id, vault_id, &new_baseline)
             .await
             .map_err(|e| Status::internal(format!("baseline writeback: {e}")))?;
 
