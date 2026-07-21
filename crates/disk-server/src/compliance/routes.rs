@@ -170,6 +170,11 @@ async fn delete_account_inner(
         .delete_consent_events_for_user(&user_id)
         .await
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
+    state
+        .meta_db
+        .delete_user_telemetry(&user_id)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
 
     let removed = state
         .meta_db
@@ -237,6 +242,12 @@ fn sub_processors_payload() -> SubProcessorsResponse {
                 purpose: "CDN, DNS, and DDoS protection",
                 location: "United States (Standard Contractual Clauses)",
                 website: "https://www.cloudflare.com",
+            },
+            SubProcessorEntry {
+                name: "PostHog, Inc.",
+                purpose: "Optional product analytics when you opt in (dashboard only)",
+                location: "United States / EU (Standard Contractual Clauses)",
+                website: "https://posthog.com",
             },
         ],
     }

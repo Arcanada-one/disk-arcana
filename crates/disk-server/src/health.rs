@@ -32,6 +32,9 @@
 //! - `PUT /selective-sync` — DISK-0023 replace per-device folder include rules
 //! - `GET /onboarding` — DISK-0025 getting-started checklist state
 //! - `PUT /onboarding` — DISK-0025 persist checklist dismiss across devices
+//! - `GET /telemetry/config` — DISK-0026 PostHog public runtime config
+//! - `GET /telemetry` — DISK-0026 per-user analytics opt-in preference
+//! - `PUT /telemetry` — DISK-0026 update analytics opt-in + consent audit
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -48,6 +51,7 @@ use crate::billing::webhook::{stripe_webhook, WebhookState};
 use crate::compliance::{delete_account, export_data, list_consents, sub_processors};
 use crate::dashboard::{resolve_conflict, summary};
 use crate::onboarding::{get_onboarding, put_onboarding};
+use crate::telemetry::{get_telemetry, get_telemetry_config, put_telemetry};
 use crate::selective_sync::{get_selective_sync, put_selective_sync};
 use crate::sharing::{accept_invite, create_invite, list_invites, list_members, remove_member};
 use crate::snapshots::{create_snapshot, get_snapshot, list_snapshots, restore_snapshot};
@@ -64,7 +68,8 @@ pub async fn serve(
 ) -> anyhow::Result<()> {
     let mut app = Router::new()
         .route("/health", get(health_handler))
-        .route("/compliance/sub-processors", get(sub_processors));
+        .route("/compliance/sub-processors", get(sub_processors))
+        .route("/telemetry/config", get(get_telemetry_config));
     if let Some(state) = webhook {
         app = app.route(
             "/billing/stripe/webhook",
@@ -114,7 +119,8 @@ pub async fn serve(
                 "/selective-sync",
                 get(get_selective_sync).put(put_selective_sync),
             )
-            .route("/onboarding", get(get_onboarding).put(put_onboarding));
+            .route("/onboarding", get(get_onboarding).put(put_onboarding))
+            .route("/telemetry", get(get_telemetry).put(put_telemetry));
         crate::trash::scheduler::spawn_periodic_prune(state.clone());
         app = app.merge(auth_router.with_state(state));
     }

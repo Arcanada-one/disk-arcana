@@ -24,6 +24,7 @@ pub mod selective_sync;
 pub mod services;
 pub mod sharing;
 pub mod snapshots;
+pub mod telemetry;
 pub mod tls;
 pub mod trash;
 pub mod versions;
@@ -51,6 +52,7 @@ pub use enrollment::{EnrollErrorKind, EnrollmentServiceImpl};
 pub use middleware::{BombError, ReplayError, ReplayGuard};
 pub use multi_node::{lifecycle::revoke_node, vclock::VClock};
 pub use onboarding::{get_onboarding, put_onboarding};
+pub use telemetry::{get_telemetry, get_telemetry_config, put_telemetry};
 pub use publisher::{
     build_signed_payload, FileMetadata as PublisherFileMetadata, PublisherSignatureProof,
     PublisherVerifier, StubKeyFetcher, VerifyError,

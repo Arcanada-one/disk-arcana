@@ -26,6 +26,8 @@
 //! | `DISK_ACL_GNUPGHOME` | Override `GNUPGHOME` for the GPG verifier. |
 //! | `DISK_HEALTH_BIND_ADDR` | HTTP health listener bind address. Default `0.0.0.0:9446`. |
 //! | `DISK_REGISTER_NODE_MODE` | `RegisterNode` gate: `open` (dev), `enrolled` (prod default), `disabled`, or `admin`. |
+//! | `DISK_POSTHOG_PROJECT_KEY` | PostHog project API key. When unset, dashboard product analytics stays disabled server-side. |
+//! | `DISK_POSTHOG_API_HOST` | PostHog ingest host exposed to the dashboard. Default `https://eu.i.posthog.com`. |
 //!
 //! Missing required vars surface as `ConfigError::MissingEnv` so the binary
 //! refuses to start (fail-closed per Appendix A).

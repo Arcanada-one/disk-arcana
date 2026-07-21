@@ -7,14 +7,15 @@
 mod accounts;
 mod billing;
 pub mod compliance;
+pub mod consent;
 pub mod conflicts;
-mod consent;
 mod dashboard;
 mod files;
 mod node_baseline;
 mod nodes;
 mod onboarding;
 mod selective_sync;
+mod telemetry;
 mod sharing;
 mod snapshots;
 mod tombstones;

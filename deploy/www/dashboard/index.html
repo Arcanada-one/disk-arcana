@@ -481,6 +481,22 @@
         </div>
       </div>
 
+      <div id="telemetry-panel" class="hidden border border-slate-800 rounded-lg p-4">
+        <h2 class="font-medium text-slate-100 mb-1">Product analytics</h2>
+        <p class="text-sm text-slate-400 mb-3">
+          Optional anonymous usage analytics via PostHog to improve onboarding and dashboard UX.
+          No synced file paths or file contents are sent.
+          <a href="../legal/privacy.html" class="text-emerald-400 hover:underline">Privacy Policy</a>
+          · <a href="../legal/sub-processors.html" class="text-emerald-400 hover:underline">Sub-processors</a>
+        </p>
+        <label class="flex items-start gap-3 text-sm cursor-pointer">
+          <input id="telemetry-opt-in" type="checkbox"
+            class="mt-1 rounded border-slate-600 bg-slate-900 text-emerald-500 focus:ring-emerald-500">
+          <span class="text-slate-300">Send anonymous product analytics events</span>
+        </label>
+        <p id="telemetry-status" class="text-xs text-slate-500 mt-2 hidden"></p>
+      </div>
+
       <div class="border border-slate-800 rounded-lg p-4">
         <p class="text-sm text-slate-400 mb-3">Download a JSON export of your account and tenant metadata (GDPR portability).</p>
         <button id="export-data-btn" type="button"
@@ -525,6 +541,11 @@
     const trashPage = { offset: 0, limit: 10, hasMore: false, total: 0 };
     let dashboardDevices = [];
     let onboardingDismissedServer = false;
+    const telemetryState = {
+      config: null,
+      preference: null,
+      phLoaded: false,
+    };
     const pendingInviteKey = 'diskPendingInvite';
     let pendingInviteToken = params.get('sharing_accept') || localStorage.getItem(pendingInviteKey) || '';
     if (params.get('sharing_accept')) {
@@ -774,6 +795,132 @@
           document.getElementById('resend-verify-btn')?.click();
         };
       }
+      trackOnboardingFunnel(data);
+    }
+
+    function telemetryFunnelKey(userId) {
+      return 'disk_telemetry_funnel:' + userId;
+    }
+
+    async function loadTelemetryConfig() {
+      if (!telemetryState.config) {
+        telemetryState.config = await api('/telemetry/config');
+      }
+      return telemetryState.config;
+    }
+
+    async function loadTelemetryPreference() {
+      telemetryState.preference = await api('/telemetry');
+      return telemetryState.preference;
+    }
+
+    function analyticsServerEnabled() {
+      return !!(telemetryState.config && telemetryState.config.enabled && telemetryState.config.project_key);
+    }
+
+    function loadPostHogScript(apiHost) {
+      return new Promise((resolve, reject) => {
+        if (window.posthog && window.posthog.__loaded) {
+          resolve(window.posthog);
+          return;
+        }
+        const script = document.createElement('script');
+        const host = String(apiHost || 'https://eu.i.posthog.com').replace(/\/$/, '');
+        script.src = host + '/static/array.js';
+        script.async = true;
+        script.onload = () => resolve(window.posthog);
+        script.onerror = () => reject(new Error('PostHog script failed to load'));
+        document.head.appendChild(script);
+      });
+    }
+
+    async function initPostHog(userId) {
+      if (!analyticsServerEnabled() || !telemetryState.preference?.opt_in) return;
+      const cfg = telemetryState.config;
+      const ph = await loadPostHogScript(cfg.api_host);
+      if (!telemetryState.phLoaded) {
+        ph.init(cfg.project_key, {
+          api_host: cfg.api_host,
+          autocapture: false,
+          capture_pageview: true,
+          persistence: 'localStorage',
+          person_profiles: 'identified_only',
+        });
+        telemetryState.phLoaded = true;
+      }
+      ph.identify(userId);
+    }
+
+    function captureAnalytics(event, props) {
+      if (!telemetryState.preference?.opt_in || !window.posthog) return;
+      window.posthog.capture(event, props || {});
+    }
+
+    function updateTelemetryPanel() {
+      const panel = document.getElementById('telemetry-panel');
+      const checkbox = document.getElementById('telemetry-opt-in');
+      const status = document.getElementById('telemetry-status');
+      if (!analyticsServerEnabled()) {
+        panel.classList.add('hidden');
+        return;
+      }
+      panel.classList.remove('hidden');
+      checkbox.checked = !!telemetryState.preference?.opt_in;
+      if (telemetryState.preference?.updated_at) {
+        status.textContent = 'Preference updated ' + formatDate(telemetryState.preference.updated_at);
+        status.classList.remove('hidden');
+      } else {
+        status.classList.add('hidden');
+      }
+    }
+
+    async function refreshTelemetry(userId) {
+      await loadTelemetryConfig();
+      await loadTelemetryPreference();
+      updateTelemetryPanel();
+      if (telemetryState.preference?.opt_in) {
+        await initPostHog(userId);
+        captureAnalytics('dashboard_viewed');
+      }
+    }
+
+    function trackOnboardingFunnel(data) {
+      if (!telemetryState.preference?.opt_in) return;
+      const userId = data.user.user_id;
+      let sent = {};
+      try {
+        sent = JSON.parse(localStorage.getItem(telemetryFunnelKey(userId)) || '{}');
+      } catch (_) {
+        sent = {};
+      }
+
+      const emailDone = !!data.user.email_verified;
+      const deviceDone = (data.devices || []).length > 0;
+      const vaultDone = (data.vaults || []).length > 0;
+      const syncDone = deviceHasRecentSync(data.devices);
+      const steps = [
+        ['verify_email', emailDone],
+        ['enroll_device', deviceDone],
+        ['create_vault', vaultDone],
+        ['first_sync', syncDone],
+      ];
+      steps.forEach(([step, done]) => {
+        if (done && !sent[step]) {
+          captureAnalytics('onboarding_step_completed', { step });
+          sent[step] = true;
+        }
+      });
+
+      const allDone = emailDone && deviceDone && vaultDone && syncDone;
+      const panelVisible = !(allDone || isOnboardingDismissed(userId));
+      if (panelVisible && !sent.checklist_viewed) {
+        captureAnalytics('onboarding_checklist_viewed');
+        sent.checklist_viewed = true;
+      }
+
+      try {
+        localStorage.setItem(telemetryFunnelKey(userId), JSON.stringify(sent));
+      } catch (_) { /* ignore */ }
     }
 
     function showDashboard(data) {
@@ -1544,6 +1691,7 @@
       try {
         const data = await api('/dashboard/summary');
         await loadOnboardingState(data.user.user_id);
+        await refreshTelemetry(data.user.user_id);
         showDashboard(data);
         await loadConsents();
       } finally {
@@ -1658,8 +1806,39 @@
         try {
           localStorage.setItem(onboardingDismissKey(summary.user.user_id), '1');
         } catch (_) { /* ignore */ }
+        captureAnalytics('onboarding_dismissed');
       } catch (_) { /* hide even when API unavailable */ }
       panel.classList.add('hidden');
+    };
+
+    document.getElementById('telemetry-opt-in').onchange = async (e) => {
+      const checkbox = e.target;
+      checkbox.disabled = true;
+      clearDashError();
+      try {
+        const pref = await api('/telemetry', {
+          method: 'PUT',
+          body: JSON.stringify({ opt_in: checkbox.checked }),
+        });
+        telemetryState.preference = pref;
+        if (pref.opt_in) {
+          await initPostHog(pref.user_id);
+          captureAnalytics('analytics_opt_in');
+          const summary = await api('/dashboard/summary');
+          trackOnboardingFunnel(summary);
+        } else if (window.posthog) {
+          window.posthog.opt_out_capturing();
+          window.posthog.reset();
+          telemetryState.phLoaded = false;
+        }
+        updateTelemetryPanel();
+        await loadConsents();
+      } catch (err) {
+        checkbox.checked = !checkbox.checked;
+        showDashError(err.message);
+      } finally {
+        checkbox.disabled = false;
+      }
     };
 
     document.getElementById('export-data-btn').onclick = async () => {
