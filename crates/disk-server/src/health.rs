@@ -1,29 +1,32 @@
 //! Minimal HTTP health listener for external monitoring.
 //!
-//! Binds to `DISK_HEALTH_BIND_ADDR` (default `0.0.0.0:9446`) and exposes a
-//! single `GET /health` route that returns `200 {"status":"ok","version":"x.y.z"}`.
-//!
-//! This listener is intentionally plain HTTP (no TLS) because it is fronted by
-//! Cloudflare proxy on port 443. The gRPC mTLS listener (`:9443`) is separate.
+//! Binds to `DISK_HEALTH_BIND_ADDR` (default `0.0.0.0:9446`) and exposes:
+//! - `GET /health` — liveness probe
+//! - `POST /billing/stripe/webhook` — DISK-0018 Stripe stub (when mode=stripe)
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
 
+use crate::billing::webhook::{stripe_webhook, WebhookState};
+
 /// Start the health HTTP server. Returns an error if the bind fails; otherwise
 /// drives the server until the provided `shutdown` future resolves.
-///
-/// Spawn as a parallel tokio task alongside the gRPC server alongside gRPC:
-/// ```text
-/// tokio::spawn(disk_server::health::serve(addr, shutdown_rx));
-/// ```
 pub async fn serve(
     addr: SocketAddr,
+    webhook: Option<Arc<WebhookState>>,
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()> {
-    let app = Router::new().route("/health", get(health_handler));
+    let mut app = Router::new().route("/health", get(health_handler));
+    if let Some(state) = webhook {
+        app = app.route(
+            "/billing/stripe/webhook",
+            post(stripe_webhook).with_state(state),
+        );
+    }
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await
@@ -54,21 +57,19 @@ mod tests {
     /// the response is 200 with the expected JSON shape.
     #[tokio::test]
     async fn health_endpoint_returns_200() {
-        // Pick an ephemeral port.
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr: SocketAddr = listener.local_addr().unwrap();
-        drop(listener); // release so `serve` can re-bind
+        drop(listener);
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         tokio::spawn(async move {
-            serve(addr, async move {
+            serve(addr, None, async move {
                 let _ = shutdown_rx.await;
             })
             .await
             .unwrap();
         });
 
-        // Give the listener a moment to bind.
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         let url = format!("http://{addr}/health");
@@ -81,7 +82,6 @@ mod tests {
             "expected version string in response"
         );
 
-        // Clean shutdown.
         let _ = shutdown_tx.send(());
     }
 

@@ -256,3 +256,22 @@ async fn v1_1_node_shares_role_check_constraint() {
         "node_shares.enforced_role must reject values outside the documented enum"
     );
 }
+
+#[tokio::test]
+async fn migration_006_tenant_billing_table_exists() {
+    let dir = tempdir().expect("tempdir");
+    let db = MetaDb::open(&dir.path().join("billing-schema.sqlite"))
+        .await
+        .expect("open");
+
+    let tables: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .fetch_all(db.pool())
+            .await
+            .expect("sqlite_master");
+
+    assert!(
+        tables.iter().any(|t| t == "tenant_billing"),
+        "tenant_billing table must exist after migration 006; got {tables:?}"
+    );
+}

@@ -133,6 +133,8 @@ pub struct ServerConfig {
     pub acl_allow_unsigned: bool,
     /// `RegisterNode` production gate (OWASP T2.10).
     pub register_node_mode: RegisterNodeMode,
+    /// Commercial quota enforcement (DISK-0018). Default `disabled` for self-hosted.
+    pub billing_mode: crate::billing::BillingMode,
 }
 
 impl ServerConfig {
@@ -200,6 +202,10 @@ impl ServerConfig {
             Some(raw) => RegisterNodeMode::parse(raw)?,
         };
 
+        let billing_mode_raw =
+            std::env::var("DISK_BILLING_MODE").unwrap_or_else(|_| "disabled".to_string());
+        let billing_mode = crate::billing::BillingMode::parse(&billing_mode_raw)?;
+
         Ok(Self {
             bind_addr,
             enrollment_bind_addr,
@@ -225,6 +231,7 @@ impl ServerConfig {
             acl_allow_unsigned: use_stub_ca_legacy
                 || std::env::var("DISK_ACL_ALLOW_UNSIGNED").ok().as_deref() == Some("1"),
             register_node_mode,
+            billing_mode,
         })
     }
 }

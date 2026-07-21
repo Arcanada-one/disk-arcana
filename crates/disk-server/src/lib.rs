@@ -9,6 +9,7 @@
 pub mod acl;
 pub mod audit;
 pub mod auth;
+pub mod billing;
 pub mod config;
 pub mod enrollment;
 pub mod health;
@@ -28,6 +29,8 @@ pub use acl::{
 };
 pub use audit::{AuditEmitter, AuditError, AuditEvent, AuditKind};
 pub use auth::{ApiKey, AuthStore, CertIdentity, SessionToken};
+pub use billing::{BillingMode, QuotaEnforcer};
+pub use billing::webhook::WebhookState;
 pub use enrollment::{EnrollErrorKind, EnrollmentServiceImpl};
 pub use middleware::{BombError, ReplayError, ReplayGuard};
 pub use multi_node::{lifecycle::revoke_node, vclock::VClock};

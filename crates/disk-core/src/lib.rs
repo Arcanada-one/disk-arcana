@@ -14,6 +14,7 @@
 #![forbid(unsafe_code)]
 
 pub mod archive;
+pub mod billing;
 pub mod config;
 pub mod conflict;
 pub mod delta;
@@ -31,6 +32,10 @@ pub mod types;
 pub mod vector_clock;
 
 pub use config::Config;
+pub use billing::{
+    check_storage_delta, parse_stripe_subscription_event, PlanTier, QuotaError, QuotaLimits,
+    StripeSubscriptionEvent,
+};
 pub use e2ee::{
     decrypt, encrypt, overlay_scanned_meta, random_salt, E2eeCachedWire, E2eeError, EncryptedBlob,
     UploadPayload, VaultKey, KEY_LEN, NONCE_LEN, SALT_LEN,

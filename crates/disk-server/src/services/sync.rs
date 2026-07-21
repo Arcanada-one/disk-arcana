@@ -38,6 +38,7 @@ use disk_proto::disk::{
 use crate::acl::{AclEnforcer, AclError, CertFingerprint, EnforcedRole};
 use crate::audit::{AuditEmitter, AuditEvent, AuditKind};
 use crate::auth::{AuthStore, CertIdentity, SessionToken};
+use crate::billing::QuotaEnforcer;
 use crate::middleware::replay::ReplayGuard;
 #[cfg(feature = "publisher-verify")]
 use crate::publisher::{
@@ -77,6 +78,8 @@ pub struct SyncServiceImpl {
     /// Populated via `with_publisher_verifier`.
     #[cfg(feature = "publisher-verify")]
     pub publisher_verifier: Option<Arc<PublisherVerifier>>,
+    /// Storage quota gate (DISK-0018). When `Some`, `DeltaUpload` checks plan limits.
+    pub quota_enforcer: Option<QuotaEnforcer>,
 }
 
 impl SyncServiceImpl {
@@ -92,6 +95,7 @@ impl SyncServiceImpl {
             audit: None,
             #[cfg(feature = "publisher-verify")]
             publisher_verifier: None,
+            quota_enforcer: None,
         }
     }
 
@@ -112,6 +116,7 @@ impl SyncServiceImpl {
             audit: Some(audit),
             #[cfg(feature = "publisher-verify")]
             publisher_verifier: None,
+            quota_enforcer: None,
         }
     }
 
@@ -132,6 +137,12 @@ impl SyncServiceImpl {
     #[cfg(feature = "publisher-verify")]
     pub fn with_publisher_verifier(mut self, verifier: Arc<PublisherVerifier>) -> Self {
         self.publisher_verifier = Some(verifier);
+        self
+    }
+
+    /// Attach storage quota enforcement (DISK-0018).
+    pub fn with_quota_enforcer(mut self, enforcer: QuotaEnforcer) -> Self {
+        self.quota_enforcer = Some(enforcer);
         self
     }
 
@@ -158,6 +169,15 @@ impl SyncServiceImpl {
             .and_then(|v| v.to_str().ok())
             .unwrap_or("default")
             .to_string()
+    }
+
+    /// Extract tenant id from `x-disk-tenant` metadata (DISK-0017 forward-compat).
+    fn extract_tenant(metadata: &tonic::metadata::MetadataMap) -> Option<String> {
+        metadata
+            .get("x-disk-tenant")
+            .and_then(|v| v.to_str().ok())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
     }
 
     /// Run ACL role check using a pre-extracted `CertIdentity`.
@@ -341,6 +361,7 @@ impl SyncService for SyncServiceImpl {
     ) -> Result<Response<DeltaUploadResponse>, Status> {
         let _node_id = self.require_auth(request.metadata())?;
         let share = Self::extract_share(request.metadata());
+        let tenant = Self::extract_tenant(request.metadata());
         let cert_id = CertIdentity::from_request(&request);
         self.check_acl_by_cert(cert_id.as_ref(), &share, WRITE_ROLES, "send_only")
             .await?;
@@ -467,6 +488,17 @@ impl SyncService for SyncServiceImpl {
                     }
                 }
             }
+        }
+
+        // ── Storage quota gate (DISK-0018) ─────────────────────────────────
+        if let (Some(enforcer), Some(file_path)) = (&self.quota_enforcer, last_path.as_deref()) {
+            enforcer
+                .check_upload(
+                    tenant.as_deref(),
+                    file_path,
+                    assembled.len() as u64,
+                )
+                .await?;
         }
 
         // ── Commit assembled bytes to sync_root (DISK-0043) ────────────────

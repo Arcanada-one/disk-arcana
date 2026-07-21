@@ -11,8 +11,8 @@
 | 1 (merged #57) | `disk_core::e2ee` primitives | Wire integration |
 | 2 (merged #58) | encrypt-on-upload, MetaDb nonce | ExchangeState reconcile |
 | 3 (merged #59) | ExchangeState ciphertext overlay | Keychain UX |
-| 4 (this PR) | `disk vault unlock|lock|status`, keychain store, daemon `resolve_vault_key` | SaaS billing, multi-device escrow |
-| 5+ | Commercial MVP billing | — |
+| 4 (merged #60) | `disk vault unlock|lock|status`, keychain store, daemon `resolve_vault_key` | SaaS billing, multi-device escrow |
+| 5+ | Multi-device escrow | Billing → DISK-0018 |
 
 ## Operator workflow (slice 4)
 
