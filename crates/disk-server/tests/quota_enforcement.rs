@@ -151,6 +151,8 @@ async fn upload_rejected_when_storage_quota_exceeded() {
         deleted_at: None,
         node_id: "seed".into(),
         encryption_nonce: None,
+        version_id: None,
+        parent_version_id: None,
     };
     meta_db.upsert_file(&existing).await.unwrap();
 

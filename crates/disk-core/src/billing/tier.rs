@@ -76,6 +76,33 @@ pub struct QuotaLimits {
     pub max_vaults: u32,
 }
 
+/// File version history retention (DISK-0020).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VersionRetention {
+    pub max_versions: u32,
+    pub max_age_secs: i64,
+}
+
+impl PlanTier {
+    /// How many historical revisions to keep per file path.
+    pub fn version_retention(self) -> VersionRetention {
+        match self {
+            Self::Free => VersionRetention {
+                max_versions: 5,
+                max_age_secs: 7 * 24 * 3600,
+            },
+            Self::Pro => VersionRetention {
+                max_versions: 30,
+                max_age_secs: 90 * 24 * 3600,
+            },
+            Self::Team => VersionRetention {
+                max_versions: 100,
+                max_age_secs: 365 * 24 * 3600,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

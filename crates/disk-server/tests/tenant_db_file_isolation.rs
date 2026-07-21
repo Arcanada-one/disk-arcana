@@ -82,6 +82,8 @@ fn file_meta(path: &str, hash_byte: u8) -> FileMeta {
         deleted_at: None,
         node_id: "server".into(),
         encryption_nonce: None,
+        version_id: None,
+        parent_version_id: None,
     }
 }
 

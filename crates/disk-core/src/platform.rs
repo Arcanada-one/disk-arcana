@@ -74,6 +74,8 @@ mod tests {
             deleted_at: None,
             node_id: "n".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         };
         assert_eq!(identity(&meta), Some(FileIdentity(42)));
     }

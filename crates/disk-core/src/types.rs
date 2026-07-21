@@ -56,6 +56,12 @@ pub struct FileMeta {
     /// XChaCha20 nonce when the indexed body is E2EE ciphertext (`None` = plaintext).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub encryption_nonce: Option<Vec<u8>>,
+    /// Monotonic revision counter for this path (DISK-0020).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version_id: Option<u64>,
+    /// Parent revision (`0` or `None` for the first revision).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_version_id: Option<u64>,
 }
 
 /// Pair returned by the scanner when an inode survives a path change.

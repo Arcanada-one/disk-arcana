@@ -21,6 +21,7 @@ pub mod multi_node;
 pub mod publisher;
 pub mod services;
 pub mod tls;
+pub mod versions;
 
 pub use acl::reload::{ReloadHandle, SessionInvalidate};
 pub use config::{CaMode, ConfigError, RegisterNodeMode, ServerConfig};
@@ -53,3 +54,4 @@ pub use tls::{
     build_mtls_from_files, tls13_mtls_server_config, CertProvider, DevSelfSignedMtlsProvider,
     DevSelfSignedProvider, StaticPemProvider, TlsError,
 };
+pub use versions::{list_versions, restore_version};

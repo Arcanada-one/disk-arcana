@@ -321,6 +321,8 @@ impl<'a> RemoteSync<'a> {
                 deleted_at: None,
                 node_id: self.node_id.clone(),
                 encryption_nonce: Some(encryption_nonce),
+                version_id: None,
+                parent_version_id: None,
             };
             if let Err(e) = db.upsert_file(&meta).await {
                 tracing::warn!(
@@ -577,6 +579,8 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                     deleted_at: None,
                     node_id: self.node_id.clone(),
                     encryption_nonce: None,
+                    version_id: None,
+                    parent_version_id: None,
                 });
             }
 
@@ -800,6 +804,8 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                         ),
                         node_id: self.node_id.clone(),
                         encryption_nonce: None,
+                        version_id: None,
+                        parent_version_id: None,
                     });
                 }
 
@@ -919,6 +925,8 @@ mod tests {
             deleted_at: None,
             node_id: "client-a".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         };
         let proto = file_meta_to_proto(&meta);
         assert_eq!(proto.path, "notes/hello.md");

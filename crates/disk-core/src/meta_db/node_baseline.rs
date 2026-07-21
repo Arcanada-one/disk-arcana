@@ -177,6 +177,8 @@ fn baseline_row_to_meta(row: sqlx::sqlite::SqliteRow) -> Result<FileMeta, MetaDb
         deleted_at,
         node_id: node_id_writer,
         encryption_nonce: None,
+        version_id: None,
+        parent_version_id: None,
     })
 }
 
@@ -208,6 +210,8 @@ mod tests {
             deleted_at: None,
             node_id: "server".into(),
             encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
         }
     }
 

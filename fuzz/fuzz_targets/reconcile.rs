@@ -56,6 +56,8 @@ fn to_meta(f: FuzzFileMeta) -> Option<FileMeta> {
             f.node_id
         },
         encryption_nonce: None,
+    version_id: None,
+    parent_version_id: None,
     })
 }
 

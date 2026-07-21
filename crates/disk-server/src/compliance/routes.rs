@@ -324,30 +324,7 @@ mod integration_tests {
         let addr: SocketAddr = listener.local_addr().unwrap();
         drop(listener);
 
-        let state = Arc::new(AuthHttpState {
-            meta_db,
-            signing_key: TEST_KEY.as_bytes().to_vec(),
-            jwt: JwtConfig {
-                mode: JwtMode::Local,
-                local_signing_key: TEST_KEY.as_bytes().to_vec(),
-                token_ttl_secs: 3600,
-                issuer: disk_core::DEFAULT_ISSUER.into(),
-                jwks: Arc::new(JwksCache::new("http://127.0.0.1:9/jwks")),
-            },
-            oauth: OAuthConfig {
-                mode: OAuthMode::Disabled,
-                issuer: None,
-                client_id: None,
-                client_secret: None,
-                redirect_uri: None,
-                public_base_url: None,
-            },
-            email_verify: EmailVerifyConfig {
-                mode: EmailVerifyMode::Disabled,
-                public_base_url: None,
-                token_ttl_secs: 86_400,
-            },
-        });
+        let state = Arc::new(crate::accounts::routes::auth_http_state_for_tests(meta_db));
 
         let server = health::serve(addr, None, Some(state), std::future::pending::<()>());
         tokio::pin!(server);

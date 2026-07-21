@@ -72,6 +72,10 @@ impl MetaDb {
             .bind(tenant_id)
             .execute(&mut *tx)
             .await?;
+        sqlx::query("DELETE FROM file_versions WHERE tenant_id IS ?1")
+            .bind(tenant_id)
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
