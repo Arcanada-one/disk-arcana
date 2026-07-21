@@ -149,9 +149,21 @@ async fn main() -> anyhow::Result<()> {
             .ok()
             .as_deref()
             != Some("0");
+        if require_sig && cfg.stripe_webhook_secret.is_none() {
+            anyhow::bail!(
+                "DISK_STRIPE_WEBHOOK_SECRET is required when DISK_BILLING_MODE=stripe \
+                 and DISK_STRIPE_WEBHOOK_REQUIRE_SIG is not 0"
+            );
+        }
+        let tolerance = std::env::var("DISK_STRIPE_WEBHOOK_TOLERANCE_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(disk_server::billing::webhook::DEFAULT_STRIPE_TOLERANCE_SECS);
         Some(Arc::new(disk_server::WebhookState {
             mode: cfg.billing_mode,
             meta_db: meta_db.clone(),
+            webhook_secret: cfg.stripe_webhook_secret.clone(),
+            signature_tolerance_secs: tolerance,
             require_signature_header: require_sig,
         }))
     } else {

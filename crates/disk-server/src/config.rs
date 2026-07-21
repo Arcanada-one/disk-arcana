@@ -135,6 +135,8 @@ pub struct ServerConfig {
     pub register_node_mode: RegisterNodeMode,
     /// Commercial quota enforcement (DISK-0018). Default `disabled` for self-hosted.
     pub billing_mode: crate::billing::BillingMode,
+    /// Stripe webhook signing secret (`whsec_...`). Required in stripe mode when sig verify is on.
+    pub stripe_webhook_secret: Option<String>,
 }
 
 impl ServerConfig {
@@ -206,6 +208,10 @@ impl ServerConfig {
             std::env::var("DISK_BILLING_MODE").unwrap_or_else(|_| "disabled".to_string());
         let billing_mode = crate::billing::BillingMode::parse(&billing_mode_raw)?;
 
+        let stripe_webhook_secret = std::env::var("DISK_STRIPE_WEBHOOK_SECRET")
+            .ok()
+            .filter(|s| !s.is_empty());
+
         Ok(Self {
             bind_addr,
             enrollment_bind_addr,
@@ -232,6 +238,7 @@ impl ServerConfig {
                 || std::env::var("DISK_ACL_ALLOW_UNSIGNED").ok().as_deref() == Some("1"),
             register_node_mode,
             billing_mode,
+            stripe_webhook_secret,
         })
     }
 }

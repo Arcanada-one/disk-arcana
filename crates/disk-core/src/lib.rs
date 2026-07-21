@@ -32,7 +32,8 @@ pub mod types;
 pub mod vector_clock;
 
 pub use billing::{
-    check_storage_delta, parse_stripe_subscription_event, PlanTier, QuotaError, QuotaLimits,
+    check_storage_delta, compute_v1_signature, parse_stripe_subscription_event,
+    verify_stripe_webhook_signature, PlanTier, QuotaError, QuotaLimits, StripeSigError,
     StripeSubscriptionEvent,
 };
 pub use config::Config;
