@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::accounts::routes::{resolve_user_from_access, verify_bearer, AuthHttpState};
+use crate::sharing::access::{require_read, require_write, resolve_vault_access};
 
 fn default_vault() -> String {
     "default".into()
@@ -162,7 +163,9 @@ async fn create_snapshot_inner(
 ) -> Result<CreateSnapshotResponse, (StatusCode, &'static str)> {
     let claims = verify_bearer(state, headers).await?;
     let user = resolve_user_from_access(state, &claims).await?;
-    let tenant_key = Some(user.tenant_id.as_str());
+    let access = resolve_vault_access(state, &user, &body.vault_id).await?;
+    require_write(&access)?;
+    let tenant_key = access.tenant_key();
 
     let tier = state
         .meta_db
@@ -211,7 +214,9 @@ async fn list_snapshots_inner(
 ) -> Result<SnapshotListResponse, (StatusCode, &'static str)> {
     let claims = verify_bearer(state, headers).await?;
     let user = resolve_user_from_access(state, &claims).await?;
-    let tenant_key = Some(user.tenant_id.as_str());
+    let access = resolve_vault_access(state, &user, &query.vault_id).await?;
+    require_read(&access)?;
+    let tenant_key = access.tenant_key();
 
     let tier = state
         .meta_db
@@ -275,7 +280,9 @@ async fn get_snapshot_inner(
 ) -> Result<SnapshotDetailResponse, (StatusCode, &'static str)> {
     let claims = verify_bearer(state, headers).await?;
     let user = resolve_user_from_access(state, &claims).await?;
-    let tenant_key = Some(user.tenant_id.as_str());
+    let access = resolve_vault_access(state, &user, &query.vault_id).await?;
+    require_read(&access)?;
+    let tenant_key = access.tenant_key();
 
     let db = state
         .tenant_router
@@ -320,7 +327,9 @@ async fn restore_snapshot_inner(
 ) -> Result<RestoreSnapshotResponse, (StatusCode, &'static str)> {
     let claims = verify_bearer(state, headers).await?;
     let user = resolve_user_from_access(state, &claims).await?;
-    let tenant_key = Some(user.tenant_id.as_str());
+    let access = resolve_vault_access(state, &user, &body.vault_id).await?;
+    require_write(&access)?;
+    let tenant_key = access.tenant_key();
 
     let tier = state
         .meta_db
@@ -505,6 +514,17 @@ mod integration_tests {
     use std::time::Duration;
     use tempfile::tempdir;
 
+    async fn seed_tenant_vault(db: &MetaDb, tenant: &str, vault: &str) {
+        sqlx::query(
+            "INSERT INTO tenant_vaults (tenant_id, vault_id, created_at) VALUES (?1, ?2, 1)",
+        )
+        .bind(tenant)
+        .bind(vault)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    }
+
     async fn spawn_auth_server(
         meta_db: MetaDb,
         sync_root: std::path::PathBuf,
@@ -571,6 +591,7 @@ mod integration_tests {
         db.create_user_account("usr_snap", &email, &hash, "corp")
             .await
             .unwrap();
+        seed_tenant_vault(&db, "corp", "default").await;
 
         let port = spawn_auth_server(db, sync_root.clone(), blobs).await;
         let client = reqwest::Client::new();

@@ -1,6 +1,6 @@
 # DISK-0022 — Sharing & Collaboration
 
-**Status:** slice 2 on DEVS — dashboard sharing UI + invite accept flow.  
+**Status:** slice 3 on DEVS — collaborator RBAC on HTTP vault routes.  
 **Parent:** DISK-0001 commercial / SaaS track.  
 **Tracking:** DISK-0022 in Datarim backlog.
 
@@ -9,16 +9,27 @@
 | Slice | In scope | Out of scope |
 |-------|----------|--------------|
 | 1 (merged #87) | `vault_invites` + `vault_members` tables, invite create/list/accept, member list/remove, `disk sharing` CLI | Dashboard sharing UI, sync-path ACL enforcement, cross-tenant file ACL on gRPC |
-| 2 (this PR) | Dashboard vault sharing panel: create invite, show one-time token/URL, pending invites + collaborators tables, remove member, `?sharing_accept=` deep-link accept | Email delivery of invites, Auth Arcana group sync |
-| 3 | Enforce collaborator roles on HTTP sync paths | Real-time co-editing |
+| 2 (merged #88) | Dashboard vault sharing panel: create invite, show one-time token/URL, pending invites + collaborators tables, remove member, `?sharing_accept=` deep-link accept | Email delivery of invites, Auth Arcana group sync |
+| 3 (this PR) | Enforce collaborator roles on HTTP vault routes (`/versions`, `/trash`, `/snapshots`, `/sharing/*` manage) | gRPC sync ACL, real-time co-editing |
 
 ## RBAC model
 
-| Role | Who | Capabilities (slice 1–2) |
-|------|-----|--------------------------|
-| Owner (implicit) | Users in the vault's owning tenant | Create/list/revoke invites and members via dashboard or API |
-| Editor | External collaborator via invite | Stored membership; enforcement deferred to slice 3 |
-| Viewer | External collaborator via invite | Stored membership; enforcement deferred to slice 3 |
+| Role | Who | Capabilities |
+|------|-----|--------------|
+| Owner (implicit) | Users in the vault's owning tenant (`tenant_vaults`) | Read + write vault data; manage sharing invites/members; trash delete/empty |
+| Editor | External collaborator via invite | Read + write (restore versions, trash, snapshots) |
+| Viewer | External collaborator via invite | Read-only (list/get); write/manage → 403 |
+
+Owning-tenant users are implicit owners when the vault exists in `tenant_vaults`. External users join via redeeming an invite token.
+
+### HTTP enforcement matrix (slice 3)
+
+| Route family | Viewer | Editor | Owner |
+|--------------|--------|--------|-------|
+| `GET /versions`, `GET /trash`, `GET /snapshots` | yes | yes | yes |
+| `POST` restore / create snapshot | no | yes | yes |
+| `POST /trash/delete`, `/trash/empty` | no | no | yes |
+| `POST/GET /sharing/*` (manage) | no | no | yes |
 
 Owning-tenant users are implicit owners when the vault exists in `tenant_vaults`. External users join via redeeming an invite token.
 
@@ -61,6 +72,8 @@ Env: `DISK_API_BASE`, `DISK_ACCESS_TOKEN`.
 
 - `crates/disk-core/src/meta_db/sharing.rs` — invite/member unit test
 - `crates/disk-server/src/sharing/routes.rs` — HTTP round-trip integration test
+- `crates/disk-server/src/sharing/access.rs` — vault access resolution unit test
+- `crates/disk-server/src/versions/routes.rs` — collaborator RBAC integration test
 - `deploy/www/dashboard/index.html` — sharing panel UI
 
 ## References

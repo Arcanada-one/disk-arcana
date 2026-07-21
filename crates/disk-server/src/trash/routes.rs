@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::accounts::routes::{resolve_user_from_access, verify_bearer, AuthHttpState};
+use crate::sharing::access::{require_manage, require_read, require_write, resolve_vault_access};
 
 #[derive(Debug, Deserialize)]
 pub struct ListTrashQuery {
@@ -143,7 +144,9 @@ async fn list_trash_inner(
 ) -> Result<TrashListResponse, (StatusCode, &'static str)> {
     let claims = verify_bearer(state, headers).await?;
     let user = resolve_user_from_access(state, &claims).await?;
-    let tenant_key = Some(user.tenant_id.as_str());
+    let access = resolve_vault_access(state, &user, &query.vault_id).await?;
+    require_read(&access)?;
+    let tenant_key = access.tenant_key();
 
     let tier = state
         .meta_db
@@ -232,7 +235,9 @@ async fn restore_trash_inner(
 
     let claims = verify_bearer(state, headers).await?;
     let user = resolve_user_from_access(state, &claims).await?;
-    let tenant_key = Some(user.tenant_id.as_str());
+    let access = resolve_vault_access(state, &user, &body.vault_id).await?;
+    require_write(&access)?;
+    let tenant_key = access.tenant_key();
 
     let tier = state
         .meta_db
@@ -380,7 +385,9 @@ async fn delete_trash_inner(
 
     let claims = verify_bearer(state, headers).await?;
     let user = resolve_user_from_access(state, &claims).await?;
-    let tenant_key = Some(user.tenant_id.as_str());
+    let access = resolve_vault_access(state, &user, &body.vault_id).await?;
+    require_manage(&access)?;
+    let tenant_key = access.tenant_key();
 
     let db = state
         .tenant_router
@@ -430,7 +437,9 @@ async fn empty_trash_inner(
 
     let claims = verify_bearer(state, headers).await?;
     let user = resolve_user_from_access(state, &claims).await?;
-    let tenant_key = Some(user.tenant_id.as_str());
+    let access = resolve_vault_access(state, &user, &body.vault_id).await?;
+    require_manage(&access)?;
+    let tenant_key = access.tenant_key();
 
     let db = state
         .tenant_router
@@ -465,6 +474,17 @@ mod integration_tests {
     use std::path::PathBuf;
     use std::time::Duration;
     use tempfile::tempdir;
+
+    async fn seed_tenant_vault(db: &MetaDb, tenant: &str, vault: &str) {
+        sqlx::query(
+            "INSERT INTO tenant_vaults (tenant_id, vault_id, created_at) VALUES (?1, ?2, 1)",
+        )
+        .bind(tenant)
+        .bind(vault)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    }
 
     async fn spawn_auth_server(
         meta_db: MetaDb,
@@ -540,6 +560,7 @@ mod integration_tests {
             .create_user_account("usr_trash", &email, &hash_pw, "corp")
             .await
             .unwrap();
+        seed_tenant_vault(&meta_db, "corp", "default").await;
 
         let port = spawn_auth_server(meta_db, sync_root.clone(), blobs).await;
         let client = reqwest::Client::new();

@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::accounts::routes::{resolve_user_from_access, verify_bearer, AuthHttpState};
+use crate::sharing::access::{require_read, require_write, resolve_vault_access};
 
 #[derive(Debug, Deserialize)]
 pub struct ListVersionsQuery {
@@ -124,7 +125,9 @@ async fn list_versions_inner(
 
     let claims = verify_bearer(state, headers).await?;
     let user = resolve_user_from_access(state, &claims).await?;
-    let tenant_key = Some(user.tenant_id.as_str());
+    let access = resolve_vault_access(state, &user, &query.vault_id).await?;
+    require_read(&access)?;
+    let tenant_key = access.tenant_key();
 
     let tier = state
         .meta_db
@@ -251,7 +254,9 @@ async fn restore_version_inner(
 
     let claims = verify_bearer(state, headers).await?;
     let user = resolve_user_from_access(state, &claims).await?;
-    let tenant_key = Some(user.tenant_id.as_str());
+    let access = resolve_vault_access(state, &user, &body.vault_id).await?;
+    require_write(&access)?;
+    let tenant_key = access.tenant_key();
 
     let tier = state
         .meta_db
@@ -378,6 +383,17 @@ mod integration_tests {
     use std::time::Duration;
     use tempfile::tempdir;
 
+    async fn seed_tenant_vault(db: &MetaDb, tenant: &str, vault: &str) {
+        sqlx::query(
+            "INSERT INTO tenant_vaults (tenant_id, vault_id, created_at) VALUES (?1, ?2, 1)",
+        )
+        .bind(tenant)
+        .bind(vault)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    }
+
     async fn spawn_auth_server(
         meta_db: MetaDb,
         sync_root: std::path::PathBuf,
@@ -454,6 +470,7 @@ mod integration_tests {
         db.create_user_account("usr_ver", &email, &hash, "corp")
             .await
             .unwrap();
+        seed_tenant_vault(&db, "corp", "default").await;
 
         let port = spawn_auth_server(db, sync_root.clone(), blobs).await;
 
@@ -555,6 +572,7 @@ mod integration_tests {
         db.create_user_account("usr_cur", &email, &pw, "corp")
             .await
             .unwrap();
+        seed_tenant_vault(&db, "corp", "default").await;
 
         let port = spawn_auth_server(db, sync_root, blobs).await;
         let client = reqwest::Client::new();
@@ -581,5 +599,148 @@ mod integration_tests {
             .await
             .unwrap();
         assert_eq!(res.status(), 409);
+    }
+
+    async fn login_token(client: &reqwest::Client, port: u16, email: &str) -> String {
+        let login: serde_json::Value = client
+            .post(format!("http://127.0.0.1:{port}/auth/login"))
+            .json(&serde_json::json!({ "email": email, "password": "long-password" }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        login["access_token"].as_str().unwrap().to_string()
+    }
+
+    #[tokio::test]
+    async fn collaborator_roles_enforced_on_versions() {
+        use disk_core::meta_db::VaultShareRole;
+
+        let dir = tempdir().unwrap();
+        let sync_root = dir.path().join("sync");
+        std::fs::create_dir_all(&sync_root).unwrap();
+        let blobs = ContentBlobStore::new(dir.path().join("version-blobs"));
+        let db = MetaDb::open(&dir.path().join("meta.sqlite")).await.unwrap();
+        seed_tenant_vault(&db, "corp", "shared").await;
+
+        let retention = PlanTier::Free.version_retention();
+        let ctx = FileVersionUpsert {
+            created_by: "server".into(),
+            retention,
+        };
+
+        let v1_bytes = b"collab-v1";
+        let v1_hash = *blake3::hash(v1_bytes).as_bytes();
+        blobs.put(&v1_hash, v1_bytes).unwrap();
+        std::fs::write(sync_root.join("shared.md"), v1_bytes).unwrap();
+
+        let mut meta = FileMeta {
+            path: "shared.md".into(),
+            content_hash: v1_hash,
+            size: v1_bytes.len() as u64,
+            mtime_ns: 1,
+            inode: None,
+            vector_clock: VectorClock::new(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "server".into(),
+            encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
+        };
+        db.upsert_file_scoped_versioned(Some("corp"), "shared", &meta, &ctx)
+            .await
+            .unwrap();
+
+        let v2_bytes = b"collab-v2";
+        let v2_hash = *blake3::hash(v2_bytes).as_bytes();
+        blobs.put(&v2_hash, v2_bytes).unwrap();
+        std::fs::write(sync_root.join("shared.md"), v2_bytes).unwrap();
+        meta.content_hash = v2_hash;
+        meta.size = v2_bytes.len() as u64;
+        db.upsert_file_scoped_versioned(Some("corp"), "shared", &meta, &ctx)
+            .await
+            .unwrap();
+
+        let pw = disk_core::hash_password("long-password").unwrap();
+        let viewer_email = disk_core::normalize_email("viewer@other.test");
+        let editor_email = disk_core::normalize_email("editor@guest.test");
+        db.create_user_account(
+            "own1",
+            &disk_core::normalize_email("owner@corp.test"),
+            &pw,
+            "corp",
+        )
+        .await
+        .unwrap();
+        db.create_user_account("vw1", &viewer_email, &pw, "other")
+            .await
+            .unwrap();
+        db.create_user_account("ed1", &editor_email, &pw, "guest")
+            .await
+            .unwrap();
+        db.upsert_vault_member(
+            Some("corp"),
+            "shared",
+            "vw1",
+            VaultShareRole::Viewer,
+            "own1",
+        )
+        .await
+        .unwrap();
+        db.upsert_vault_member(
+            Some("corp"),
+            "shared",
+            "ed1",
+            VaultShareRole::Editor,
+            "own1",
+        )
+        .await
+        .unwrap();
+
+        let port = spawn_auth_server(db, sync_root.clone(), blobs).await;
+        let client = reqwest::Client::new();
+        let viewer_token = login_token(&client, port, &viewer_email).await;
+        let editor_token = login_token(&client, port, &editor_email).await;
+
+        let list = client
+            .get(format!(
+                "http://127.0.0.1:{port}/versions?path=shared.md&vault_id=shared"
+            ))
+            .bearer_auth(&viewer_token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(list.status(), 200);
+
+        let viewer_restore = client
+            .post(format!("http://127.0.0.1:{port}/versions/restore"))
+            .bearer_auth(&viewer_token)
+            .json(&serde_json::json!({
+                "path": "shared.md",
+                "vault_id": "shared",
+                "version_id": 1
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(viewer_restore.status(), 403);
+
+        let editor_restore = client
+            .post(format!("http://127.0.0.1:{port}/versions/restore"))
+            .bearer_auth(&editor_token)
+            .json(&serde_json::json!({
+                "path": "shared.md",
+                "vault_id": "shared",
+                "version_id": 1
+            }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(editor_restore.status(), 200);
+        let on_disk = std::fs::read(sync_root.join("shared.md")).unwrap();
+        assert_eq!(on_disk, v1_bytes);
     }
 }
