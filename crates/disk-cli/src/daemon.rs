@@ -35,7 +35,10 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use disk_client::config::{spawn_config_watcher, ConfigWatcher, Direction, DiskConfig};
 use disk_client::connection::DiskClient;
-use disk_client::lan_sync::{parse_server_port, spawn_lan_discovery, LanPeerRegistry};
+use disk_client::lan_sync::{
+    parse_server_port, spawn_lan_discovery, spawn_lan_serve, LanFetchContext, LanPeerRegistry,
+    LanServeState,
+};
 use disk_client::resolve_vault_key;
 use disk_client::rest_api::{serve, DaemonState, ShareSnapshot};
 use disk_client::sync_loop::{LoopState, LoopTrigger, RemoteSync, SyncLoop, POLL_INTERVAL};
@@ -169,7 +172,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
         state
     };
     let state = if !share_roots.is_empty() {
-        state.with_vault_roots(share_roots)
+        state.with_vault_roots(share_roots.clone())
     } else {
         state
     };
@@ -177,13 +180,24 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
     let lan_registry = LanPeerRegistry::new(cfg.lan_sync.enabled, &node_id);
     let state = state.with_lan_peers(Arc::clone(&lan_registry));
     let (lan_shutdown_tx, lan_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let (lan_serve_shutdown_tx, lan_serve_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let lan_discovery_handle = if cfg.lan_sync.enabled {
         tracing::info!(
             port = cfg.lan_sync.advertise_port,
             "daemon: LAN sync discovery enabled"
         );
+        let serve_state = LanServeState {
+            share_roots: share_roots.clone(),
+            tenant_id: cfg.node.tenant_id.clone(),
+            self_node_id: node_id.clone(),
+        };
+        spawn_lan_serve(
+            cfg.lan_sync.advertise_port,
+            serve_state,
+            lan_serve_shutdown_rx,
+        );
         Some(spawn_lan_discovery(
-            lan_registry,
+            Arc::clone(&lan_registry),
             node_id.clone(),
             cfg.node.tenant_id.clone(),
             cfg.lan_sync.advertise_port,
@@ -192,6 +206,16 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
         ))
     } else {
         drop(lan_shutdown_rx);
+        drop(lan_serve_shutdown_rx);
+        None
+    };
+    let lan_fetch_ctx = if cfg.lan_sync.enabled {
+        Some(LanFetchContext::new(
+            Arc::clone(&lan_registry),
+            cfg.node.tenant_id.clone(),
+            node_id.clone(),
+        ))
+    } else {
         None
     };
 
@@ -269,6 +293,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
         let blob_cache = Arc::clone(&blob_cache);
         let e2ee_key = e2ee_key.clone();
         let telemetry_for_task = telemetry.clone();
+        let lan_fetch_for_loop = lan_fetch_ctx.clone();
         // Clone the DaemonState handle into the per-share task so it can
         // write live loop state back via `update_share`.
         let state_for_task = state.clone();
@@ -430,6 +455,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
                     Arc::clone(&blob_cache),
                     baselines,
                     meta_db.clone(),
+                    lan_fetch_for_loop.clone(),
                 );
                 if let Some(ref key) = e2ee_key {
                     transport = transport.with_e2ee_key(key.clone());
@@ -551,6 +577,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
     let shutdown_fut = async move {
         let _ = shutdown_rx.await;
         let _ = lan_shutdown_tx.send(());
+        let _ = lan_serve_shutdown_tx.send(());
     };
 
     let local = serve(state, args.status_bind, shutdown_fut)
@@ -638,6 +665,7 @@ pub(crate) async fn load_baselines_for_share(
 /// This function is the single production call site that wires
 /// `with_blob_cache` and `with_meta_db` onto the sync transport — keeping it
 /// extracted makes it testable without a live gRPC server.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_remote_sync_for_share<'a>(
     client: &'a DiskClient,
     share_name: &str,
@@ -646,9 +674,15 @@ pub(crate) fn build_remote_sync_for_share<'a>(
     blob_cache: Arc<BlobCache>,
     baselines: HashMap<String, [u8; 32]>,
     meta_db: Option<Arc<MetaDb>>,
+    lan_fetch: Option<LanFetchContext>,
 ) -> RemoteSync<'a> {
     let transport = RemoteSync::with_scan_root(client, share_name, share_path, node_id)
         .with_blob_cache(blob_cache, baselines);
+    let transport = if let Some(ctx) = lan_fetch {
+        transport.with_lan_fetch(ctx)
+    } else {
+        transport
+    };
     if let Some(db) = meta_db {
         transport.with_meta_db(db)
     } else {
@@ -943,6 +977,7 @@ client_key  = "/b"
             Arc::clone(&cache),
             baselines,
             None,
+            None,
         );
 
         // Assert the blob cache is attached.
@@ -1071,6 +1106,7 @@ client_key  = "/b"
             Arc::clone(&cache),
             HashMap::new(),
             Some(Arc::clone(&db)),
+            None,
         );
 
         assert!(

@@ -34,6 +34,7 @@ use super::LoopError;
 use crate::blob_cache::BlobCache;
 use crate::conflict_writer::{apply_conflict, ConflictApplyOutcome};
 use crate::connection::{ClientError, DiskClient};
+use crate::lan_sync::{try_lan_fetch, LanFetchContext};
 
 /// Map a `tonic::Status` returned by `SyncService` to a [`LoopError`].
 pub fn classify_tonic_status(status: &Status) -> LoopError {
@@ -125,6 +126,8 @@ pub struct RemoteSync<'a> {
     e2ee_key: Option<VaultKey>,
     /// In-memory stable ciphertext index when MetaDb is absent or cold (slice 3).
     e2ee_wire_cache: HashMap<String, E2eeCachedWire>,
+    /// LAN-preferred download path (DISK-0027 slice 2).
+    lan_fetch: Option<LanFetchContext>,
 }
 
 impl<'a> RemoteSync<'a> {
@@ -140,6 +143,7 @@ impl<'a> RemoteSync<'a> {
             meta_db: None,
             e2ee_key: None,
             e2ee_wire_cache: HashMap::new(),
+            lan_fetch: None,
         }
     }
 
@@ -160,6 +164,7 @@ impl<'a> RemoteSync<'a> {
             meta_db: None,
             e2ee_key: None,
             e2ee_wire_cache: HashMap::new(),
+            lan_fetch: None,
         }
     }
 
@@ -193,6 +198,12 @@ impl<'a> RemoteSync<'a> {
     ) -> Self {
         self.blob_cache = Some(cache);
         self.baselines = baselines;
+        self
+    }
+
+    /// Enable LAN-preferred delta fetch before cloud download (DISK-0027 slice 2).
+    pub fn with_lan_fetch(mut self, ctx: LanFetchContext) -> Self {
+        self.lan_fetch = Some(ctx);
         self
     }
 
@@ -584,19 +595,49 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                 // DISK-0062: pass `share` so the server ACL enforcer can route
                 // the request correctly.  A failed download is a pure no-op —
                 // do NOT record a baseline or infer a delete from it.
-                let bytes = match self
-                    .client
-                    .download_file(&self.share, &to_download.path)
-                    .await
-                {
-                    Ok(b) => b,
-                    Err(e) => {
-                        tracing::warn!(
-                            path = %to_download.path,
-                            error = %e,
-                            "download failed; skipping"
-                        );
-                        continue;
+                //
+                // DISK-0027 slice 2: try enrolled LAN peers before cloud delta_download.
+                let expected_hash: Option<[u8; 32]> =
+                    to_download.content_hash.as_slice().try_into().ok();
+
+                let bytes = if let Some(ref lan) = self.lan_fetch {
+                    if let Some(b) =
+                        try_lan_fetch(lan, &self.share, &to_download.path, expected_hash.as_ref())
+                            .await
+                    {
+                        b
+                    } else {
+                        match self
+                            .client
+                            .download_file(&self.share, &to_download.path)
+                            .await
+                        {
+                            Ok(b) => b,
+                            Err(e) => {
+                                tracing::warn!(
+                                    path = %to_download.path,
+                                    error = %e,
+                                    "download failed; skipping"
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                } else {
+                    match self
+                        .client
+                        .download_file(&self.share, &to_download.path)
+                        .await
+                    {
+                        Ok(b) => b,
+                        Err(e) => {
+                            tracing::warn!(
+                                path = %to_download.path,
+                                error = %e,
+                                "download failed; skipping"
+                            );
+                            continue;
+                        }
                     }
                 };
 
