@@ -26,32 +26,48 @@
       <form id="login-form" class="grid gap-3 max-w-md">
         <label class="grid gap-1 text-sm">
           <span class="text-slate-400">Email</span>
-          <input id="login-email" type="email" required class="bg-slate-900 border border-slate-700 rounded px-3 py-2">
+          <input id="login-email" type="email" required autocomplete="email"
+            class="bg-slate-900 border border-slate-700 rounded px-3 py-2">
         </label>
         <label class="grid gap-1 text-sm">
           <span class="text-slate-400">Password</span>
-          <input id="login-password" type="password" required minlength="8" class="bg-slate-900 border border-slate-700 rounded px-3 py-2">
+          <input id="login-password" type="password" required minlength="8" autocomplete="current-password"
+            class="bg-slate-900 border border-slate-700 rounded px-3 py-2">
         </label>
-        <button type="submit" class="mt-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded px-4 py-2 text-sm font-medium">Log in</button>
+        <button type="submit" class="mt-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded px-4 py-2 text-sm font-medium">
+          Log in
+        </button>
       </form>
       <form id="signup-form" class="hidden grid gap-3 max-w-md">
         <label class="grid gap-1 text-sm">
           <span class="text-slate-400">Email</span>
-          <input id="signup-email" type="email" required class="bg-slate-900 border border-slate-700 rounded px-3 py-2">
+          <input id="signup-email" type="email" required autocomplete="email"
+            class="bg-slate-900 border border-slate-700 rounded px-3 py-2">
         </label>
         <label class="grid gap-1 text-sm">
           <span class="text-slate-400">Password</span>
-          <input id="signup-password" type="password" required minlength="8" class="bg-slate-900 border border-slate-700 rounded px-3 py-2">
+          <input id="signup-password" type="password" required minlength="8" autocomplete="new-password"
+            class="bg-slate-900 border border-slate-700 rounded px-3 py-2">
+          <span class="text-xs text-slate-500">At least 8 characters</span>
         </label>
         <label class="grid gap-1 text-sm">
           <span class="text-slate-400">Tenant ID (optional)</span>
-          <input id="signup-tenant" type="text" pattern="[a-z0-9][a-z0-9-]*" class="bg-slate-900 border border-slate-700 rounded px-3 py-2" placeholder="auto from email">
+          <input id="signup-tenant" type="text" pattern="[a-z0-9][a-z0-9-]*"
+            class="bg-slate-900 border border-slate-700 rounded px-3 py-2" placeholder="auto from email">
         </label>
-        <button type="submit" class="mt-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded px-4 py-2 text-sm font-medium">Create account</button>
+        <button type="submit" class="mt-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded px-4 py-2 text-sm font-medium">
+          Create account
+        </button>
       </form>
+      <div id="signup-verify-hint" class="hidden mt-4 max-w-md rounded border border-amber-800/60 bg-amber-950/30 p-4 text-sm">
+        <p class="text-amber-200 font-medium mb-1">Verify your email</p>
+        <p id="signup-verify-text" class="text-slate-300 mb-2"></p>
+        <a id="signup-verify-link" href="#" class="text-emerald-400 hover:underline break-all"></a>
+      </div>
       <p id="auth-error" class="mt-4 text-sm text-red-400 hidden"></p>
       <div class="mt-6 pt-6 border-t border-slate-800 max-w-md">
-        <button id="oauth-login" type="button" class="w-full border border-slate-700 hover:border-emerald-500 text-sm rounded px-4 py-2">
+        <button id="oauth-login" type="button"
+          class="w-full border border-slate-700 hover:border-emerald-500 text-sm rounded px-4 py-2">
           Continue with OAuth
         </button>
       </div>
@@ -59,35 +75,82 @@
     </section>
 
     <section id="dashboard-panel" class="hidden space-y-6">
-      <div class="flex items-center justify-between gap-4">
+      <div class="flex flex-wrap items-center justify-between gap-4">
         <p id="user-line" class="text-slate-300"></p>
         <button id="logout-btn" type="button" class="text-sm text-slate-400 hover:text-slate-200">Log out</button>
       </div>
+
+      <div id="verify-banner" class="hidden rounded-lg border border-amber-800/60 bg-amber-950/30 p-4">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p class="text-amber-200 font-medium">Email not verified</p>
+            <p class="text-sm text-slate-300 mt-1">Confirm your address to unlock full dashboard access.</p>
+            <p id="verify-link-line" class="text-sm mt-2 hidden">
+              <a id="verify-link" href="#" class="text-emerald-400 hover:underline break-all"></a>
+            </p>
+          </div>
+          <button id="resend-verify-btn" type="button"
+            class="text-sm border border-slate-700 rounded px-3 py-1.5 hover:border-emerald-500 shrink-0">
+            Resend link
+          </button>
+        </div>
+      </div>
+
+      <p id="dash-error" class="text-sm text-red-400 hidden"></p>
+      <p id="dash-loading" class="text-sm text-slate-400 hidden">Refreshing dashboard…</p>
 
       <div class="grid gap-4 sm:grid-cols-3">
         <div class="border border-slate-800 rounded-lg p-4">
           <h2 class="text-sm text-slate-400 mb-1">Plan</h2>
           <p id="plan-tier" class="text-xl font-semibold capitalize"></p>
           <p id="storage-usage" class="text-sm text-slate-400 mt-2"></p>
+          <div id="storage-bar" class="mt-2 h-1.5 bg-slate-800 rounded overflow-hidden"></div>
         </div>
         <div class="border border-slate-800 rounded-lg p-4">
           <h2 class="text-sm text-slate-400 mb-1">Devices</h2>
           <p id="nodes-usage" class="text-xl font-semibold"></p>
+          <div id="nodes-bar" class="mt-2 h-1.5 bg-slate-800 rounded overflow-hidden"></div>
         </div>
         <div class="border border-slate-800 rounded-lg p-4">
           <h2 class="text-sm text-slate-400 mb-1">Vaults</h2>
           <p id="vaults-usage" class="text-xl font-semibold"></p>
+          <div id="vaults-bar" class="mt-2 h-1.5 bg-slate-800 rounded overflow-hidden"></div>
         </div>
       </div>
 
-      <div class="border border-slate-800 rounded-lg p-4">
+      <div class="border border-slate-800 rounded-lg p-4 overflow-x-auto">
         <h2 class="font-medium mb-3">Vaults</h2>
-        <ul id="vault-list" class="text-sm text-slate-300 space-y-1"></ul>
+        <table id="vault-table" class="w-full text-sm text-left hidden">
+          <thead class="text-slate-400 border-b border-slate-800">
+            <tr>
+              <th class="py-2 pr-4 font-medium">Vault ID</th>
+              <th class="py-2 font-medium">Created</th>
+            </tr>
+          </thead>
+          <tbody id="vault-list" class="text-slate-300"></tbody>
+        </table>
+        <p id="vault-empty" class="text-sm text-slate-500 hidden">
+          No vaults yet. Run <code class="text-slate-300">disk share init --preset &lt;name&gt;</code> on an enrolled device.
+        </p>
       </div>
 
-      <div class="border border-slate-800 rounded-lg p-4">
+      <div class="border border-slate-800 rounded-lg p-4 overflow-x-auto">
         <h2 class="font-medium mb-3">Devices</h2>
-        <ul id="device-list" class="text-sm text-slate-300 space-y-1"></ul>
+        <table id="device-table" class="w-full text-sm text-left hidden">
+          <thead class="text-slate-400 border-b border-slate-800">
+            <tr>
+              <th class="py-2 pr-4 font-medium">Name</th>
+              <th class="py-2 pr-4 font-medium">Platform</th>
+              <th class="py-2 pr-4 font-medium">Node ID</th>
+              <th class="py-2 pr-4 font-medium">Registered</th>
+              <th class="py-2 font-medium">Last seen</th>
+            </tr>
+          </thead>
+          <tbody id="device-list" class="text-slate-300"></tbody>
+        </table>
+        <p id="device-empty" class="text-sm text-slate-500 hidden">
+          No devices registered. Issue an enrollment token and run <code class="text-slate-300">disk enroll</code> on your machine.
+        </p>
       </div>
 
       <div class="border border-slate-800 rounded-lg p-4">
@@ -108,13 +171,28 @@
     const authPanel = document.getElementById('auth-panel');
     const dashPanel = document.getElementById('dashboard-panel');
     const authError = document.getElementById('auth-error');
+    const dashError = document.getElementById('dash-error');
+    const dashLoading = document.getElementById('dash-loading');
 
-    function showError(msg) {
+    const PLATFORM_LABELS = {
+      darwin: 'macOS',
+      linux: 'Linux',
+      windows: 'Windows',
+    };
+
+    function showAuthError(msg) {
       authError.textContent = msg;
       authError.classList.remove('hidden');
     }
-    function clearError() {
+    function clearAuthError() {
       authError.classList.add('hidden');
+    }
+    function showDashError(msg) {
+      dashError.textContent = msg;
+      dashError.classList.remove('hidden');
+    }
+    function clearDashError() {
+      dashError.classList.add('hidden');
     }
 
     function formatBytes(n) {
@@ -126,11 +204,67 @@
       return v.toFixed(1) + ' ' + units[i];
     }
 
-    async function api(path, opts = {}) {
+    function formatDate(ts) {
+      if (!ts) return '—';
+      return new Date(ts * 1000).toLocaleString();
+    }
+
+    function formatRelative(ts) {
+      if (!ts) return 'never';
+      const diff = Math.floor(Date.now() / 1000) - ts;
+      if (diff < 60) return 'just now';
+      if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+      if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+      return Math.floor(diff / 86400) + 'd ago';
+    }
+
+    function usageBar(el, count, limit) {
+      if (!limit) {
+        el.innerHTML = '';
+        return;
+      }
+      const pct = Math.min(100, Math.round((count / limit) * 100));
+      const color = pct >= 90 ? 'bg-amber-500' : 'bg-emerald-500';
+      el.innerHTML = '<div class="h-full ' + color + ' transition-all" style="width:' + pct + '%"></div>';
+    }
+
+    function platformLabel(raw) {
+      if (!raw) return 'unknown';
+      return PLATFORM_LABELS[raw.toLowerCase()] || raw;
+    }
+
+    function verifyPageUrl(token) {
+      return new URL('verify-email.html?token=' + encodeURIComponent(token), location.href).href;
+    }
+
+    function storeTokens(res) {
+      localStorage.setItem(tokenKey, res.access_token);
+      if (res.refresh_token) localStorage.setItem(refreshKey, res.refresh_token);
+    }
+
+    async function refreshAccessToken() {
+      const rt = localStorage.getItem(refreshKey);
+      if (!rt) throw new Error('session expired');
+      const res = await fetch(apiBase + '/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: rt }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || 'refresh failed');
+      storeTokens(body);
+      return body.access_token;
+    }
+
+    async function api(path, opts = {}, retried) {
       const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
       const token = localStorage.getItem(tokenKey);
       if (token) headers['Authorization'] = 'Bearer ' + token;
       const res = await fetch(apiBase + path, Object.assign({}, opts, { headers }));
+      if (res.status === 401 && !retried && localStorage.getItem(refreshKey)) {
+        await refreshAccessToken();
+        return api(path, opts, true);
+      }
       const body = res.headers.get('content-type')?.includes('json') ? await res.json() : null;
       if (!res.ok) throw new Error(body?.error || res.statusText);
       return body;
@@ -140,12 +274,65 @@
       return new URL('oauth-callback.html', location.href).href.split('?')[0];
     }
 
+    function showSignupVerifyHint(res) {
+      const hint = document.getElementById('signup-verify-hint');
+      const link = document.getElementById('signup-verify-link');
+      if (!res.verification_token && !res.verification_url) {
+        hint.classList.add('hidden');
+        return;
+      }
+      hint.classList.remove('hidden');
+      document.getElementById('signup-verify-text').textContent =
+        res.user && !res.user.email_verified
+          ? 'Check your inbox or use the link below (stub/dev mode).'
+          : '';
+      if (res.verification_token) {
+        const url = verifyPageUrl(res.verification_token);
+        link.href = url;
+        link.textContent = url;
+      } else if (res.verification_url) {
+        link.href = res.verification_url;
+        link.textContent = res.verification_url;
+      }
+    }
+
+    function updateVerifyBanner(data, resendPayload) {
+      const banner = document.getElementById('verify-banner');
+      const linkLine = document.getElementById('verify-link-line');
+      const link = document.getElementById('verify-link');
+      if (data.user.email_verified) {
+        banner.classList.add('hidden');
+        return;
+      }
+      banner.classList.remove('hidden');
+      if (resendPayload?.verification_token) {
+        const url = verifyPageUrl(resendPayload.verification_token);
+        link.href = url;
+        link.textContent = url;
+        linkLine.classList.remove('hidden');
+      } else if (resendPayload?.verification_url) {
+        link.href = resendPayload.verification_url;
+        link.textContent = resendPayload.verification_url;
+        linkLine.classList.remove('hidden');
+      } else {
+        linkLine.classList.add('hidden');
+      }
+    }
+
     function showDashboard(data) {
       authPanel.classList.add('hidden');
       dashPanel.classList.remove('hidden');
-      document.getElementById('user-line').textContent =
-        data.user.email + ' · tenant ' + data.user.tenant_id +
-        (data.user.email_verified ? '' : ' · email not verified');
+      clearDashError();
+      dashLoading.classList.add('hidden');
+
+      const verifiedBadge = data.user.email_verified
+        ? ''
+        : ' · <span class="text-amber-400">email not verified</span>';
+      document.getElementById('user-line').innerHTML =
+        data.user.email + ' · tenant <code class="text-slate-200">' + data.user.tenant_id + '</code>' + verifiedBadge;
+
+      updateVerifyBanner(data, null);
+
       document.getElementById('plan-tier').textContent = data.billing.plan_tier;
       document.getElementById('storage-usage').textContent =
         formatBytes(data.billing.storage_bytes) + ' / ' + formatBytes(data.billing.storage_limit_bytes);
@@ -154,25 +341,57 @@
       document.getElementById('vaults-usage').textContent =
         data.billing.vaults_count + ' / ' + data.billing.vaults_limit;
 
-      const vaultList = document.getElementById('vault-list');
-      vaultList.innerHTML = data.vaults.length
-        ? data.vaults.map(v => '<li><code>' + v.vault_id + '</code></li>').join('')
-        : '<li class="text-slate-500">No vaults yet</li>';
+      usageBar(document.getElementById('storage-bar'), data.billing.storage_bytes, data.billing.storage_limit_bytes);
+      usageBar(document.getElementById('nodes-bar'), data.billing.nodes_count, data.billing.nodes_limit);
+      usageBar(document.getElementById('vaults-bar'), data.billing.vaults_count, data.billing.vaults_limit);
 
+      const vaultTable = document.getElementById('vault-table');
+      const vaultEmpty = document.getElementById('vault-empty');
+      const vaultList = document.getElementById('vault-list');
+      if (data.vaults.length) {
+        vaultTable.classList.remove('hidden');
+        vaultEmpty.classList.add('hidden');
+        vaultList.innerHTML = data.vaults.map(v =>
+          '<tr class="border-b border-slate-800/60">' +
+          '<td class="py-2 pr-4"><code>' + escapeHtml(v.vault_id) + '</code></td>' +
+          '<td class="py-2 text-slate-400">' + formatDate(v.created_at) + '</td></tr>'
+        ).join('');
+      } else {
+        vaultTable.classList.add('hidden');
+        vaultEmpty.classList.remove('hidden');
+        vaultList.innerHTML = '';
+      }
+
+      const deviceTable = document.getElementById('device-table');
+      const deviceEmpty = document.getElementById('device-empty');
       const deviceList = document.getElementById('device-list');
-      deviceList.innerHTML = data.devices.length
-        ? data.devices.map(d => '<li><code>' + d.node_id + '</code> · ' +
-            (d.display_name || 'unnamed') + ' · ' + (d.platform || 'unknown') + '</li>').join('')
-        : '<li class="text-slate-500">No devices registered</li>';
+      if (data.devices.length) {
+        deviceTable.classList.remove('hidden');
+        deviceEmpty.classList.add('hidden');
+        deviceList.innerHTML = data.devices.map(d =>
+          '<tr class="border-b border-slate-800/60">' +
+          '<td class="py-2 pr-4">' + escapeHtml(d.display_name || 'unnamed') + '</td>' +
+          '<td class="py-2 pr-4"><span class="text-xs border border-slate-700 rounded px-1.5 py-0.5">' +
+            escapeHtml(platformLabel(d.platform)) + '</span></td>' +
+          '<td class="py-2 pr-4"><code class="text-xs">' + escapeHtml(d.node_id) + '</code></td>' +
+          '<td class="py-2 pr-4 text-slate-400">' + formatDate(d.registered_at) + '</td>' +
+          '<td class="py-2 text-slate-400" title="' + formatDate(d.last_seen) + '">' +
+            formatRelative(d.last_seen) + '</td></tr>'
+        ).join('');
+      } else {
+        deviceTable.classList.add('hidden');
+        deviceEmpty.classList.remove('hidden');
+        deviceList.innerHTML = '';
+      }
 
       const conflictList = document.getElementById('conflict-list');
       conflictList.innerHTML = data.conflicts.length
         ? data.conflicts.map(c => {
             const id = c.id;
             return '<li class="border border-slate-800 rounded p-3">' +
-              '<code>' + c.vault_id + '</code> / ' + c.path +
-              '<br><span class="text-slate-500">' + c.conflict_type +
-              (c.fork_path ? ' → ' + c.fork_path : '') + '</span>' +
+              '<code>' + escapeHtml(c.vault_id) + '</code> / ' + escapeHtml(c.path) +
+              '<br><span class="text-slate-500">' + escapeHtml(c.conflict_type) +
+              (c.fork_path ? ' → ' + escapeHtml(c.fork_path) : '') + '</span>' +
               '<div class="mt-2 flex flex-wrap gap-2">' +
               ['keep-local', 'keep-remote', 'fork-remote'].map(action =>
                 '<button type="button" data-conflict-id="' + id + '" data-action="' + action +
@@ -194,52 +413,68 @@
             });
             await loadDashboard();
           } catch (err) {
-            showError(err.message);
+            showDashError(err.message);
             btn.disabled = false;
           }
         });
       });
     }
 
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
     async function loadDashboard() {
-      const data = await api('/dashboard/summary');
-      showDashboard(data);
+      dashLoading.classList.remove('hidden');
+      clearDashError();
+      try {
+        const data = await api('/dashboard/summary');
+        showDashboard(data);
+      } finally {
+        dashLoading.classList.add('hidden');
+      }
     }
 
     document.getElementById('tab-login').onclick = () => {
       document.getElementById('login-form').classList.remove('hidden');
       document.getElementById('signup-form').classList.add('hidden');
+      document.getElementById('signup-verify-hint').classList.add('hidden');
       document.getElementById('tab-login').className = 'text-emerald-400 font-medium';
       document.getElementById('tab-signup').className = 'text-slate-400 hover:text-slate-200';
-      clearError();
+      clearAuthError();
     };
     document.getElementById('tab-signup').onclick = () => {
       document.getElementById('signup-form').classList.remove('hidden');
       document.getElementById('login-form').classList.add('hidden');
       document.getElementById('tab-signup').className = 'text-emerald-400 font-medium';
       document.getElementById('tab-login').className = 'text-slate-400 hover:text-slate-200';
-      clearError();
+      clearAuthError();
     };
 
     document.getElementById('login-form').onsubmit = async (e) => {
       e.preventDefault();
-      clearError();
+      clearAuthError();
       try {
         const body = {
           email: document.getElementById('login-email').value,
           password: document.getElementById('login-password').value,
         };
         const res = await api('/auth/login', { method: 'POST', body: JSON.stringify(body) });
-        localStorage.setItem(tokenKey, res.access_token);
+        storeTokens(res);
         await loadDashboard();
       } catch (err) {
-        showError(err.message);
+        showAuthError(err.message);
       }
     };
 
     document.getElementById('signup-form').onsubmit = async (e) => {
       e.preventDefault();
-      clearError();
+      clearAuthError();
+      document.getElementById('signup-verify-hint').classList.add('hidden');
       try {
         const body = {
           email: document.getElementById('signup-email').value,
@@ -248,10 +483,17 @@
         const tenant = document.getElementById('signup-tenant').value.trim();
         if (tenant) body.tenant_id = tenant;
         const res = await api('/auth/signup', { method: 'POST', body: JSON.stringify(body) });
-        localStorage.setItem(tokenKey, res.access_token);
-        await loadDashboard();
+        storeTokens(res);
+        showSignupVerifyHint(res);
+        if (res.user?.email_verified) {
+          await loadDashboard();
+        } else {
+          authPanel.classList.remove('hidden');
+          dashPanel.classList.add('hidden');
+          showAuthError('Account created — verify your email to continue.');
+        }
       } catch (err) {
-        showError(err.message);
+        showAuthError(err.message);
       }
     };
 
@@ -260,10 +502,11 @@
       localStorage.removeItem(refreshKey);
       dashPanel.classList.add('hidden');
       authPanel.classList.remove('hidden');
+      document.getElementById('signup-verify-hint').classList.add('hidden');
     };
 
     document.getElementById('oauth-login').onclick = async () => {
-      clearError();
+      clearAuthError();
       try {
         const redirectUri = dashboardCallbackUrl();
         const start = await api(
@@ -271,7 +514,22 @@
         );
         window.location = start.authorization_url;
       } catch (err) {
-        showError(err.message);
+        showAuthError(err.message);
+      }
+    };
+
+    document.getElementById('resend-verify-btn').onclick = async () => {
+      const btn = document.getElementById('resend-verify-btn');
+      btn.disabled = true;
+      clearDashError();
+      try {
+        const res = await api('/auth/resend-verification', { method: 'POST', body: '{}' });
+        const summary = await api('/dashboard/summary');
+        updateVerifyBanner(summary, res);
+      } catch (err) {
+        showDashError(err.message);
+      } finally {
+        btn.disabled = false;
       }
     };
 
@@ -282,6 +540,7 @@
         await loadDashboard();
       } catch {
         localStorage.removeItem(tokenKey);
+        localStorage.removeItem(refreshKey);
       }
     })();
   </script>
