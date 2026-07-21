@@ -1,15 +1,16 @@
-# DISK-0018 — Billing scaffold (slice 1)
+# DISK-0018 — Billing scaffold
 
-**Status:** slice 1 on DEVS — plan tiers, storage quota gate, Stripe webhook stub.  
+**Status:** slice 2 on DEVS — Stripe webhook HMAC verification.  
 **Parent:** DISK-0001 commercial / SaaS track.  
-**Tracking:** DISK-0018 in Datarim backlog (supersedes DISK-0015 slice 5+ billing note).
+**Tracking:** DISK-0018 in Datarim backlog.
 
 ## Scope
 
 | Slice | In scope | Out of scope |
 |-------|----------|--------------|
-| 1 (this PR) | `PlanTier`, `tenant_billing` migration, `QuotaEnforcer` on `DeltaUpload`, Stripe JSON parser + `POST /billing/stripe/webhook` stub | Live Stripe API, HMAC verify, invoices, Auth Arcana signup |
-| 2+ | Stripe signature verification, Billing Arcana integration, dashboard | — |
+| 1 (merged #61) | `PlanTier`, `tenant_billing`, `QuotaEnforcer`, Stripe JSON parser + webhook route | Live Stripe API, HMAC verify |
+| 2 (this PR) | `verify_stripe_webhook_signature`, `DISK_STRIPE_WEBHOOK_SECRET`, timestamp tolerance | Billing Arcana, invoices, node/vault quotas |
+| 3+ | Node/vault quota gates, Billing Arcana integration, dashboard | — |
 
 ## Plan tiers
 
@@ -22,37 +23,37 @@
 ## Operator config
 
 ```bash
-# Self-hosted default — no quota checks
-DISK_BILLING_MODE=disabled
+DISK_BILLING_MODE=disabled          # self-hosted default
+DISK_BILLING_MODE=enforce           # quota gate only
+DISK_BILLING_MODE=stripe            # quota + webhook
 
-# Enforce tiers from tenant_billing / DISK_BILLING_DEFAULT_TIER
-DISK_BILLING_MODE=enforce
 DISK_BILLING_DEFAULT_TIER=free
-
-# Stripe webhook on health HTTP listener (:9446)
-DISK_BILLING_MODE=stripe
-DISK_STRIPE_WEBHOOK_REQUIRE_SIG=1   # set 0 for local stub tests
+DISK_STRIPE_WEBHOOK_SECRET=whsec_...   # required when stripe + sig verify on
+DISK_STRIPE_WEBHOOK_REQUIRE_SIG=1    # set 0 for local stub (no secret)
+DISK_STRIPE_WEBHOOK_TOLERANCE_SECS=300
 ```
+
+## Stripe signature (slice 2)
+
+`POST /billing/stripe/webhook` verifies `Stripe-Signature` before JSON parse:
+
+1. `signed_payload = "{t}.{body}"`
+2. `v1 = HMAC-SHA256(webhook_secret, signed_payload)` (hex)
+3. Reject when timestamp skew exceeds tolerance (default 300s)
 
 ## API
 
 ```rust
-disk_core::billing::{PlanTier, QuotaLimits, check_storage_delta}
-MetaDb::get_plan_tier / set_plan_tier / sum_storage_bytes / apply_stripe_subscription
-disk_server::QuotaEnforcer::check_upload
-POST /billing/stripe/webhook   // health listener, mode=stripe only
+verify_stripe_webhook_signature(header, body, secret, tolerance_secs)
+compute_v1_signature(secret, timestamp, body)  // tests
 ```
-
-gRPC clients may send `x-disk-tenant` metadata (DISK-0017 forward-compat); omitted = single-tenant (`tenant_id IS NULL`).
 
 ## Tests
 
-- `crates/disk-core/src/billing/*` — tier parse, quota math, Stripe JSON
-- `crates/disk-core/src/meta_db/billing.rs` — tier round-trip
-- `crates/disk-server/tests/quota_enforcement.rs` — upload accept/reject
-- `crates/disk-server/src/billing/webhook.rs` — webhook HTTP IT
+- `crates/disk-core/src/billing/stripe_sig.rs` — HMAC unit tests
+- `crates/disk-server/src/billing/webhook.rs` — accept valid / reject invalid sig
 
 ## References
 
 - `crates/disk-core/migrations/006_billing.sql`
-- `docs/design/DISK-0015-e2ee-scaffold.md` — E2EE track (orthogonal)
+- Stripe: https://stripe.com/docs/webhooks/signatures

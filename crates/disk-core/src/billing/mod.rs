@@ -2,8 +2,10 @@
 
 mod quota;
 mod stripe;
+mod stripe_sig;
 mod tier;
 
 pub use quota::{check_storage_delta, QuotaError};
 pub use stripe::{parse_stripe_subscription_event, StripeSubscriptionEvent};
+pub use stripe_sig::{compute_v1_signature, verify_stripe_webhook_signature, StripeSigError};
 pub use tier::{PlanTier, QuotaLimits};

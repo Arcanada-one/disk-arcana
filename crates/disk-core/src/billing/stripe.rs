@@ -63,10 +63,9 @@ struct StripePrice {
     lookup_key: Option<String>,
 }
 
-/// Parse a Stripe `customer.subscription.*` webhook JSON body (DISK-0018 slice 1).
+/// Parse a Stripe `customer.subscription.*` webhook JSON body.
 ///
-/// HMAC signature verification is deferred to slice 2; callers must gate on
-/// `DISK_BILLING_MODE=stripe` and network ACLs until then.
+/// Call only after `verify_stripe_webhook_signature` when `DISK_BILLING_MODE=stripe`.
 pub fn parse_stripe_subscription_event(
     body: &str,
 ) -> Result<StripeSubscriptionEvent, StripeParseError> {
