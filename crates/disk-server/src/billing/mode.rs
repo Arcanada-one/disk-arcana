@@ -35,8 +35,7 @@ impl BillingMode {
 
 /// Default tier for tenants without a `tenant_billing` row.
 pub fn default_plan_tier_from_env() -> Result<PlanTier, ConfigError> {
-    let raw = std::env::var("DISK_BILLING_DEFAULT_TIER")
-        .unwrap_or_else(|_| "free".to_string());
+    let raw = std::env::var("DISK_BILLING_DEFAULT_TIER").unwrap_or_else(|_| "free".to_string());
     PlanTier::parse(&raw)
         .map_err(|e| ConfigError::InvalidValue("DISK_BILLING_DEFAULT_TIER", e.to_string()))
 }
@@ -47,7 +46,10 @@ mod tests {
 
     #[test]
     fn parse_modes() {
-        assert_eq!(BillingMode::parse("disabled").unwrap(), BillingMode::Disabled);
+        assert_eq!(
+            BillingMode::parse("disabled").unwrap(),
+            BillingMode::Disabled
+        );
         assert_eq!(BillingMode::parse("enforce").unwrap(), BillingMode::Enforce);
         assert_eq!(BillingMode::parse("stripe").unwrap(), BillingMode::Stripe);
     }

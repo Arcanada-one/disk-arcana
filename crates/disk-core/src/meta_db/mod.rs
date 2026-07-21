@@ -4,8 +4,8 @@
 //! (DISK-0003) layers CRUD methods for the `files`, `tombstones`, and
 //! `conflicts` tables and wires up `BEGIN ... COMMIT` batch transactions.
 
-pub mod conflicts;
 mod billing;
+pub mod conflicts;
 mod files;
 mod node_baseline;
 mod tombstones;

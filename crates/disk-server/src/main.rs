@@ -202,7 +202,9 @@ async fn main() -> anyhow::Result<()> {
     // Runs concurrently with the gRPC server; both shut down on SIGTERM/SIGINT.
     let health_addr = cfg.health_bind_addr;
     let _health_task = tokio::spawn(async move {
-        if let Err(e) = disk_server::health::serve(health_addr, webhook_state, health_shutdown).await {
+        if let Err(e) =
+            disk_server::health::serve(health_addr, webhook_state, health_shutdown).await
+        {
             tracing::error!(error = %e, "health server exited with error");
         }
     });

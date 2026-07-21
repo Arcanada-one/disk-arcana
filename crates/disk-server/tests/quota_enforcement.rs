@@ -9,8 +9,8 @@ use disk_core::types::FileMeta;
 use disk_core::VectorClock;
 use disk_proto::disk::{
     auth_service_client::AuthServiceClient, auth_service_server::AuthServiceServer,
-    sync_service_client::SyncServiceClient, sync_service_server::SyncServiceServer,
-    DeltaChunk, DeltaUploadRequest, NodeAuthRequest, NodeRegisterRequest,
+    sync_service_client::SyncServiceClient, sync_service_server::SyncServiceServer, DeltaChunk,
+    DeltaUploadRequest, NodeAuthRequest, NodeRegisterRequest,
 };
 use disk_server::{AuthServiceImpl, AuthStore, BillingMode, QuotaEnforcer, SyncServiceImpl};
 use rcgen::{generate_simple_self_signed, CertifiedKey};

@@ -493,11 +493,7 @@ impl SyncService for SyncServiceImpl {
         // ── Storage quota gate (DISK-0018) ─────────────────────────────────
         if let (Some(enforcer), Some(file_path)) = (&self.quota_enforcer, last_path.as_deref()) {
             enforcer
-                .check_upload(
-                    tenant.as_deref(),
-                    file_path,
-                    assembled.len() as u64,
-                )
+                .check_upload(tenant.as_deref(), file_path, assembled.len() as u64)
                 .await?;
         }
 

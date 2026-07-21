@@ -78,9 +78,8 @@ impl QuotaEnforcer {
             .unwrap_or(0);
 
         let delta = new_size as i64 - old_size as i64;
-        check_storage_delta(used, delta, limits).map_err(|e| {
-            Status::resource_exhausted(format!("storage quota: {e}"))
-        })?;
+        check_storage_delta(used, delta, limits)
+            .map_err(|e| Status::resource_exhausted(format!("storage quota: {e}")))?;
         Ok(())
     }
 }

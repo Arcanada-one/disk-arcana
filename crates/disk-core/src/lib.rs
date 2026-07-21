@@ -31,11 +31,11 @@ pub mod traits;
 pub mod types;
 pub mod vector_clock;
 
-pub use config::Config;
 pub use billing::{
     check_storage_delta, parse_stripe_subscription_event, PlanTier, QuotaError, QuotaLimits,
     StripeSubscriptionEvent,
 };
+pub use config::Config;
 pub use e2ee::{
     decrypt, encrypt, overlay_scanned_meta, random_salt, E2eeCachedWire, E2eeError, EncryptedBlob,
     UploadPayload, VaultKey, KEY_LEN, NONCE_LEN, SALT_LEN,

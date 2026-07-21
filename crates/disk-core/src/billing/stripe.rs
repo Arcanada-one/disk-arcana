@@ -67,7 +67,9 @@ struct StripePrice {
 ///
 /// HMAC signature verification is deferred to slice 2; callers must gate on
 /// `DISK_BILLING_MODE=stripe` and network ACLs until then.
-pub fn parse_stripe_subscription_event(body: &str) -> Result<StripeSubscriptionEvent, StripeParseError> {
+pub fn parse_stripe_subscription_event(
+    body: &str,
+) -> Result<StripeSubscriptionEvent, StripeParseError> {
     let envelope: StripeEnvelope = serde_json::from_str(body)?;
     if !envelope.event_type.starts_with("customer.subscription.") {
         return Err(StripeParseError::UnsupportedEvent(envelope.event_type));

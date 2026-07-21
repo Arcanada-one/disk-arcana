@@ -6,7 +6,9 @@ use super::QuotaLimits;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum QuotaError {
-    #[error("storage quota exceeded: used {used_bytes} + delta {delta_bytes} > limit {limit_bytes}")]
+    #[error(
+        "storage quota exceeded: used {used_bytes} + delta {delta_bytes} > limit {limit_bytes}"
+    )]
     StorageExceeded {
         used_bytes: u64,
         delta_bytes: i64,
