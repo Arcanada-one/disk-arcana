@@ -1,13 +1,13 @@
-//! HTTP handlers for `/dashboard/*` (DISK-0019 slice 1).
+//! HTTP handlers for `/dashboard/*` (DISK-0019).
 
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
 use disk_core::billing::PlanTier;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::accounts::routes::{resolve_user_from_access, verify_bearer, AuthHttpState};
@@ -63,6 +63,71 @@ pub struct DashboardConflict {
     pub conflict_type: String,
     pub fork_path: Option<String>,
     pub created_at: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ResolveConflictRequest {
+    pub action: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ResolveConflictResponse {
+    pub resolved: bool,
+    pub id: i64,
+    pub action: String,
+}
+
+pub async fn resolve_conflict(
+    State(state): State<Arc<AuthHttpState>>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Json(body): Json<ResolveConflictRequest>,
+) -> impl IntoResponse {
+    match resolve_conflict_inner(&state, &headers, id, body).await {
+        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Err((code, msg)) => (code, Json(json!({ "error": msg }))).into_response(),
+    }
+}
+
+async fn resolve_conflict_inner(
+    state: &AuthHttpState,
+    headers: &HeaderMap,
+    id: i64,
+    body: ResolveConflictRequest,
+) -> Result<ResolveConflictResponse, (StatusCode, &'static str)> {
+    if !is_valid_resolve_action(&body.action) {
+        return Err((StatusCode::BAD_REQUEST, "invalid action"));
+    }
+
+    let claims = verify_bearer(state, headers).await?;
+    let user = resolve_user_from_access(state, &claims).await?;
+    let tenant_key = Some(user.tenant_id.as_str());
+
+    let conflict = state
+        .meta_db
+        .get_unresolved_conflict_for_tenant(tenant_key, id)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error"))?
+        .ok_or((StatusCode::NOT_FOUND, "conflict not found"))?;
+
+    state
+        .meta_db
+        .resolve_conflict(id, &body.action)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
+
+    Ok(ResolveConflictResponse {
+        resolved: true,
+        id: conflict.id.unwrap_or(id),
+        action: body.action,
+    })
+}
+
+fn is_valid_resolve_action(action: &str) -> bool {
+    matches!(
+        action,
+        "fork-local" | "fork-remote" | "merge" | "keep-local" | "keep-remote"
+    )
 }
 
 pub async fn summary(
@@ -332,6 +397,84 @@ mod integration_tests {
             assert_eq!(summary["vaults"].as_array().unwrap().len(), 1);
             assert_eq!(summary["devices"].as_array().unwrap().len(), 1);
             assert_eq!(summary["conflicts"].as_array().unwrap().len(), 1);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn dashboard_resolve_conflict_round_trip() {
+        let dir = tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("dash-resolve.sqlite"))
+            .await
+            .unwrap();
+        let seed_db = db.clone();
+
+        with_dashboard_server(db, |addr| async move {
+            let base = format!("http://{addr}");
+            let client = reqwest::Client::new();
+
+            let signup: Value = client
+                .post(format!("{base}/auth/signup"))
+                .json(&serde_json::json!({
+                    "email": "resolve@example.com",
+                    "password": "secure-pass",
+                    "tenant_id": "resolve-corp"
+                }))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            let token = signup["access_token"].as_str().unwrap();
+
+            let conflict = ConflictRecord {
+                id: None,
+                vault_id: "default".into(),
+                path: "notes/a.md".into(),
+                conflict_type: "Concurrent".into(),
+                local_hash: None,
+                remote_hash: None,
+                base_hash: None,
+                resolution: None,
+                fork_path: None,
+                resolved: false,
+                created_at: 1,
+                resolved_at: None,
+            };
+            let id = seed_db
+                .create_conflict_scoped(Some("resolve-corp"), &conflict)
+                .await
+                .unwrap();
+
+            let resolved: Value = client
+                .post(format!("{base}/dashboard/conflicts/{id}/resolve"))
+                .bearer_auth(token)
+                .json(&serde_json::json!({ "action": "keep-local" }))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert_eq!(resolved["resolved"], true);
+
+            let summary: Value = client
+                .get(format!("{base}/dashboard/summary"))
+                .bearer_auth(token)
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert_eq!(summary["conflicts"].as_array().unwrap().len(), 0);
         })
         .await;
     }

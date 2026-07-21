@@ -38,7 +38,7 @@ pub use audit::{AuditEmitter, AuditError, AuditEvent, AuditKind};
 pub use auth::{ApiKey, AuthStore, CertIdentity, SessionToken};
 pub use billing::webhook::WebhookState;
 pub use billing::{BillingMode, QuotaEnforcer};
-pub use dashboard::summary;
+pub use dashboard::{resolve_conflict, summary};
 pub use enrollment::{EnrollErrorKind, EnrollmentServiceImpl};
 pub use middleware::{BombError, ReplayError, ReplayGuard};
 pub use multi_node::{lifecycle::revoke_node, vclock::VClock};

@@ -117,6 +117,28 @@ impl MetaDb {
 
         rows.into_iter().map(row_to_conflict).collect()
     }
+
+    /// Fetch one unresolved conflict by id, scoped to tenant.
+    pub async fn get_unresolved_conflict_for_tenant(
+        &self,
+        tenant_id: Option<&str>,
+        id: i64,
+    ) -> Result<Option<ConflictRecord>, MetaDbError> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, vault_id, path, conflict_type, local_hash, remote_hash, base_hash,
+                   resolution, fork_path, resolved, created_at, resolved_at
+            FROM conflicts
+            WHERE id = ?1 AND resolved = 0 AND tenant_id IS ?2
+            "#,
+        )
+        .bind(id)
+        .bind(tenant_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(row_to_conflict).transpose()
+    }
 }
 
 fn row_to_conflict(row: sqlx::sqlite::SqliteRow) -> Result<ConflictRecord, MetaDbError> {

@@ -2,4 +2,4 @@
 
 pub mod routes;
 
-pub use routes::summary;
+pub use routes::{resolve_conflict, summary};
