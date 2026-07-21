@@ -137,6 +137,11 @@ async fn signup_inner(
         .set_plan_tier(Some(&tenant_id), PlanTier::Free)
         .await;
 
+    let _ = state
+        .meta_db
+        .record_signup_policy_consents(&user_id, &tenant_id)
+        .await;
+
     let mut resp = build_token_response(state, &user_id, &email, &tenant_id, false)?;
     attach_verification(state, &user_id, &mut resp)?;
     Ok(resp)

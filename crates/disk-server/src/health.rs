@@ -11,6 +11,8 @@
 //! - `POST /dashboard/conflicts/{id}/resolve` — DISK-0019 slice 2
 //! - `GET /compliance/export` — DISK-0021 GDPR data export (when auth=enforce)
 //! - `POST /compliance/delete-account` — DISK-0021 slice 2 right-to-erasure
+//! - `GET /compliance/sub-processors` — DISK-0021 slice 3 public registry
+//! - `GET /compliance/consents` — DISK-0021 slice 3 consent audit (when auth=enforce)
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -24,7 +26,7 @@ use crate::accounts::{
     oauth_callback, oauth_start, refresh_token, resend_verification, verify_email,
 };
 use crate::billing::webhook::{stripe_webhook, WebhookState};
-use crate::compliance::{delete_account, export_data};
+use crate::compliance::{delete_account, export_data, list_consents, sub_processors};
 use crate::dashboard::{resolve_conflict, summary};
 
 /// Start the health HTTP server. Returns an error if the bind fails; otherwise
@@ -35,7 +37,9 @@ pub async fn serve(
     auth: Option<Arc<AuthHttpState>>,
     shutdown: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()> {
-    let mut app = Router::new().route("/health", get(health_handler));
+    let mut app = Router::new()
+        .route("/health", get(health_handler))
+        .route("/compliance/sub-processors", get(sub_processors));
     if let Some(state) = webhook {
         app = app.route(
             "/billing/stripe/webhook",
@@ -66,7 +70,8 @@ pub async fn serve(
             .route("/dashboard/summary", get(summary))
             .route("/dashboard/conflicts/:id/resolve", post(resolve_conflict))
             .route("/compliance/export", get(export_data))
-            .route("/compliance/delete-account", post(delete_account));
+            .route("/compliance/delete-account", post(delete_account))
+            .route("/compliance/consents", get(list_consents));
         app = app.merge(auth_router.with_state(state));
     }
 

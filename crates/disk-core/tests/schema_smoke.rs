@@ -379,3 +379,22 @@ async fn migration_012_user_accounts_oauth_columns_exist() {
         );
     }
 }
+
+#[tokio::test]
+async fn migration_013_consent_events_table_exists() {
+    let dir = tempdir().expect("tempdir");
+    let db = MetaDb::open(&dir.path().join("consent-events-schema.sqlite"))
+        .await
+        .expect("open");
+
+    let tables: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .fetch_all(db.pool())
+            .await
+            .expect("sqlite_master");
+
+    assert!(
+        tables.iter().any(|t| t == "consent_events"),
+        "consent_events table must exist after migration 013; got {tables:?}"
+    );
+}
