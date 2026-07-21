@@ -40,6 +40,10 @@
 //! - `DELETE /agents/webhooks` — DISK-0028 remove agent webhook
 //! - `GET /agents/revision` — DISK-0028 optimistic-lock revision lookup
 //! - `POST /agents/write` — DISK-0028 agent HTTP write with revision check
+//! - `POST /orgs` — DISK-0030 create team/org workspace
+//! - `GET /orgs` — DISK-0030 list user organizations
+//! - `GET /orgs/members` — DISK-0030 list organization members
+//! - `POST /orgs/members` — DISK-0030 add organization member
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -60,6 +64,7 @@ use crate::billing::webhook::{stripe_webhook, WebhookState};
 use crate::compliance::{delete_account, export_data, list_consents, sub_processors};
 use crate::dashboard::{resolve_conflict, summary};
 use crate::onboarding::{get_onboarding, put_onboarding};
+use crate::orgs::{add_member, create_org, list_members as list_org_members, list_orgs};
 use crate::selective_sync::{get_selective_sync, put_selective_sync};
 use crate::sharing::{accept_invite, create_invite, list_invites, list_members, remove_member};
 use crate::snapshots::{create_snapshot, get_snapshot, list_snapshots, restore_snapshot};
@@ -138,7 +143,9 @@ pub async fn serve(
             )
             .route("/agents/revision", get(get_revision))
             .route("/agents/write", post(agent_write))
-            .route("/agents/embeddings-stale", post(report_embeddings_stale));
+            .route("/agents/embeddings-stale", post(report_embeddings_stale))
+            .route("/orgs", get(list_orgs).post(create_org))
+            .route("/orgs/members", get(list_org_members).post(add_member));
         crate::trash::scheduler::spawn_periodic_prune(state.clone());
         app = app.merge(auth_router.with_state(state));
     }
