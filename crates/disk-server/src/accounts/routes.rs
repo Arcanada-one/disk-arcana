@@ -274,101 +274,99 @@ mod integration_tests {
         tokio::pin!(server);
 
         tokio::select! {
-            result = &mut server => panic!("health server exited early: {result:?}"),
-            () = async {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                exercise(addr).await;
-            } => {        }
-    }
-
-    fn disabled_oauth() -> OAuthConfig {
-        OAuthConfig {
-            mode: OAuthMode::Disabled,
-            issuer: None,
-            client_id: None,
-            client_secret: None,
-            redirect_uri: None,
-            public_base_url: None,
+                result = &mut server => panic!("health server exited early: {result:?}"),
+                () = async {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    exercise(addr).await;
+                } => {        }
         }
-    }
 
-    async fn with_stub_oauth_server<F, Fut>(meta_db: MetaDb, exercise: F)
-    where
-        F: FnOnce(SocketAddr) -> Fut,
-        Fut: std::future::Future<Output = ()>,
-    {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr: SocketAddr = listener.local_addr().unwrap();
-        drop(listener);
+        fn disabled_oauth() -> OAuthConfig {
+            OAuthConfig {
+                mode: OAuthMode::Disabled,
+                issuer: None,
+                client_id: None,
+                client_secret: None,
+                redirect_uri: None,
+                public_base_url: None,
+            }
+        }
 
-        let oauth = OAuthConfig {
-            mode: OAuthMode::Stub,
-            issuer: None,
-            client_id: None,
-            client_secret: None,
-            redirect_uri: None,
-            public_base_url: Some(format!("http://{addr}")),
-        };
+        async fn with_stub_oauth_server<F, Fut>(meta_db: MetaDb, exercise: F)
+        where
+            F: FnOnce(SocketAddr) -> Fut,
+            Fut: std::future::Future<Output = ()>,
+        {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr: SocketAddr = listener.local_addr().unwrap();
+            drop(listener);
 
-        with_auth_server(meta_db, oauth, exercise).await;
-    }
+            let oauth = OAuthConfig {
+                mode: OAuthMode::Stub,
+                issuer: None,
+                client_id: None,
+                client_secret: None,
+                redirect_uri: None,
+                public_base_url: Some(format!("http://{addr}")),
+            };
 
-    #[tokio::test]
-    async fn stub_oauth_start_callback_round_trip() {
-        let dir = tempdir().unwrap();
-        let db = MetaDb::open(&dir.path().join("auth-oauth.sqlite"))
-            .await
-            .unwrap();
-        with_stub_oauth_server(db, |addr| async move {
-            let base = format!("http://{addr}");
-            let client = reqwest::Client::new();
+            with_auth_server(meta_db, oauth, exercise).await;
+        }
 
-            let start: Value = client
-                .get(format!("{base}/auth/oauth/start?provider=google"))
-                .send()
-                .await
-                .unwrap()
-                .error_for_status()
-                .unwrap()
-                .json()
+        #[tokio::test]
+        async fn stub_oauth_start_callback_round_trip() {
+            let dir = tempdir().unwrap();
+            let db = MetaDb::open(&dir.path().join("auth-oauth.sqlite"))
                 .await
                 .unwrap();
+            with_stub_oauth_server(db, |addr| async move {
+                let base = format!("http://{addr}");
+                let client = reqwest::Client::new();
 
-            let callback_url = start["authorization_url"].as_str().unwrap();
-            let oauth_state = start["state"].as_str().unwrap();
-            assert!(callback_url.contains("/auth/oauth/callback"));
+                let start: Value = client
+                    .get(format!("{base}/auth/oauth/start?provider=google"))
+                    .send()
+                    .await
+                    .unwrap()
+                    .error_for_status()
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
 
-            let parsed = reqwest::Url::parse(callback_url).unwrap();
-            let code = parsed
-                .query_pairs()
-                .find(|(k, _)| k == "code")
-                .map(|(_, v)| v.to_string())
-                .unwrap();
+                let callback_url = start["authorization_url"].as_str().unwrap();
+                let oauth_state = start["state"].as_str().unwrap();
+                assert!(callback_url.contains("/auth/oauth/callback"));
 
-            let token: Value = client
-                .get(format!("{base}/auth/oauth/callback"))
-                .query(&[("code", code), ("state", oauth_state.to_string())])
-                .send()
-                .await
-                .unwrap()
-                .error_for_status()
-                .unwrap()
-                .json()
-                .await
-                .unwrap();
+                let parsed = reqwest::Url::parse(callback_url).unwrap();
+                let code = parsed
+                    .query_pairs()
+                    .find(|(k, _)| k == "code")
+                    .map(|(_, v)| v.to_string())
+                    .unwrap();
 
-            assert_eq!(token["token_type"], "Bearer");
-            assert!(
-                token["user"]["email"]
+                let token: Value = client
+                    .get(format!("{base}/auth/oauth/callback"))
+                    .query(&[("code", code), ("state", oauth_state.to_string())])
+                    .send()
+                    .await
+                    .unwrap()
+                    .error_for_status()
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
+
+                assert_eq!(token["token_type"], "Bearer");
+                assert!(token["user"]["email"]
                     .as_str()
                     .unwrap()
-                    .ends_with("@stub.oauth.local")
-            );
-            assert_eq!(token["user"]["email_verified"], true);
-        })
-        .await;
+                    .ends_with("@stub.oauth.local"));
+                assert_eq!(token["user"]["email_verified"], true);
+            })
+            .await;
+        }
     }
-}
 
     #[tokio::test]
     async fn health_responds_when_auth_routes_mounted() {
@@ -558,12 +556,10 @@ mod integration_tests {
                 .unwrap();
 
             assert_eq!(token["token_type"], "Bearer");
-            assert!(
-                token["user"]["email"]
-                    .as_str()
-                    .unwrap()
-                    .ends_with("@stub.oauth.local")
-            );
+            assert!(token["user"]["email"]
+                .as_str()
+                .unwrap()
+                .ends_with("@stub.oauth.local"));
             assert_eq!(token["user"]["email_verified"], true);
         })
         .await;

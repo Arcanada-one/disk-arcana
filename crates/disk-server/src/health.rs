@@ -13,8 +13,8 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
 
-use crate::accounts::{oauth_callback, oauth_start};
 use crate::accounts::routes::{login, me, signup, AuthHttpState};
+use crate::accounts::{oauth_callback, oauth_start};
 use crate::billing::webhook::{stripe_webhook, WebhookState};
 
 /// Start the health HTTP server. Returns an error if the bind fails; otherwise
