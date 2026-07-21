@@ -209,8 +209,7 @@ fn verify_verification_token(
         .ok_or((StatusCode::BAD_REQUEST, "invalid token"))?;
     let expected =
         sign_token(signing_key, payload).map_err(|_| (StatusCode::BAD_REQUEST, "invalid token"))?;
-    let valid: bool =
-        subtle::ConstantTimeEq::ct_eq(expected.as_bytes(), sig.as_bytes()).into();
+    let valid: bool = subtle::ConstantTimeEq::ct_eq(expected.as_bytes(), sig.as_bytes()).into();
     if !valid {
         return Err((StatusCode::BAD_REQUEST, "invalid token"));
     }
