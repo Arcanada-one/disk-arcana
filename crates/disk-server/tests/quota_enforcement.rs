@@ -6,7 +6,7 @@ use std::time::Duration;
 use disk_core::billing::{PlanTier, QuotaLimits};
 use disk_core::meta_db::MetaDb;
 use disk_core::types::FileMeta;
-use disk_core::VectorClock;
+use disk_core::{TenantMetaRouter, VectorClock};
 use disk_proto::disk::{
     auth_service_client::AuthServiceClient, auth_service_server::AuthServiceServer,
     sync_service_client::SyncServiceClient, sync_service_server::SyncServiceServer, DeltaChunk,
@@ -98,14 +98,15 @@ async fn spawn_server_with_quota(
     let cert_pem = cert.pem();
     let key_pem = key_pair.serialize_pem();
 
-    let enforcer = QuotaEnforcer::new(BillingMode::Enforce, meta_db.clone())
+    let router = TenantMetaRouter::single(meta_db.clone());
+    let enforcer = QuotaEnforcer::new(BillingMode::Enforce, router.clone())
         .unwrap()
         .with_test_limits(limits);
 
     let auth_impl = AuthServiceImpl::new(store.clone()).with_quota_enforcer(enforcer.clone());
     let auth_svc = AuthServiceServer::new(auth_impl);
     let sync_impl = SyncServiceImpl::new(store.clone(), sync_root)
-        .with_meta_db(meta_db, "server-test")
+        .with_meta_router(router, "server-test")
         .with_quota_enforcer(enforcer);
     let sync_svc = SyncServiceServer::new(sync_impl);
 

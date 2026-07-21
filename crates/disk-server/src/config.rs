@@ -137,6 +137,10 @@ pub struct ServerConfig {
     pub billing_mode: crate::billing::BillingMode,
     /// Stripe webhook signing secret (`whsec_...`). Required in stripe mode when sig verify is on.
     pub stripe_webhook_secret: Option<String>,
+    /// Per-tenant SQLite data directory (DISK-0017 slice 4). When set, file
+    /// metadata lives under `{dir}/{tenant}/meta.sqlite`; control tables stay
+    /// on `DISK_DB_PATH`.
+    pub tenant_db_dir: Option<PathBuf>,
 }
 
 impl ServerConfig {
@@ -239,6 +243,7 @@ impl ServerConfig {
             register_node_mode,
             billing_mode,
             stripe_webhook_secret,
+            tenant_db_dir: opt_path("DISK_TENANT_DB_DIR"),
         })
     }
 }
