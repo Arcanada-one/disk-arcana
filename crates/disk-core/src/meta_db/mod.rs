@@ -22,6 +22,8 @@ use sqlx::{
 
 use crate::error::MetaDbError;
 
+pub use accounts::{NewOAuthUser, UserAccount};
+
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
 /// Handle to the on-disk SQLite metadata index. Cheap to clone (wraps a pool).

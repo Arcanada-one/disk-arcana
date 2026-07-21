@@ -147,6 +147,13 @@ pub struct ServerConfig {
     pub jwt_signing_key: Option<String>,
     /// Access token TTL seconds (default 86400).
     pub jwt_ttl_secs: u64,
+    /// OAuth social login mode (DISK-0016 slice 2).
+    pub oauth_mode: crate::accounts::OAuthMode,
+    pub oauth_issuer: Option<String>,
+    pub oauth_client_id: Option<String>,
+    pub oauth_client_secret: Option<String>,
+    pub oauth_redirect_uri: Option<String>,
+    pub oauth_public_base_url: Option<String>,
 }
 
 impl ServerConfig {
@@ -247,6 +254,53 @@ impl ServerConfig {
             }
         }
 
+        let oauth_mode_raw =
+            std::env::var("DISK_OAUTH_MODE").unwrap_or_else(|_| "disabled".to_string());
+        let oauth_mode = crate::accounts::OAuthMode::parse(&oauth_mode_raw)?;
+        let oauth_issuer = std::env::var("DISK_OAUTH_ISSUER")
+            .ok()
+            .filter(|s| !s.is_empty());
+        let oauth_client_id = std::env::var("DISK_OAUTH_CLIENT_ID")
+            .ok()
+            .filter(|s| !s.is_empty());
+        let oauth_client_secret = std::env::var("DISK_OAUTH_CLIENT_SECRET")
+            .ok()
+            .filter(|s| !s.is_empty());
+        let oauth_redirect_uri = std::env::var("DISK_OAUTH_REDIRECT_URI")
+            .ok()
+            .filter(|s| !s.is_empty());
+        let oauth_public_base_url = std::env::var("DISK_OAUTH_PUBLIC_BASE_URL")
+            .ok()
+            .filter(|s| !s.is_empty());
+
+        if oauth_mode.is_active() && !auth_mode.is_active() {
+            return Err(ConfigError::InvalidValue(
+                "DISK_OAUTH_MODE",
+                "oauth requires DISK_AUTH_MODE=enforce".into(),
+            ));
+        }
+        if oauth_mode == crate::accounts::OAuthMode::AuthArcana {
+            for (var, val) in [
+                ("DISK_OAUTH_ISSUER", oauth_issuer.as_deref()),
+                ("DISK_OAUTH_CLIENT_ID", oauth_client_id.as_deref()),
+                ("DISK_OAUTH_CLIENT_SECRET", oauth_client_secret.as_deref()),
+                ("DISK_OAUTH_REDIRECT_URI", oauth_redirect_uri.as_deref()),
+            ] {
+                if val.is_none() {
+                    return Err(ConfigError::MissingEnv(var));
+                }
+            }
+        }
+        if oauth_mode == crate::accounts::OAuthMode::Stub
+            && oauth_public_base_url.is_none()
+            && oauth_redirect_uri.is_none()
+        {
+            return Err(ConfigError::InvalidValue(
+                "DISK_OAUTH_PUBLIC_BASE_URL",
+                "required in stub mode when DISK_OAUTH_REDIRECT_URI is unset".into(),
+            ));
+        }
+
         Ok(Self {
             bind_addr,
             enrollment_bind_addr,
@@ -278,6 +332,12 @@ impl ServerConfig {
             auth_mode,
             jwt_signing_key,
             jwt_ttl_secs,
+            oauth_mode,
+            oauth_issuer,
+            oauth_client_id,
+            oauth_client_secret,
+            oauth_redirect_uri,
+            oauth_public_base_url,
         })
     }
 }

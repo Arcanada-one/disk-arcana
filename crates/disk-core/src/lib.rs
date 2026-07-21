@@ -36,7 +36,7 @@ pub mod vector_clock;
 pub use accounts::{
     default_tenant_from_email, hash_password, issue_token, new_user_id, normalize_email,
     sanitize_tenant_slug, validate_email, verify_password, verify_token, DiskJwtClaims, JwtError,
-    PasswordError, DEFAULT_ISSUER, JWT_DEFAULT_TTL_SECS, MIN_PASSWORD_LEN,
+    PasswordError, DEFAULT_ISSUER, JWT_DEFAULT_TTL_SECS, MIN_PASSWORD_LEN, OAUTH_PASSWORD_SENTINEL,
 };
 pub use billing::{
     check_node_capacity, check_storage_delta, check_vault_capacity, compute_v1_signature,

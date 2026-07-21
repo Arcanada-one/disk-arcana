@@ -8,6 +8,9 @@ pub use jwt::{
 };
 pub use password::{hash_password, verify_password, PasswordError, MIN_PASSWORD_LEN};
 
+/// Sentinel stored in `password_hash` for OAuth-only accounts (DISK-0016 slice 2).
+pub const OAUTH_PASSWORD_SENTINEL: &str = "!oauth:no-password!";
+
 /// Generate a random user id (`usr_` + 16 hex bytes).
 pub fn new_user_id() -> String {
     use rand::RngCore;

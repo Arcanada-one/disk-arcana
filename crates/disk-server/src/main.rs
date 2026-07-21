@@ -184,6 +184,14 @@ async fn main() -> anyhow::Result<()> {
             meta_db: meta_router.control(),
             signing_key: key.into_bytes(),
             token_ttl_secs: cfg.jwt_ttl_secs,
+            oauth: disk_server::OAuthConfig {
+                mode: cfg.oauth_mode,
+                issuer: cfg.oauth_issuer.clone(),
+                client_id: cfg.oauth_client_id.clone(),
+                client_secret: cfg.oauth_client_secret.clone(),
+                redirect_uri: cfg.oauth_redirect_uri.clone(),
+                public_base_url: cfg.oauth_public_base_url.clone(),
+            },
         }))
     } else {
         None

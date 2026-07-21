@@ -15,11 +15,14 @@ use disk_core::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use super::oauth::OAuthConfig;
+
 #[derive(Clone)]
 pub struct AuthHttpState {
     pub meta_db: MetaDb,
     pub signing_key: Vec<u8>,
     pub token_ttl_secs: u64,
+    pub oauth: OAuthConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -132,6 +135,10 @@ async fn login_inner(
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error"))?
         .ok_or((StatusCode::UNAUTHORIZED, "invalid credentials"))?;
 
+    if user.is_oauth_only() {
+        return Err((StatusCode::UNAUTHORIZED, "use oauth login"));
+    }
+
     let ok = verify_password(&body.password, &user.password_hash)
         .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "password verify failed"))?;
     if !ok {
@@ -170,7 +177,7 @@ async fn me_inner(
     })
 }
 
-fn build_token_response(
+pub(crate) fn build_token_response(
     state: &AuthHttpState,
     user_id: &str,
     email: &str,
@@ -242,11 +249,23 @@ mod integration_tests {
     use tokio::net::TcpListener;
 
     use super::*;
+    use crate::accounts::{OAuthConfig, OAuthMode};
     use crate::health;
 
     const TEST_KEY: &str = "01234567890123456789012345678901";
 
-    async fn with_auth_server<F, Fut>(meta_db: MetaDb, exercise: F)
+    fn disabled_oauth() -> OAuthConfig {
+        OAuthConfig {
+            mode: OAuthMode::Disabled,
+            issuer: None,
+            client_id: None,
+            client_secret: None,
+            redirect_uri: None,
+            public_base_url: None,
+        }
+    }
+
+    async fn with_auth_server<F, Fut>(meta_db: MetaDb, oauth: OAuthConfig, exercise: F)
     where
         F: FnOnce(SocketAddr) -> Fut,
         Fut: std::future::Future<Output = ()>,
@@ -259,6 +278,7 @@ mod integration_tests {
             meta_db,
             signing_key: TEST_KEY.as_bytes().to_vec(),
             token_ttl_secs: 3600,
+            oauth,
         });
 
         let server = health::serve(addr, None, Some(state), std::future::pending::<()>());
@@ -273,13 +293,34 @@ mod integration_tests {
         }
     }
 
+    async fn with_stub_oauth_server<F, Fut>(meta_db: MetaDb, exercise: F)
+    where
+        F: FnOnce(SocketAddr) -> Fut,
+        Fut: std::future::Future<Output = ()>,
+    {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr: SocketAddr = listener.local_addr().unwrap();
+        drop(listener);
+
+        let oauth = OAuthConfig {
+            mode: OAuthMode::Stub,
+            issuer: None,
+            client_id: None,
+            client_secret: None,
+            redirect_uri: None,
+            public_base_url: Some(format!("http://{addr}")),
+        };
+
+        with_auth_server(meta_db, oauth, exercise).await;
+    }
+
     #[tokio::test]
     async fn health_responds_when_auth_routes_mounted() {
         let dir = tempdir().unwrap();
         let db = MetaDb::open(&dir.path().join("auth-health.sqlite"))
             .await
             .unwrap();
-        with_auth_server(db, |addr| async move {
+        with_auth_server(db, disabled_oauth(), |addr| async move {
             let resp = reqwest::get(format!("http://{addr}/health")).await.unwrap();
             assert_eq!(resp.status(), 200);
         })
@@ -292,7 +333,7 @@ mod integration_tests {
         let db = MetaDb::open(&dir.path().join("auth-it.sqlite"))
             .await
             .unwrap();
-        with_auth_server(db, |addr| async move {
+        with_auth_server(db, disabled_oauth(), |addr| async move {
             let base = format!("http://{addr}");
             let client = reqwest::Client::new();
 
@@ -355,7 +396,7 @@ mod integration_tests {
         let db = MetaDb::open(&dir.path().join("auth-dup.sqlite"))
             .await
             .unwrap();
-        with_auth_server(db, |addr| async move {
+        with_auth_server(db, disabled_oauth(), |addr| async move {
             let base = format!("http://{addr}");
             let client = reqwest::Client::new();
             let body = serde_json::json!({
@@ -380,6 +421,60 @@ mod integration_tests {
                 .await
                 .unwrap();
             assert_eq!(resp.status(), 409);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn stub_oauth_start_callback_round_trip() {
+        let dir = tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("auth-oauth.sqlite"))
+            .await
+            .unwrap();
+        with_stub_oauth_server(db, |addr| async move {
+            let base = format!("http://{addr}");
+            let client = reqwest::Client::new();
+
+            let start: Value = client
+                .get(format!("{base}/auth/oauth/start?provider=google"))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+
+            let callback_url = start["authorization_url"].as_str().unwrap();
+            let oauth_state = start["state"].as_str().unwrap();
+            assert!(callback_url.contains("/auth/oauth/callback"));
+
+            let parsed = reqwest::Url::parse(callback_url).unwrap();
+            let code = parsed
+                .query_pairs()
+                .find(|(k, _)| k == "code")
+                .map(|(_, v)| v.to_string())
+                .unwrap();
+
+            let token: Value = client
+                .get(format!("{base}/auth/oauth/callback"))
+                .query(&[("code", code), ("state", oauth_state.to_string())])
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+
+            assert_eq!(token["token_type"], "Bearer");
+            assert!(token["user"]["email"]
+                .as_str()
+                .unwrap()
+                .ends_with("@stub.oauth.local"));
+            assert_eq!(token["user"]["email_verified"], true);
         })
         .await;
     }
