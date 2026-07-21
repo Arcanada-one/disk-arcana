@@ -14,7 +14,7 @@ use sha2::Sha256;
 use tracing::info;
 
 use super::email_verify_mode::EmailVerifyMode;
-use super::routes::{bearer_token, build_token_response, AuthHttpState, AuthTokenResponse};
+use super::routes::{build_token_response, AuthHttpState, AuthTokenResponse};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -142,16 +142,11 @@ async fn resend_verification_inner(
         return Err((StatusCode::NOT_FOUND, "email verification disabled"));
     }
 
-    let bearer = bearer_token(headers).ok_or((StatusCode::UNAUTHORIZED, "missing bearer token"))?;
-    let claims = disk_core::verify_token(&state.signing_key, bearer)
+    let claims = super::routes::verify_bearer(state, headers)
+        .await
         .map_err(|_| (StatusCode::UNAUTHORIZED, "invalid token"))?;
 
-    let user = state
-        .meta_db
-        .get_user_by_id(&claims.sub)
-        .await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error"))?
-        .ok_or((StatusCode::UNAUTHORIZED, "user not found"))?;
+    let user = super::routes::resolve_user_from_access(state, &claims).await?;
 
     if user.email_verified {
         return Err((StatusCode::CONFLICT, "email already verified"));

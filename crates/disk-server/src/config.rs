@@ -147,6 +147,10 @@ pub struct ServerConfig {
     pub jwt_signing_key: Option<String>,
     /// Access token TTL seconds (default 86400).
     pub jwt_ttl_secs: u64,
+    /// Bearer JWT mode (DISK-0016 slice 4).
+    pub jwt_mode: crate::accounts::JwtMode,
+    pub jwt_issuer: Option<String>,
+    pub jwt_jwks_uri: Option<String>,
     /// OAuth social login mode (DISK-0016 slice 2).
     pub oauth_mode: crate::accounts::OAuthMode,
     pub oauth_issuer: Option<String>,
@@ -246,6 +250,9 @@ impl ServerConfig {
             .and_then(|s| s.parse().ok())
             .unwrap_or(disk_core::JWT_DEFAULT_TTL_SECS);
 
+        let jwt_mode_raw = std::env::var("DISK_JWT_MODE").unwrap_or_else(|_| "local".to_string());
+        let jwt_mode = crate::accounts::JwtMode::parse(&jwt_mode_raw)?;
+
         if auth_mode.is_active() {
             let key = jwt_signing_key
                 .as_deref()
@@ -331,6 +338,33 @@ impl ServerConfig {
             ));
         }
 
+        let jwt_issuer = std::env::var("DISK_JWT_ISSUER")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .or(oauth_issuer.clone())
+            .or_else(|| {
+                if jwt_mode.allows_jwks_verify() {
+                    Some("https://auth.arcanada.ai".into())
+                } else {
+                    None
+                }
+            });
+        let jwt_jwks_uri = std::env::var("DISK_JWT_JWKS_URI")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                jwt_issuer
+                    .as_ref()
+                    .map(|iss| format!("{}/.well-known/jwks.json", iss.trim_end_matches('/')))
+            });
+
+        if jwt_mode.allows_jwks_verify() && jwt_jwks_uri.is_none() {
+            return Err(ConfigError::InvalidValue(
+                "DISK_JWT_JWKS_URI",
+                "required when DISK_JWT_MODE is auth_arcana or dual".into(),
+            ));
+        }
+
         Ok(Self {
             bind_addr,
             enrollment_bind_addr,
@@ -362,6 +396,9 @@ impl ServerConfig {
             auth_mode,
             jwt_signing_key,
             jwt_ttl_secs,
+            jwt_mode,
+            jwt_issuer,
+            jwt_jwks_uri,
             oauth_mode,
             oauth_issuer,
             oauth_client_id,

@@ -9,20 +9,22 @@ use axum::Json;
 use disk_core::billing::PlanTier;
 use disk_core::meta_db::MetaDb;
 use disk_core::{
-    default_tenant_from_email, hash_password, issue_token, new_user_id, normalize_email,
-    sanitize_tenant_slug, validate_email, verify_password, verify_token,
+    default_tenant_from_email, hash_password, new_user_id, normalize_email, sanitize_tenant_slug,
+    validate_email, verify_password,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::email_verify::{deliver_verification, EmailVerifyConfig, VerificationDelivery};
+use super::jwt_service::{JwtConfig, VerifiedAccess};
 use super::oauth::OAuthConfig;
 
 #[derive(Clone)]
 pub struct AuthHttpState {
     pub meta_db: MetaDb,
+    /// Symmetric key for OAuth state + email verification HMAC (not bearer JWT in JWKS mode).
     pub signing_key: Vec<u8>,
-    pub token_ttl_secs: u64,
+    pub jwt: JwtConfig,
     pub oauth: OAuthConfig,
     pub email_verify: EmailVerifyConfig,
 }
@@ -92,6 +94,13 @@ async fn signup_inner(
     state: &AuthHttpState,
     body: SignupRequest,
 ) -> Result<AuthTokenResponse, (StatusCode, &'static str)> {
+    if !state.jwt.mode.allows_local_issue() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "password signup disabled in auth_arcana jwt mode",
+        ));
+    }
+
     let email = normalize_email(&body.email);
     if !validate_email(&email) {
         return Err((StatusCode::BAD_REQUEST, "invalid email"));
@@ -135,6 +144,13 @@ async fn login_inner(
     state: &AuthHttpState,
     body: LoginRequest,
 ) -> Result<AuthTokenResponse, (StatusCode, &'static str)> {
+    if !state.jwt.mode.allows_local_issue() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "password login disabled in auth_arcana jwt mode",
+        ));
+    }
+
     let email = normalize_email(&body.email);
     let user = state
         .meta_db
@@ -166,16 +182,8 @@ async fn me_inner(
     state: &AuthHttpState,
     headers: &HeaderMap,
 ) -> Result<UserProfile, (StatusCode, &'static str)> {
-    let token = bearer_token(headers).ok_or((StatusCode::UNAUTHORIZED, "missing bearer token"))?;
-    let claims = verify_token(&state.signing_key, token)
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "invalid token"))?;
-
-    let user = state
-        .meta_db
-        .get_user_by_id(&claims.sub)
-        .await
-        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error"))?
-        .ok_or((StatusCode::UNAUTHORIZED, "user not found"))?;
+    let claims = verify_bearer(state, headers).await?;
+    let user = resolve_user_from_access(state, &claims).await?;
 
     Ok(UserProfile {
         user_id: user.id,
@@ -185,6 +193,40 @@ async fn me_inner(
     })
 }
 
+pub(crate) async fn verify_bearer(
+    state: &AuthHttpState,
+    headers: &HeaderMap,
+) -> Result<VerifiedAccess, (StatusCode, &'static str)> {
+    let token = bearer_token(headers).ok_or((StatusCode::UNAUTHORIZED, "missing bearer token"))?;
+    state
+        .jwt
+        .verify(token)
+        .await
+        .map_err(|_| (StatusCode::UNAUTHORIZED, "invalid token"))
+}
+
+pub(crate) async fn resolve_user_from_access(
+    state: &AuthHttpState,
+    claims: &VerifiedAccess,
+) -> Result<disk_core::meta_db::UserAccount, (StatusCode, &'static str)> {
+    if let Ok(Some(user)) = state.meta_db.get_user_by_id(&claims.sub).await {
+        return Ok(user);
+    }
+    if let Ok(Some(user)) = state
+        .meta_db
+        .get_user_by_oauth("auth_arcana", &claims.sub)
+        .await
+    {
+        return Ok(user);
+    }
+    if let Some(email) = claims.email.as_deref() {
+        if let Ok(Some(user)) = state.meta_db.get_user_by_email(email).await {
+            return Ok(user);
+        }
+    }
+    Err((StatusCode::UNAUTHORIZED, "user not found"))
+}
+
 pub(crate) fn build_token_response(
     state: &AuthHttpState,
     user_id: &str,
@@ -192,20 +234,15 @@ pub(crate) fn build_token_response(
     tenant_id: &str,
     email_verified: bool,
 ) -> Result<AuthTokenResponse, (StatusCode, &'static str)> {
-    let access_token = issue_token(
-        &state.signing_key,
-        user_id,
-        email,
-        tenant_id,
-        email_verified,
-        state.token_ttl_secs,
-    )
-    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "token issue failed"))?;
+    let access_token = state
+        .jwt
+        .issue_local(user_id, email, tenant_id, email_verified)
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "token issue failed"))?;
 
     Ok(AuthTokenResponse {
         access_token,
         token_type: "Bearer",
-        expires_in: state.token_ttl_secs,
+        expires_in: state.jwt.token_ttl_secs,
         user: UserProfile {
             user_id: user_id.to_owned(),
             email: email.to_owned(),
@@ -215,6 +252,29 @@ pub(crate) fn build_token_response(
         verification_token: None,
         verification_url: None,
     })
+}
+
+pub(crate) fn build_external_token_response(
+    access_token: String,
+    expires_in: u64,
+    user_id: &str,
+    email: &str,
+    tenant_id: &str,
+    email_verified: bool,
+) -> AuthTokenResponse {
+    AuthTokenResponse {
+        access_token,
+        token_type: "Bearer",
+        expires_in,
+        user: UserProfile {
+            user_id: user_id.to_owned(),
+            email: email.to_owned(),
+            tenant_id: tenant_id.to_owned(),
+            email_verified,
+        },
+        verification_token: None,
+        verification_url: None,
+    }
 }
 
 fn attach_verification(
@@ -273,10 +333,22 @@ mod integration_tests {
     use tokio::net::TcpListener;
 
     use super::*;
-    use crate::accounts::{EmailVerifyConfig, EmailVerifyMode, OAuthConfig, OAuthMode};
+    use crate::accounts::{
+        EmailVerifyConfig, EmailVerifyMode, JwksCache, JwtConfig, JwtMode, OAuthConfig, OAuthMode,
+    };
     use crate::health;
 
     const TEST_KEY: &str = "01234567890123456789012345678901";
+
+    fn local_jwt() -> JwtConfig {
+        JwtConfig {
+            mode: JwtMode::Local,
+            local_signing_key: TEST_KEY.as_bytes().to_vec(),
+            token_ttl_secs: 3600,
+            issuer: disk_core::DEFAULT_ISSUER.into(),
+            jwks: Arc::new(JwksCache::new("http://127.0.0.1:9/jwks")),
+        }
+    }
 
     fn disabled_oauth() -> OAuthConfig {
         OAuthConfig {
@@ -329,7 +401,7 @@ mod integration_tests {
         let state = Arc::new(AuthHttpState {
             meta_db,
             signing_key: TEST_KEY.as_bytes().to_vec(),
-            token_ttl_secs: 3600,
+            jwt: local_jwt(),
             oauth,
             email_verify,
         });

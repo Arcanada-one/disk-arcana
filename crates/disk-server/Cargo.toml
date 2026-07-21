@@ -52,6 +52,7 @@ hex          = "0.4"
 hmac         = "0.12"
 sha2         = "0.10"
 subtle       = "2"
+jsonwebtoken = { workspace = true }
 
 [dependencies.tempfile]
 version = "3"

@@ -180,10 +180,24 @@ async fn main() -> anyhow::Result<()> {
             .jwt_signing_key
             .clone()
             .expect("jwt key checked in ServerConfig::from_env");
+        let key_bytes = key.into_bytes();
         Some(Arc::new(disk_server::AuthHttpState {
             meta_db: meta_router.control(),
-            signing_key: key.into_bytes(),
-            token_ttl_secs: cfg.jwt_ttl_secs,
+            signing_key: key_bytes.clone(),
+            jwt: disk_server::JwtConfig {
+                mode: cfg.jwt_mode,
+                local_signing_key: key_bytes,
+                token_ttl_secs: cfg.jwt_ttl_secs,
+                issuer: cfg
+                    .jwt_issuer
+                    .clone()
+                    .unwrap_or_else(|| disk_core::DEFAULT_ISSUER.to_string()),
+                jwks: Arc::new(disk_server::JwksCache::new(
+                    cfg.jwt_jwks_uri
+                        .clone()
+                        .unwrap_or_else(|| "http://127.0.0.1:9/jwks".into()),
+                )),
+            },
             oauth: disk_server::OAuthConfig {
                 mode: cfg.oauth_mode,
                 issuer: cfg.oauth_issuer.clone(),
