@@ -14,7 +14,7 @@
 //! - `GET /compliance/sub-processors` — DISK-0021 slice 3 public registry
 //! - `GET /compliance/consents` — DISK-0021 slice 3 consent audit (when auth=enforce)
 //! - `GET /versions` — DISK-0020 file version history (when auth=enforce)
-//! - `POST /versions/restore` — DISK-0020 restore a historical revision (slice 2 polish: pagination + guards)
+//! - `POST /versions/restore` — DISK-0020 restore a historical revision
 
 use std::net::SocketAddr;
 use std::sync::Arc;

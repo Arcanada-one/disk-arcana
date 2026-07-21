@@ -1,6 +1,6 @@
 # DISK-0020 — File Versioning and History
 
-**Status:** slice 2 on DEVS — version history UI polish + list/restore API pagination.  
+**Status:** slice 3 on DEVS — gRPC `version_id` wire fill + `disk versions` CLI.  
 **Parent:** DISK-0001 commercial / SaaS track.  
 **Tracking:** DISK-0020 in Datarim backlog.
 
@@ -9,8 +9,9 @@
 | Slice | In scope | Out of scope |
 |-------|----------|--------------|
 | 1 (merged #79) | `file_versions` table, versioned upsert on sync upload, content blob archive, `GET /versions`, `POST /versions/restore`, tier retention (Free/Pro/Team), dashboard UI scaffold | Client-side version picker, billing-gated restore limits beyond retention, cross-vault moves |
-| 2 (this PR) | API polish: `current` snapshot, pagination (`offset`/`limit`), `plan_tier` + retention hints, restore guards (`version is already current`, matching content), dashboard table UI, vault select, paging controls | gRPC/proto wire fill, CLI `disk versions` |
-| 3+ | gRPC/proto version fields populated on exchange, CLI `disk versions` | Point-in-time vault snapshots |
+| 2 (merged #80) | API polish: `current` snapshot, pagination, retention hints, restore guards, dashboard table UI | gRPC/proto wire fill, CLI `disk versions` |
+| 3 (this PR) | Populate `FileMetadata.version_id` / `parent_version_id` on gRPC exchange (server + client), MetaDb overlay on client scan, `disk versions list|restore` CLI | Point-in-time vault snapshots |
+| 4+ | Point-in-time vault snapshots | — |
 
 ## Retention by tier
 
@@ -29,26 +30,29 @@ Pruned after each versioned write (`prune_file_versions`).
 | GET | `/versions?path=&vault_id=&limit=&offset=` | Bearer JWT | Lists historical revisions (newest first) plus `current` live snapshot |
 | POST | `/versions/restore` | Bearer JWT | Body: `{ path, vault_id, version_id }` — writes blob back to sync root, bumps version |
 
-### List response (slice 2)
+Mounted on the health HTTP listener when `DISK_AUTH_MODE=enforce`.
 
-```json
-{
-  "path": "notes.md",
-  "vault_id": "default",
-  "plan_tier": "free",
-  "file_exists": true,
-  "file_deleted": false,
-  "current_version_id": 3,
-  "retention": { "max_versions": 5, "max_age_secs": 604800, "max_age_days": 7 },
-  "pagination": { "limit": 20, "offset": 0, "total_historical": 2, "has_more": false },
-  "current": { "version_id": 3, "is_current": true, "blob_available": true, ... },
-  "versions": [ { "version_id": 2, "is_current": false, ... } ]
-}
+## gRPC wire (slice 3)
+
+`proto/disk.proto` fields 14–15 on `FileMetadata`:
+
+- `version_id` — monotonic revision for the path (0 = unset on wire)
+- `parent_version_id` — prior revision (0 = root)
+
+Server `exchange_state` / delta paths populate these via `file_meta_to_proto` when MetaDb rows carry version counters. Client scan overlays version ids from local MetaDb before upload; download baselines preserve ids from `to_download` metadata.
+
+## CLI (slice 3)
+
+```bash
+# List versions (health API — defaults to http://127.0.0.1:9446)
+disk versions list --path notes/a.md --vault default \
+  --api https://disk.arcanada.ai --token "$DISK_ACCESS_TOKEN"
+
+# Restore a historical revision
+disk versions restore --path notes/a.md --version-id 2 --vault default
 ```
 
-Restore returns `{ restored, new_version_id, message, ... }`. Errors: `409` when version is already current or blob missing; `404` when version row absent.
-
-Mounted on the health HTTP listener when `DISK_AUTH_MODE=enforce`.
+Env: `DISK_API_BASE`, `DISK_ACCESS_TOKEN`.
 
 ## Storage
 
@@ -56,19 +60,13 @@ Mounted on the health HTTP listener when `DISK_AUTH_MODE=enforce`.
 - **Blobs:** `{sync_root}/.version-blobs/{hh}/{hash}` content-addressed store (`ContentBlobStore`)
 - **Sync path:** before overwrite on `DeltaUpload`, prior bytes archived; upsert uses `upsert_file_scoped_versioned`
 
-## Dashboard UI (slice 2)
-
-- `deploy/www/dashboard/index.html` — version table (size, hash prefix, author), retention banner, vault `<select>`, pagination, restore success line
-- Deep link: `?version_path=docs/a.md&version_vault=default`
-
 ## Tests
 
-- `crates/disk-core/src/meta_db/versions.rs` — versioned upsert unit test
-- `crates/disk-core/tests/schema_smoke.rs` — migration 014
-- `crates/disk-server/src/versions/routes.rs` — list + restore HTTP round-trip, restore rejects current version
+- `crates/disk-server/src/services/sync.rs` — proto version_id round-trip
+- `crates/disk-client/src/sync_loop/wire.rs` — client `file_meta_to_proto` / `proto_to_file_meta`
+- `crates/disk-cli/src/main.rs` — `disk versions` clap parse tests
 
 ## References
 
-- `proto/disk.proto` — forward-compat `version_id` / `parent_version_id` fields (wire fill in slice 3)
 - `docs/design/DISK-0018-billing-scaffold.md` — tier source for retention
 - `deploy/www/dashboard/index.html` — version history panel
