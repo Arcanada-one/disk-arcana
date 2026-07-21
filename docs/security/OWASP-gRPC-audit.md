@@ -53,7 +53,7 @@ See also `SECURITY.md` § Phase 3 threat model (V-7 … V-14).
 | T2.2 | Session token TTL (24h) + expiry eviction | verified | `auth/storage.rs` `SESSION_TTL`; `validate_expired_session_returns_none_and_evicts` |
 | T2.3 | Invalid API key → `Unauthenticated` (no oracle) | verified | `auth/storage.rs` `wrong_key_unauthenticated` |
 | T2.4 | Revoked node certs rejected | verified | `crates/disk-server/tests/node_revocation.rs` |
-| T2.5 | API key brute-force rate limiting | **gap** | Not implemented — track as hardening follow-up (constant-time compare exists via hash verify only) |
+| T2.5 | API key brute-force rate limiting | verified | `auth/rate_limit.rs`; `auth/storage.rs`; `tests/auth_rate_limit.rs`; default 5 failures / 60s per `node_id` → `ResourceExhausted` |
 | T2.6 | Enrollment token TTL enforced | verified | `crates/disk-server/tests/enrollment_expired_token.rs` |
 | T2.7 | Enrollment token single-use (replay blocked) | verified | `crates/disk-server/tests/enrollment_token_replay.rs` |
 | T2.8 | Cold-boot enroll without cert (DISK-0044) | gap | Operator-issued internal CA today; design options in backlog `DISK-0044` |
@@ -132,7 +132,6 @@ Source of truth: `proto/disk.proto`.
 
 | ID | Item | Tracking |
 |----|------|----------|
-| G1 | Auth brute-force rate limit | New hardening task (post-DISK-0012) |
 | G2 | DISK-0044 cert-less bootstrap | `datarim/backlog.md` DISK-0044 |
 | G3 | 10K load / soak | Staging operator gate |
 | G4 | External pentest before SaaS | DISK-0017+ |

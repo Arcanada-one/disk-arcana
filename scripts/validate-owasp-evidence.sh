@@ -25,6 +25,8 @@ check crates/disk-client/tests/it_tls_domain.rs
 check crates/disk-server/tests/auth_required.rs
 check crates/disk-server/src/auth/storage.rs
 check crates/disk-server/tests/node_revocation.rs
+check crates/disk-server/src/auth/rate_limit.rs
+check crates/disk-server/tests/auth_rate_limit.rs
 check crates/disk-server/tests/enrollment_expired_token.rs
 check crates/disk-server/tests/enrollment_token_replay.rs
 
@@ -57,4 +59,4 @@ if [ "$missing" -ne 0 ]; then
     exit 1
 fi
 
-printf 'OWASP evidence validation OK (%s paths)\n' 22
+printf 'OWASP evidence validation OK (%s paths)\n' 24
