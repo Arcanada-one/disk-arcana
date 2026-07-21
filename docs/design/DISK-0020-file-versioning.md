@@ -1,6 +1,6 @@
 # DISK-0020 — File Versioning and History
 
-**Status:** slice 4 on DEVS — point-in-time vault snapshots.  
+**Status:** slice 5 on DEVS — dashboard vault snapshots UI.  
 **Parent:** DISK-0001 commercial / SaaS track.  
 **Tracking:** DISK-0020 in Datarim backlog.
 
@@ -11,7 +11,8 @@
 | 1 (merged #79) | `file_versions` table, versioned upsert on sync upload, content blob archive, `GET /versions`, `POST /versions/restore`, tier retention (Free/Pro/Team), dashboard UI scaffold | Client-side version picker, billing-gated restore limits beyond retention, cross-vault moves |
 | 2 (merged #80) | API polish: `current` snapshot, pagination, retention hints, restore guards, dashboard table UI | gRPC/proto wire fill, CLI `disk versions` |
 | 3 (merged #81) | gRPC `version_id` wire fill, `disk versions list\|restore` CLI | Point-in-time vault snapshots |
-| 4 (this PR) | `vault_snapshots` + `vault_snapshot_files` tables, snapshot create/list/show/restore HTTP API, tier snapshot retention, `disk snapshots` CLI | Cross-vault snapshot clone, scheduled snapshots |
+| 4 (merged #82) | `vault_snapshots` + `vault_snapshot_files` tables, snapshot create/list/show/restore HTTP API, tier snapshot retention, `disk snapshots` CLI | Cross-vault snapshot clone, scheduled snapshots |
+| 5 (this PR) | Dashboard vault snapshots panel: create, list, view file index, restore | Scheduled snapshots, cross-vault clone |
 
 ## Retention by tier
 
@@ -83,4 +84,4 @@ Env: `DISK_API_BASE`, `DISK_ACCESS_TOKEN`.
 ## References
 
 - `docs/design/DISK-0018-billing-scaffold.md` — tier source for retention
-- `deploy/www/dashboard/index.html` — per-file version history panel (dashboard snapshot UI deferred)
+- `deploy/www/dashboard/index.html` — per-file version history + vault snapshots panels

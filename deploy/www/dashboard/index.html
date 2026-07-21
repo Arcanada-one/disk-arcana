@@ -211,6 +211,81 @@
         </div>
       </div>
 
+      <div class="border border-slate-800 rounded-lg p-4 overflow-x-auto">
+        <h2 class="font-medium mb-1">Vault snapshots</h2>
+        <p id="snapshot-retention-hint" class="text-sm text-slate-400 mb-3">
+          Point-in-time copies of an entire vault. Retention depends on your plan tier.
+        </p>
+        <div class="flex flex-wrap gap-2 items-end mb-3">
+          <label class="grid gap-1 text-sm">
+            <span class="text-slate-400">Vault</span>
+            <select id="snapshot-vault"
+              class="bg-slate-900 border border-slate-700 rounded px-3 py-2 min-w-[8rem]">
+              <option value="default">default</option>
+            </select>
+          </label>
+          <label class="grid gap-1 text-sm flex-1 min-w-[12rem]">
+            <span class="text-slate-400">Label (optional)</span>
+            <input id="snapshot-label" type="text" placeholder="pre-migration"
+              class="bg-slate-900 border border-slate-700 rounded px-3 py-2 w-full">
+          </label>
+          <button id="snapshot-create-btn" type="button"
+            class="text-sm border border-emerald-700 text-emerald-300 rounded px-3 py-2 hover:border-emerald-500">
+            Create snapshot
+          </button>
+          <button id="snapshot-list-btn" type="button"
+            class="text-sm border border-slate-700 rounded px-3 py-2 hover:border-emerald-500">
+            Refresh list
+          </button>
+        </div>
+        <p id="snapshot-loading" class="text-sm text-slate-400 hidden mb-2">Loading snapshots…</p>
+        <p id="snapshot-success" class="text-sm text-emerald-400 hidden mb-2"></p>
+        <table id="snapshot-table" class="w-full text-sm text-left hidden">
+          <thead class="text-slate-400 border-b border-slate-800">
+            <tr>
+              <th class="py-2 pr-3 font-medium">ID</th>
+              <th class="py-2 pr-3 font-medium">Created</th>
+              <th class="py-2 pr-3 font-medium">Files</th>
+              <th class="py-2 pr-3 font-medium">Size</th>
+              <th class="py-2 pr-3 font-medium">Label</th>
+              <th class="py-2 font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="snapshot-list" class="text-slate-300"></tbody>
+        </table>
+        <div id="snapshot-empty" class="text-sm text-slate-500 hidden"></div>
+        <div id="snapshot-pagination" class="mt-3 flex flex-wrap items-center gap-2 hidden">
+          <button id="snapshot-prev-btn" type="button"
+            class="text-xs border border-slate-700 rounded px-2 py-1 hover:border-emerald-500 disabled:opacity-40">
+            Previous
+          </button>
+          <span id="snapshot-page-label" class="text-xs text-slate-500"></span>
+          <button id="snapshot-next-btn" type="button"
+            class="text-xs border border-slate-700 rounded px-2 py-1 hover:border-emerald-500 disabled:opacity-40">
+            Next
+          </button>
+        </div>
+        <div id="snapshot-detail" class="mt-4 hidden border border-slate-800 rounded p-3">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <h3 id="snapshot-detail-title" class="text-sm font-medium text-slate-200"></h3>
+            <button id="snapshot-detail-close" type="button"
+              class="text-xs text-slate-400 hover:text-slate-200">Close</button>
+          </div>
+          <p id="snapshot-detail-meta" class="text-xs text-slate-500 mb-2"></p>
+          <table class="w-full text-xs text-left">
+            <thead class="text-slate-500 border-b border-slate-800">
+              <tr>
+                <th class="py-1 pr-2 font-medium">Path</th>
+                <th class="py-1 pr-2 font-medium">Version</th>
+                <th class="py-1 pr-2 font-medium">Size</th>
+                <th class="py-1 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody id="snapshot-detail-files" class="text-slate-400"></tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="border border-slate-800 rounded-lg p-4">
         <p class="text-sm text-slate-400 mb-3">Download a JSON export of your account and tenant metadata (GDPR portability).</p>
         <button id="export-data-btn" type="button"
@@ -251,6 +326,7 @@
     document.getElementById('api-base-label').textContent = apiBase;
 
     const versionPage = { offset: 0, limit: 10, hasMore: false, total: 0 };
+    const snapshotPage = { offset: 0, limit: 10, hasMore: false, total: 0 };
 
     const tokenKey = 'diskAccessToken';
     const refreshKey = 'diskRefreshToken';
@@ -505,11 +581,12 @@
         });
       });
 
-      populateVersionVaults(data.vaults);
+      populateVaultSelect('version-vault', data.vaults);
+      populateVaultSelect('snapshot-vault', data.vaults);
     }
 
-    function populateVersionVaults(vaults) {
-      const select = document.getElementById('version-vault');
+    function populateVaultSelect(selectId, vaults) {
+      const select = document.getElementById(selectId);
       const current = select.value || 'default';
       const ids = vaults.length ? vaults.map(v => v.vault_id) : ['default'];
       if (!ids.includes(current)) ids.unshift(current);
@@ -620,6 +697,149 @@
             'Page ' + page + ' of ' + pages + ' (' + data.pagination.total_historical + ' historical)';
           document.getElementById('version-prev-btn').disabled = offset === 0;
           document.getElementById('version-next-btn').disabled = !data.pagination.has_more;
+        }
+      } finally {
+        loading.classList.add('hidden');
+      }
+    }
+
+    function snapshotRowHtml(s, vault) {
+      const label = s.label ? escapeHtml(s.label) : '<span class="text-slate-600">—</span>';
+      return '<tr class="border-b border-slate-800/60">' +
+        '<td class="py-2 pr-3"><code>#' + s.id + '</code></td>' +
+        '<td class="py-2 pr-3 text-slate-400">' + formatDate(s.created_at) + '</td>' +
+        '<td class="py-2 pr-3 text-slate-400">' + s.file_count + '</td>' +
+        '<td class="py-2 pr-3 text-slate-400">' + formatBytes(s.bytes_total) + '</td>' +
+        '<td class="py-2 pr-3 text-slate-400">' + label + '</td>' +
+        '<td class="py-2 flex flex-wrap gap-1">' +
+        '<button type="button" data-snapshot-id="' + s.id + '" data-vault="' + escapeHtml(vault) +
+          '" class="snapshot-view text-xs border border-slate-700 rounded px-2 py-0.5 hover:border-emerald-500">View</button>' +
+        '<button type="button" data-snapshot-id="' + s.id + '" data-vault="' + escapeHtml(vault) +
+          '" class="snapshot-restore text-xs border border-slate-700 rounded px-2 py-0.5 hover:border-amber-500">Restore</button>' +
+        '</td></tr>';
+    }
+
+    function bindSnapshotActions(vault) {
+      document.querySelectorAll('.snapshot-view').forEach(el => {
+        el.onclick = async () => {
+          const id = el.dataset.snapshotId;
+          el.disabled = true;
+          clearDashError();
+          try {
+            await loadSnapshotDetail(id, vault);
+          } catch (err) {
+            showDashError(err.message);
+          } finally {
+            el.disabled = false;
+          }
+        };
+      });
+      document.querySelectorAll('.snapshot-restore').forEach(el => {
+        el.onclick = async () => {
+          const id = el.dataset.snapshotId;
+          const label = el.closest('tr')?.querySelector('td:nth-child(5)')?.textContent?.trim() || id;
+          if (!window.confirm('Restore vault "' + vault + '" from snapshot #' + id +
+              (label && label !== '—' ? ' ("' + label + '")' : '') + '? Live files will be overwritten.')) {
+            return;
+          }
+          el.disabled = true;
+          clearDashError();
+          document.getElementById('snapshot-success').classList.add('hidden');
+          try {
+            const res = await api('/snapshots/' + id + '/restore', {
+              method: 'POST',
+              body: JSON.stringify({ vault_id: vault }),
+            });
+            const ok = document.getElementById('snapshot-success');
+            ok.textContent = 'Restored snapshot #' + id + ': ' + res.files_restored + ' file(s)' +
+              (res.files_skipped ? ', ' + res.files_skipped + ' skipped' : '') +
+              (res.files_failed ? ', ' + res.files_failed + ' failed' : '');
+            ok.classList.remove('hidden');
+          } catch (err) {
+            showDashError(err.message);
+            el.disabled = false;
+          }
+        };
+      });
+    }
+
+    async function loadSnapshotDetail(id, vault) {
+      const qs = new URLSearchParams({ vault_id: vault });
+      const data = await api('/snapshots/' + id + '?' + qs.toString());
+      const snap = data.snapshot;
+      const panel = document.getElementById('snapshot-detail');
+      document.getElementById('snapshot-detail-title').textContent =
+        'Snapshot #' + snap.id + (snap.label ? ' — ' + snap.label : '');
+      document.getElementById('snapshot-detail-meta').textContent =
+        formatDate(snap.created_at) + ' · ' + snap.file_count + ' files · ' +
+        formatBytes(snap.bytes_total) +
+        (snap.created_by ? ' · by ' + snap.created_by : '');
+      const rows = data.files.map(f => {
+        const status = f.deleted
+          ? '<span class="text-slate-600">deleted</span>'
+          : (f.blob_available
+            ? '<span class="text-emerald-400">ok</span>'
+            : '<span class="text-amber-400">blob missing</span>');
+        return '<tr class="border-b border-slate-800/40">' +
+          '<td class="py-1 pr-2"><code>' + escapeHtml(f.path) + '</code></td>' +
+          '<td class="py-1 pr-2">v' + f.version_id + '</td>' +
+          '<td class="py-1 pr-2">' + formatBytes(f.size) + '</td>' +
+          '<td class="py-1">' + status + '</td></tr>';
+      });
+      document.getElementById('snapshot-detail-files').innerHTML =
+        rows.length ? rows.join('') : '<tr><td colspan="4" class="py-2 text-slate-600">No files in snapshot</td></tr>';
+      panel.classList.remove('hidden');
+    }
+
+    async function loadSnapshots(vault, offset) {
+      const loading = document.getElementById('snapshot-loading');
+      const table = document.getElementById('snapshot-table');
+      const empty = document.getElementById('snapshot-empty');
+      const pagination = document.getElementById('snapshot-pagination');
+      const success = document.getElementById('snapshot-success');
+      const detail = document.getElementById('snapshot-detail');
+      loading.classList.remove('hidden');
+      table.classList.add('hidden');
+      empty.classList.add('hidden');
+      pagination.classList.add('hidden');
+      success.classList.add('hidden');
+      detail.classList.add('hidden');
+      clearDashError();
+      try {
+        const qs = new URLSearchParams({
+          vault_id: vault,
+          limit: String(snapshotPage.limit),
+          offset: String(offset),
+        });
+        const data = await api('/snapshots?' + qs.toString());
+        snapshotPage.offset = data.pagination.offset;
+        snapshotPage.hasMore = data.pagination.has_more;
+        snapshotPage.total = data.pagination.total;
+
+        document.getElementById('snapshot-retention-hint').textContent =
+          'Plan: ' + data.plan_tier + ' · keep up to ' + data.retention.max_snapshots +
+          ' snapshots / ' + data.retention.max_age_days + ' days per vault.';
+
+        if (!data.snapshots.length) {
+          empty.textContent = offset === 0
+            ? 'No snapshots for vault "' + vault + '". Create one before a risky change.'
+            : 'No more snapshots on this page.';
+          empty.classList.remove('hidden');
+        } else {
+          document.getElementById('snapshot-list').innerHTML =
+            data.snapshots.map(s => snapshotRowHtml(s, vault)).join('');
+          table.classList.remove('hidden');
+          bindSnapshotActions(vault);
+        }
+
+        if (data.pagination.total > snapshotPage.limit || offset > 0) {
+          pagination.classList.remove('hidden');
+          const page = Math.floor(offset / snapshotPage.limit) + 1;
+          const pages = Math.max(1, Math.ceil(data.pagination.total / snapshotPage.limit));
+          document.getElementById('snapshot-page-label').textContent =
+            'Page ' + page + ' of ' + pages + ' (' + data.pagination.total + ' total)';
+          document.getElementById('snapshot-prev-btn').disabled = offset === 0;
+          document.getElementById('snapshot-next-btn').disabled = !data.pagination.has_more;
         }
       } finally {
         loading.classList.add('hidden');
@@ -820,6 +1040,70 @@
       }
     };
 
+    document.getElementById('snapshot-create-btn').onclick = async () => {
+      const btn = document.getElementById('snapshot-create-btn');
+      const vault = document.getElementById('snapshot-vault').value.trim() || 'default';
+      const label = document.getElementById('snapshot-label').value.trim();
+      btn.disabled = true;
+      clearDashError();
+      document.getElementById('snapshot-success').classList.add('hidden');
+      try {
+        const body = { vault_id: vault };
+        if (label) body.label = label;
+        const res = await api('/snapshots', { method: 'POST', body: JSON.stringify(body) });
+        const ok = document.getElementById('snapshot-success');
+        ok.textContent = 'Created snapshot #' + res.snapshot.id +
+          (res.snapshot.label ? ' ("' + res.snapshot.label + '")' : '') +
+          ' — ' + res.snapshot.file_count + ' files';
+        ok.classList.remove('hidden');
+        document.getElementById('snapshot-label').value = '';
+        snapshotPage.offset = 0;
+        await loadSnapshots(vault, 0);
+      } catch (err) {
+        showDashError(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    document.getElementById('snapshot-list-btn').onclick = async () => {
+      const btn = document.getElementById('snapshot-list-btn');
+      const vault = document.getElementById('snapshot-vault').value.trim() || 'default';
+      btn.disabled = true;
+      snapshotPage.offset = 0;
+      try {
+        await loadSnapshots(vault, 0);
+      } catch (err) {
+        showDashError(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    document.getElementById('snapshot-prev-btn').onclick = async () => {
+      const vault = document.getElementById('snapshot-vault').value.trim() || 'default';
+      const next = Math.max(0, snapshotPage.offset - snapshotPage.limit);
+      try {
+        await loadSnapshots(vault, next);
+      } catch (err) {
+        showDashError(err.message);
+      }
+    };
+
+    document.getElementById('snapshot-next-btn').onclick = async () => {
+      const vault = document.getElementById('snapshot-vault').value.trim() || 'default';
+      if (!snapshotPage.hasMore) return;
+      try {
+        await loadSnapshots(vault, snapshotPage.offset + snapshotPage.limit);
+      } catch (err) {
+        showDashError(err.message);
+      }
+    };
+
+    document.getElementById('snapshot-detail-close').onclick = () => {
+      document.getElementById('snapshot-detail').classList.add('hidden');
+    };
+
     document.getElementById('delete-account-btn').onclick = async () => {
       const btn = document.getElementById('delete-account-btn');
       const confirmEmail = document.getElementById('delete-confirm-email').value.trim();
@@ -853,8 +1137,10 @@
     (async () => {
       const prefilledPath = params.get('version_path');
       const prefilledVault = params.get('version_vault');
+      const prefilledSnapshotVault = params.get('snapshot_vault');
       if (prefilledPath) document.getElementById('version-path').value = prefilledPath;
       if (prefilledVault) document.getElementById('version-vault').value = prefilledVault;
+      if (prefilledSnapshotVault) document.getElementById('snapshot-vault').value = prefilledSnapshotVault;
 
       const token = localStorage.getItem(tokenKey);
       if (!token) return;
@@ -864,6 +1150,12 @@
           await loadVersions(
             prefilledPath,
             prefilledVault || document.getElementById('version-vault').value || 'default',
+            0
+          );
+        }
+        if (params.get('snapshots') === '1' || prefilledSnapshotVault) {
+          await loadSnapshots(
+            prefilledSnapshotVault || document.getElementById('snapshot-vault').value || 'default',
             0
           );
         }
