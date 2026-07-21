@@ -83,6 +83,13 @@ jobs:
         run: bash crates/disk-client/lints/check_loopback_bind.sh .
       - name: install.sh syntax (DISK-0010)
         run: sh -n scripts/install.sh
+      - name: Obsidian plugin unit tests (DISK-0008)
+        run: |
+          set -euo pipefail
+          cd plugins/obsidian
+          npm ci
+          npm run typecheck
+          npm test
       - name: gitleaks
         # Run gitleaks directly via the upstream binary — gitleaks/gitleaks-action
         # requires a paid licence for organisation accounts.
@@ -132,6 +139,8 @@ jobs:
         run: cargo test --workspace --all-features
       - name: Coverage gate (≥80 % lines, DISK-0032)
         run: cargo llvm-cov --workspace --all-features --fail-under-lines 80
+      - name: Obsidian plugin integration (DISK-0008)
+        run: bash scripts/test-obsidian-integration.sh
 
   fuzz-smoke:
     name: Fuzz smoke (DISK-0012, 80s)
