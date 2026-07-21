@@ -5,6 +5,7 @@
 //! - `POST /billing/stripe/webhook` — DISK-0018 Stripe stub (when mode=stripe)
 //! - `POST /auth/signup`, `POST /auth/login`, `GET /auth/me` — DISK-0016 (when auth=enforce)
 //! - `GET /auth/oauth/start`, `GET /auth/oauth/callback` — DISK-0016 slice 2 (when oauth active)
+//! - `GET /auth/verify-email`, `POST /auth/resend-verification` — DISK-0016 slice 3 (when email verify active)
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -14,7 +15,7 @@ use axum::{Json, Router};
 use serde_json::{json, Value};
 
 use crate::accounts::routes::{login, me, signup, AuthHttpState};
-use crate::accounts::{oauth_callback, oauth_start};
+use crate::accounts::{oauth_callback, oauth_start, resend_verification, verify_email};
 use crate::billing::webhook::{stripe_webhook, WebhookState};
 
 /// Start the health HTTP server. Returns an error if the bind fails; otherwise
@@ -41,6 +42,11 @@ pub async fn serve(
             auth_router = auth_router
                 .route("/auth/oauth/start", get(oauth_start))
                 .route("/auth/oauth/callback", get(oauth_callback));
+        }
+        if state.email_verify.mode.is_active() {
+            auth_router = auth_router
+                .route("/auth/verify-email", get(verify_email))
+                .route("/auth/resend-verification", post(resend_verification));
         }
         app = app.merge(auth_router.with_state(state));
     }

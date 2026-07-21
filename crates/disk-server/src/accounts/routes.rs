@@ -15,6 +15,7 @@ use disk_core::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use super::email_verify::{deliver_verification, EmailVerifyConfig, VerificationDelivery};
 use super::oauth::OAuthConfig;
 
 #[derive(Clone)]
@@ -23,6 +24,7 @@ pub struct AuthHttpState {
     pub signing_key: Vec<u8>,
     pub token_ttl_secs: u64,
     pub oauth: OAuthConfig,
+    pub email_verify: EmailVerifyConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,6 +47,10 @@ pub struct AuthTokenResponse {
     pub token_type: &'static str,
     pub expires_in: u64,
     pub user: UserProfile,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification_url: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -120,7 +126,9 @@ async fn signup_inner(
         .set_plan_tier(Some(&tenant_id), PlanTier::Free)
         .await;
 
-    build_token_response(state, &user_id, &email, &tenant_id, false)
+    let mut resp = build_token_response(state, &user_id, &email, &tenant_id, false)?;
+    attach_verification(state, &user_id, &mut resp)?;
+    Ok(resp)
 }
 
 async fn login_inner(
@@ -204,10 +212,26 @@ pub(crate) fn build_token_response(
             tenant_id: tenant_id.to_owned(),
             email_verified,
         },
+        verification_token: None,
+        verification_url: None,
     })
 }
 
-fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+fn attach_verification(
+    state: &AuthHttpState,
+    user_id: &str,
+    resp: &mut AuthTokenResponse,
+) -> Result<(), (StatusCode, &'static str)> {
+    let VerificationDelivery {
+        verification_token,
+        verification_url,
+    } = deliver_verification(state, user_id)?;
+    resp.verification_token = verification_token;
+    resp.verification_url = verification_url;
+    Ok(())
+}
+
+pub(crate) fn bearer_token(headers: &HeaderMap) -> Option<&str> {
     let raw = headers
         .get(axum::http::header::AUTHORIZATION)?
         .to_str()
@@ -249,7 +273,7 @@ mod integration_tests {
     use tokio::net::TcpListener;
 
     use super::*;
-    use crate::accounts::{OAuthConfig, OAuthMode};
+    use crate::accounts::{EmailVerifyConfig, EmailVerifyMode, OAuthConfig, OAuthMode};
     use crate::health;
 
     const TEST_KEY: &str = "01234567890123456789012345678901";
@@ -265,8 +289,36 @@ mod integration_tests {
         }
     }
 
+    fn disabled_email_verify() -> EmailVerifyConfig {
+        EmailVerifyConfig {
+            mode: EmailVerifyMode::Disabled,
+            public_base_url: None,
+            token_ttl_secs: 86_400,
+        }
+    }
+
+    fn stub_email_verify(base: &str) -> EmailVerifyConfig {
+        EmailVerifyConfig {
+            mode: EmailVerifyMode::Stub,
+            public_base_url: Some(base.to_string()),
+            token_ttl_secs: 86_400,
+        }
+    }
+
     async fn with_auth_server<F, Fut>(meta_db: MetaDb, oauth: OAuthConfig, exercise: F)
     where
+        F: FnOnce(SocketAddr) -> Fut,
+        Fut: std::future::Future<Output = ()>,
+    {
+        with_auth_server_full(meta_db, oauth, disabled_email_verify(), exercise).await;
+    }
+
+    async fn with_auth_server_full<F, Fut>(
+        meta_db: MetaDb,
+        oauth: OAuthConfig,
+        email_verify: EmailVerifyConfig,
+        exercise: F,
+    ) where
         F: FnOnce(SocketAddr) -> Fut,
         Fut: std::future::Future<Output = ()>,
     {
@@ -279,6 +331,7 @@ mod integration_tests {
             signing_key: TEST_KEY.as_bytes().to_vec(),
             token_ttl_secs: 3600,
             oauth,
+            email_verify,
         });
 
         let server = health::serve(addr, None, Some(state), std::future::pending::<()>());
@@ -312,6 +365,19 @@ mod integration_tests {
         };
 
         with_auth_server(meta_db, oauth, exercise).await;
+    }
+
+    async fn with_stub_email_verify_server<F, Fut>(meta_db: MetaDb, exercise: F)
+    where
+        F: FnOnce(SocketAddr) -> Fut,
+        Fut: std::future::Future<Output = ()>,
+    {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr: SocketAddr = listener.local_addr().unwrap();
+        drop(listener);
+
+        let email_verify = stub_email_verify(&format!("http://{addr}"));
+        with_auth_server_full(meta_db, disabled_oauth(), email_verify, exercise).await;
     }
 
     #[tokio::test]
@@ -475,6 +541,117 @@ mod integration_tests {
                 .unwrap()
                 .ends_with("@stub.oauth.local"));
             assert_eq!(token["user"]["email_verified"], true);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn stub_email_verify_signup_and_confirm_round_trip() {
+        let dir = tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("auth-email-verify.sqlite"))
+            .await
+            .unwrap();
+        with_stub_email_verify_server(db, |addr| async move {
+            let base = format!("http://{addr}");
+            let client = reqwest::Client::new();
+
+            let signup: Value = client
+                .post(format!("{base}/auth/signup"))
+                .json(&serde_json::json!({
+                    "email": "verify@example.com",
+                    "password": "secure-pass",
+                    "tenant_id": "verify-corp"
+                }))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+
+            assert_eq!(signup["user"]["email_verified"], false);
+            let verify_token = signup["verification_token"]
+                .as_str()
+                .expect("stub mode must return verification_token");
+            assert!(signup["verification_url"]
+                .as_str()
+                .unwrap()
+                .contains("/auth/verify-email?token="));
+
+            let verified: Value = client
+                .get(format!("{base}/auth/verify-email"))
+                .query(&[("token", verify_token)])
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+
+            assert_eq!(verified["user"]["email_verified"], true);
+            let new_token = verified["access_token"].as_str().unwrap();
+
+            let me: Value = client
+                .get(format!("{base}/auth/me"))
+                .bearer_auth(new_token)
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert_eq!(me["email_verified"], true);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn resend_verification_returns_stub_token() {
+        let dir = tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("auth-resend.sqlite"))
+            .await
+            .unwrap();
+        with_stub_email_verify_server(db, |addr| async move {
+            let base = format!("http://{addr}");
+            let client = reqwest::Client::new();
+
+            let signup: Value = client
+                .post(format!("{base}/auth/signup"))
+                .json(&serde_json::json!({
+                    "email": "resend@example.com",
+                    "password": "secure-pass",
+                    "tenant_id": "resend-corp"
+                }))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+
+            let token = signup["access_token"].as_str().unwrap();
+            let resend: Value = client
+                .post(format!("{base}/auth/resend-verification"))
+                .bearer_auth(token)
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+
+            assert_eq!(resend["sent"], true);
+            assert!(resend["verification_token"].is_string());
         })
         .await;
     }
