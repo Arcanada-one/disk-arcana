@@ -144,7 +144,8 @@
               <th class="py-2 pr-4 font-medium">Platform</th>
               <th class="py-2 pr-4 font-medium">Node ID</th>
               <th class="py-2 pr-4 font-medium">Registered</th>
-              <th class="py-2 font-medium">Last seen</th>
+              <th class="py-2 pr-4 font-medium">Last seen</th>
+              <th class="py-2 font-medium">Selective sync</th>
             </tr>
           </thead>
           <tbody id="device-list" class="text-slate-300"></tbody>
@@ -364,6 +365,52 @@
       </div>
 
       <div class="border border-slate-800 rounded-lg p-4 overflow-x-auto">
+        <h2 class="font-medium mb-1">Selective sync</h2>
+        <p id="selective-hint" class="text-sm text-slate-400 mb-3">
+          Choose which folder prefixes sync on each enrolled device. Leave empty to sync the entire vault.
+          Enforcement on the sync engine ships in a later release — rules are stored now.
+        </p>
+        <div class="flex flex-wrap gap-2 items-end mb-3">
+          <label class="grid gap-1 text-sm">
+            <span class="text-slate-400">Vault</span>
+            <select id="selective-vault"
+              class="bg-slate-900 border border-slate-700 rounded px-3 py-2 min-w-[8rem]">
+              <option value="default">default</option>
+            </select>
+          </label>
+          <label class="grid gap-1 text-sm min-w-[10rem]">
+            <span class="text-slate-400">Device</span>
+            <select id="selective-device"
+              class="bg-slate-900 border border-slate-700 rounded px-3 py-2 min-w-[10rem]">
+              <option value="">— select device —</option>
+            </select>
+            <input id="selective-node-manual" type="text" placeholder="node-id"
+              class="hidden bg-slate-900 border border-slate-700 rounded px-3 py-2 w-full">
+          </label>
+          <button id="selective-load-btn" type="button"
+            class="text-sm border border-slate-700 rounded px-3 py-2 hover:border-emerald-500">
+            Load
+          </button>
+          <button id="selective-save-btn" type="button"
+            class="text-sm border border-emerald-700 text-emerald-300 rounded px-3 py-2 hover:border-emerald-500">
+            Save folders
+          </button>
+          <button id="selective-clear-btn" type="button"
+            class="text-sm border border-slate-700 rounded px-3 py-2 hover:border-amber-500 text-amber-200">
+            Sync all (clear filter)
+          </button>
+        </div>
+        <label class="grid gap-1 text-sm mb-2">
+          <span class="text-slate-400">Folder prefixes (one per line, e.g. <code class="text-slate-300">docs</code> or <code class="text-slate-300">photos/2024</code>)</span>
+          <textarea id="selective-includes" rows="4" placeholder="docs&#10;photos/2024"
+            class="bg-slate-900 border border-slate-700 rounded px-3 py-2 w-full font-mono text-sm"></textarea>
+        </label>
+        <p id="selective-loading" class="text-sm text-slate-400 hidden mb-2">Loading selective sync rules…</p>
+        <p id="selective-status" class="text-sm text-slate-400 hidden mb-2"></p>
+        <p id="selective-success" class="text-sm text-emerald-400 hidden mb-2"></p>
+      </div>
+
+      <div class="border border-slate-800 rounded-lg p-4 overflow-x-auto">
         <h2 class="font-medium mb-1">Recycle bin</h2>
         <p id="trash-retention-hint" class="text-sm text-slate-400 mb-3">
           Soft-deleted files you can still restore. Retention depends on your plan tier.
@@ -457,6 +504,7 @@
     const versionPage = { offset: 0, limit: 10, hasMore: false, total: 0 };
     const snapshotPage = { offset: 0, limit: 10, hasMore: false, total: 0 };
     const trashPage = { offset: 0, limit: 10, hasMore: false, total: 0 };
+    let dashboardDevices = [];
     const pendingInviteKey = 'diskPendingInvite';
     let pendingInviteToken = params.get('sharing_accept') || localStorage.getItem(pendingInviteKey) || '';
     if (params.get('sharing_accept')) {
@@ -673,9 +721,27 @@
             escapeHtml(platformLabel(d.platform)) + '</span></td>' +
           '<td class="py-2 pr-4"><code class="text-xs">' + escapeHtml(d.node_id) + '</code></td>' +
           '<td class="py-2 pr-4 text-slate-400">' + formatDate(d.registered_at) + '</td>' +
-          '<td class="py-2 text-slate-400" title="' + formatDate(d.last_seen) + '">' +
-            formatRelative(d.last_seen) + '</td></tr>'
+          '<td class="py-2 pr-4 text-slate-400" title="' + formatDate(d.last_seen) + '">' +
+            formatRelative(d.last_seen) + '</td>' +
+          '<td class="py-2">' +
+          '<button type="button" data-selective-node="' + escapeHtml(d.node_id) +
+          '" class="selective-device-btn text-xs border border-slate-700 rounded px-2 py-0.5 hover:border-emerald-500">' +
+          'Folders</button></td></tr>'
         ).join('');
+        deviceList.querySelectorAll('.selective-device-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const nodeId = btn.getAttribute('data-selective-node');
+            document.getElementById('selective-device').value = nodeId;
+            document.getElementById('selective-node-manual').value = nodeId;
+            document.getElementById('selective-vault').value =
+              document.getElementById('selective-vault').value || 'default';
+            document.getElementById('selective-hint').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            loadSelectiveSync(
+              document.getElementById('selective-vault').value || 'default',
+              nodeId
+            );
+          });
+        });
       } else {
         deviceTable.classList.add('hidden');
         deviceEmpty.classList.remove('hidden');
@@ -721,7 +787,107 @@
       populateVaultSelect('snapshot-vault', data.vaults);
       populateVaultSelect('trash-vault', data.vaults);
       populateVaultSelect('sharing-vault', data.vaults);
+      populateVaultSelect('selective-vault', data.vaults);
+      dashboardDevices = data.devices || [];
+      populateDeviceSelect('selective-device', dashboardDevices);
       updateSharingAcceptPanel();
+    }
+
+    function populateDeviceSelect(selectId, devices) {
+      const select = document.getElementById(selectId);
+      const manual = document.getElementById('selective-node-manual');
+      const current = getSelectiveNodeId() || select.value;
+      if (!devices.length) {
+        select.classList.add('hidden');
+        manual.classList.remove('hidden');
+        if (current) manual.value = current;
+        return;
+      }
+      select.classList.remove('hidden');
+      manual.classList.add('hidden');
+      const ids = devices.map(d => d.node_id);
+      if (current && !ids.includes(current)) ids.unshift(current);
+      select.innerHTML = '<option value="">— select device —</option>' +
+        ids.map(id => {
+          const dev = devices.find(d => d.node_id === id);
+          const label = dev && dev.display_name
+            ? escapeHtml(dev.display_name) + ' (' + escapeHtml(id) + ')'
+            : escapeHtml(id);
+          return '<option value="' + escapeHtml(id) + '"' +
+            (id === current ? ' selected' : '') + '>' + label + '</option>';
+        }).join('');
+    }
+
+    function getSelectiveNodeId() {
+      const manual = document.getElementById('selective-node-manual');
+      if (!manual.classList.contains('hidden')) {
+        return manual.value.trim();
+      }
+      return document.getElementById('selective-device').value.trim();
+    }
+
+    function parseSelectiveIncludes(text) {
+      return text.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+    }
+
+    function formatSelectiveIncludes(includes) {
+      return (includes || []).join('\n');
+    }
+
+    async function loadSelectiveSync(vault, nodeId) {
+      const loading = document.getElementById('selective-loading');
+      const status = document.getElementById('selective-status');
+      const success = document.getElementById('selective-success');
+      const textarea = document.getElementById('selective-includes');
+      if (!nodeId) {
+        showDashError('Select a device or enter a node ID.');
+        return;
+      }
+      loading.classList.remove('hidden');
+      status.classList.add('hidden');
+      success.classList.add('hidden');
+      clearDashError();
+      try {
+        const qs = new URLSearchParams({ vault_id: vault, node_id: nodeId });
+        const data = await api('/selective-sync?' + qs.toString());
+        if (data.sync_all) {
+          textarea.value = '';
+          status.textContent = 'Syncing entire vault (no folder filter).';
+        } else {
+          textarea.value = formatSelectiveIncludes(data.includes);
+          status.textContent = data.includes.length + ' folder prefix(es) configured.';
+        }
+        status.classList.remove('hidden');
+      } catch (err) {
+        showDashError(err.message);
+      } finally {
+        loading.classList.add('hidden');
+      }
+    }
+
+    async function saveSelectiveSync(vault, nodeId, includes, successMessage) {
+      const success = document.getElementById('selective-success');
+      const status = document.getElementById('selective-status');
+      if (!nodeId) {
+        showDashError('Select a device or enter a node ID.');
+        return;
+      }
+      clearDashError();
+      success.classList.add('hidden');
+      const data = await api('/selective-sync', {
+        method: 'PUT',
+        body: JSON.stringify({ vault_id: vault, node_id: nodeId, includes }),
+      });
+      if (data.sync_all) {
+        document.getElementById('selective-includes').value = '';
+        status.textContent = 'Syncing entire vault (no folder filter).';
+      } else {
+        document.getElementById('selective-includes').value = formatSelectiveIncludes(data.includes);
+        status.textContent = data.includes.length + ' folder prefix(es) saved.';
+      }
+      status.classList.remove('hidden');
+      success.textContent = successMessage || 'Selective sync rules saved.';
+      success.classList.remove('hidden');
     }
 
     function updateSharingAcceptPanel() {
@@ -1610,6 +1776,52 @@
       }
     };
 
+    document.getElementById('selective-load-btn').onclick = async () => {
+      const btn = document.getElementById('selective-load-btn');
+      const vault = document.getElementById('selective-vault').value.trim() || 'default';
+      const nodeId = getSelectiveNodeId();
+      btn.disabled = true;
+      try {
+        await loadSelectiveSync(vault, nodeId);
+      } catch (err) {
+        showDashError(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    document.getElementById('selective-save-btn').onclick = async () => {
+      const btn = document.getElementById('selective-save-btn');
+      const vault = document.getElementById('selective-vault').value.trim() || 'default';
+      const nodeId = getSelectiveNodeId();
+      const includes = parseSelectiveIncludes(document.getElementById('selective-includes').value);
+      btn.disabled = true;
+      clearDashError();
+      try {
+        await saveSelectiveSync(vault, nodeId, includes, 'Folder rules saved for device "' + nodeId + '".');
+      } catch (err) {
+        showDashError(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    document.getElementById('selective-clear-btn').onclick = async () => {
+      const btn = document.getElementById('selective-clear-btn');
+      const vault = document.getElementById('selective-vault').value.trim() || 'default';
+      const nodeId = getSelectiveNodeId();
+      if (!window.confirm('Clear folder filter and sync entire vault "' + vault + '" on this device?')) return;
+      btn.disabled = true;
+      clearDashError();
+      try {
+        await saveSelectiveSync(vault, nodeId, [], 'Cleared filter — syncing entire vault.');
+      } catch (err) {
+        showDashError(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
     document.getElementById('delete-account-btn').onclick = async () => {
       const btn = document.getElementById('delete-account-btn');
       const confirmEmail = document.getElementById('delete-confirm-email').value.trim();
@@ -1646,11 +1858,18 @@
       const prefilledSnapshotVault = params.get('snapshot_vault');
       const prefilledTrashVault = params.get('trash_vault');
       const prefilledSharingVault = params.get('sharing_vault');
+      const prefilledSelectiveVault = params.get('selective_sync_vault');
+      const prefilledSelectiveNode = params.get('selective_sync_node');
       if (prefilledPath) document.getElementById('version-path').value = prefilledPath;
       if (prefilledVault) document.getElementById('version-vault').value = prefilledVault;
       if (prefilledSnapshotVault) document.getElementById('snapshot-vault').value = prefilledSnapshotVault;
       if (prefilledTrashVault) document.getElementById('trash-vault').value = prefilledTrashVault;
       if (prefilledSharingVault) document.getElementById('sharing-vault').value = prefilledSharingVault;
+      if (prefilledSelectiveVault) document.getElementById('selective-vault').value = prefilledSelectiveVault;
+      if (prefilledSelectiveNode) {
+        document.getElementById('selective-device').value = prefilledSelectiveNode;
+        document.getElementById('selective-node-manual').value = prefilledSelectiveNode;
+      }
 
       const token = localStorage.getItem(tokenKey);
       if (!token) {
@@ -1684,6 +1903,14 @@
           await loadSharing(
             prefilledSharingVault || document.getElementById('sharing-vault').value || 'default'
           );
+        }
+        if (params.get('selective_sync') === '1' || prefilledSelectiveVault || prefilledSelectiveNode) {
+          const vault = prefilledSelectiveVault ||
+            document.getElementById('selective-vault').value || 'default';
+          const nodeId = prefilledSelectiveNode || getSelectiveNodeId();
+          if (nodeId) {
+            await loadSelectiveSync(vault, nodeId);
+          }
         }
       } catch {
         localStorage.removeItem(tokenKey);

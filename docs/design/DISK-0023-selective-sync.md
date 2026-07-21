@@ -1,6 +1,6 @@
 # DISK-0023 — Selective Sync
 
-**Status:** slice 1 on DEVS — storage + HTTP API + CLI.  
+**Status:** slice 2 on DEVS — dashboard per-device folder picker.  
 **Parent:** DISK-0001 commercial / SaaS track.  
 **Tracking:** DISK-0023 in Datarim backlog.
 
@@ -8,8 +8,8 @@
 
 | Slice | In scope | Out of scope |
 |-------|----------|--------------|
-| 1 (this PR) | `device_sync_includes` table, GET/PUT `/selective-sync`, `disk selective-sync` CLI, path prefix normalization + matcher | gRPC SyncState/Delta enforcement, dashboard folder picker UI |
-| 2 | Dashboard selective-sync panel per device | Client daemon auto-apply on sync |
+| 1 (merged #90) | `device_sync_includes` table, GET/PUT `/selective-sync`, `disk selective-sync` CLI, path prefix normalization + matcher | gRPC SyncState/Delta enforcement, dashboard folder picker UI |
+| 2 (this PR) | Dashboard selective-sync panel: vault + device picker, folder prefix textarea, load/save/clear; Devices table "Folders" shortcut | Client daemon auto-apply on sync |
 | 3 | Enforce includes on gRPC sync paths (server filters outbound deltas) | Cross-vault moves |
 
 ## Model
@@ -29,6 +29,14 @@ Config is scoped to the JWT user; `node_id` is the enrolled device identifier (h
 | PUT | `/selective-sync` | Bearer JWT (write) | Body: `{ vault_id, node_id, includes: ["docs", "photos/2024"] }` — replaces rules |
 
 Mounted on the health HTTP listener when `DISK_AUTH_MODE=enforce`.
+
+## Dashboard deep links
+
+- `?selective_sync=1` — open panel and load when node is known
+- `?selective_sync_vault=wiki` — preselect vault
+- `?selective_sync_node=macbook` — preselect device node id
+
+Devices table includes a **Folders** button per row that scrolls to the selective-sync panel and loads rules for that node.
 
 ## CLI
 
@@ -50,6 +58,7 @@ Env: `DISK_API_BASE`, `DISK_ACCESS_TOKEN`.
 - `crates/disk-core/src/selective_sync.rs` — prefix normalize + match unit tests
 - `crates/disk-core/src/meta_db/selective_sync.rs` — replace/list unit test
 - `crates/disk-server/src/selective_sync/routes.rs` — HTTP round-trip integration test
+- `deploy/www/dashboard/index.html` — selective sync panel UI
 
 ## References
 
