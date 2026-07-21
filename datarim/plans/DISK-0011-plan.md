@@ -1,8 +1,11 @@
 ---
 taskId: DISK-0011
 title: Agent Dreamer Integration
-status: in_progress
+status: done
 created: 2026-07-21
+merged: 2026-07-21
+merge_commit: ddab6d9
+pr: 44
 complexity: L2
 prefix: DISK
 parent: DISK-0001
