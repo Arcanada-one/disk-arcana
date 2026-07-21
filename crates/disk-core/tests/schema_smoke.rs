@@ -358,3 +358,24 @@ async fn migration_011_user_accounts_table_exists() {
         "user_accounts table must exist after migration 011; got {tables:?}"
     );
 }
+
+#[tokio::test]
+async fn migration_012_user_accounts_oauth_columns_exist() {
+    let dir = tempdir().expect("tempdir");
+    let db = MetaDb::open(&dir.path().join("user-accounts-oauth-schema.sqlite"))
+        .await
+        .expect("open");
+
+    let rows = sqlx::query("PRAGMA table_info(user_accounts)")
+        .fetch_all(db.pool())
+        .await
+        .expect("table_info user_accounts");
+    let columns: Vec<String> = rows.iter().map(|r| r.get::<String, _>("name")).collect();
+
+    for required in ["oauth_provider", "oauth_subject"] {
+        assert!(
+            columns.iter().any(|c| c == required),
+            "user_accounts missing column `{required}` after migration 012; got {columns:?}"
+        );
+    }
+}

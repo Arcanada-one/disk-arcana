@@ -46,6 +46,12 @@ ed25519-dalek      = { workspace = true }
 reqwest            = { workspace = true }
 axum               = { workspace = true }
 async-trait = "0.1.89"
+base64       = "0.22"
+urlencoding  = "2"
+hex          = "0.4"
+hmac         = "0.12"
+sha2         = "0.10"
+subtle       = "2"
 
 [dependencies.tempfile]
 version = "3"

@@ -4,6 +4,7 @@
 //! - `GET /health` — liveness probe
 //! - `POST /billing/stripe/webhook` — DISK-0018 Stripe stub (when mode=stripe)
 //! - `POST /auth/signup`, `POST /auth/login`, `GET /auth/me` — DISK-0016 (when auth=enforce)
+//! - `GET /auth/oauth/start`, `GET /auth/oauth/callback` — DISK-0016 slice 2 (when oauth active)
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -12,6 +13,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
 
+use crate::accounts::{oauth_callback, oauth_start};
 use crate::accounts::routes::{login, me, signup, AuthHttpState};
 use crate::billing::webhook::{stripe_webhook, WebhookState};
 
@@ -31,12 +33,16 @@ pub async fn serve(
         );
     }
     if let Some(state) = auth {
-        let auth_router = Router::new()
+        let mut auth_router = Router::new()
             .route("/auth/signup", post(signup))
             .route("/auth/login", post(login))
-            .route("/auth/me", get(me))
-            .with_state(state);
-        app = app.merge(auth_router);
+            .route("/auth/me", get(me));
+        if state.oauth.mode.is_active() {
+            auth_router = auth_router
+                .route("/auth/oauth/start", get(oauth_start))
+                .route("/auth/oauth/callback", get(oauth_callback));
+        }
+        app = app.merge(auth_router.with_state(state));
     }
 
     let listener = tokio::net::TcpListener::bind(addr)

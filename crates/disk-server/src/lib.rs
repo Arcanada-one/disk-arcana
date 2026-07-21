@@ -23,7 +23,9 @@ pub mod tls;
 pub use acl::reload::{ReloadHandle, SessionInvalidate};
 pub use config::{CaMode, ConfigError, RegisterNodeMode, ServerConfig};
 
-pub use accounts::{routes::AuthHttpState, AuthMode};
+pub use accounts::{
+    oauth_callback, oauth_start, routes::AuthHttpState, AuthMode, OAuthConfig, OAuthMode,
+};
 pub use acl::{
     load_from_yaml, AclEnforcer, AclError, AclLoadError, AclState, AclYamlFile, AlwaysFailVerifier,
     CertFingerprint, EnforcedRole, EnforcementTable, GpgVerifier, LoadOutcome, NoopVerifier,
