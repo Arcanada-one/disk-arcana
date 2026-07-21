@@ -30,6 +30,8 @@
 //! - `POST /sharing/members/remove` — DISK-0022 revoke collaborator access
 //! - `GET /selective-sync` — DISK-0023 per-device folder include rules
 //! - `PUT /selective-sync` — DISK-0023 replace per-device folder include rules
+//! - `GET /onboarding` — DISK-0025 getting-started checklist state
+//! - `PUT /onboarding` — DISK-0025 persist checklist dismiss across devices
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -45,6 +47,7 @@ use crate::accounts::{
 use crate::billing::webhook::{stripe_webhook, WebhookState};
 use crate::compliance::{delete_account, export_data, list_consents, sub_processors};
 use crate::dashboard::{resolve_conflict, summary};
+use crate::onboarding::{get_onboarding, put_onboarding};
 use crate::selective_sync::{get_selective_sync, put_selective_sync};
 use crate::sharing::{accept_invite, create_invite, list_invites, list_members, remove_member};
 use crate::snapshots::{create_snapshot, get_snapshot, list_snapshots, restore_snapshot};
@@ -110,7 +113,8 @@ pub async fn serve(
             .route(
                 "/selective-sync",
                 get(get_selective_sync).put(put_selective_sync),
-            );
+            )
+            .route("/onboarding", get(get_onboarding).put(put_onboarding));
         crate::trash::scheduler::spawn_periodic_prune(state.clone());
         app = app.merge(auth_router.with_state(state));
     }
