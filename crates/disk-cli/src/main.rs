@@ -1456,8 +1456,7 @@ node_id_hint = "from-bf"
 
     #[test]
     fn cli_parses_trash_list() {
-        let cli = Cli::try_parse_from(["disk", "trash", "list", "--vault", "wiki"])
-            .unwrap();
+        let cli = Cli::try_parse_from(["disk", "trash", "list", "--vault", "wiki"]).unwrap();
         match cli.command {
             Some(Command::Trash(TrashArgs {
                 command: TrashCommand::List(l),

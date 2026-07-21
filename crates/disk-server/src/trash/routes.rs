@@ -441,7 +441,10 @@ mod integration_tests {
             .await
             .unwrap();
         assert_eq!(list["items"].as_array().unwrap().len(), 1);
-        assert_eq!(list["items"][0]["path"].as_str().unwrap(), "notes/restore-me.md");
+        assert_eq!(
+            list["items"][0]["path"].as_str().unwrap(),
+            "notes/restore-me.md"
+        );
         assert!(list["items"][0]["blob_available"].as_bool().unwrap());
 
         let restore: serde_json::Value = client
