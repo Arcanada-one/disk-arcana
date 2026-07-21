@@ -111,6 +111,7 @@ pub fn restore(archive: &Path, destination: &Path) -> io::Result<ArchiveIndex> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn round_trip_is_indexed_and_compressed() {
         let tmp = tempfile::tempdir().unwrap();
@@ -124,5 +125,25 @@ mod tests {
         assert_eq!(read_index(&arc).unwrap(), index);
         restore(&arc, &dst).unwrap();
         assert_eq!(fs::read(dst.join("nested/a.md")).unwrap(), b"hello");
+    }
+
+    #[test]
+    fn restore_rejects_parent_traversal_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let arc = tmp.path().join("arc");
+        fs::create_dir_all(arc.join("entries")).unwrap();
+        let digest = blake3::hash(b"x").to_hex().to_string();
+        fs::write(arc.join("entries").join(format!("{digest}.zst")), b"").unwrap();
+        let index = ArchiveIndex {
+            version: 1,
+            entries: vec![ArchiveEntry {
+                path: "../escape.txt".into(),
+                size: 1,
+                digest,
+            }],
+        };
+        fs::write(arc.join(INDEX), serde_json::to_vec_pretty(&index).unwrap()).unwrap();
+        let err = restore(&arc, &tmp.path().join("dst")).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
     }
 }

@@ -48,6 +48,11 @@ bash scripts/test-obsidian-integration.sh
 Install `manifest.json`, `main.js`, and `styles.css` into an Obsidian vault's
 `.obsidian/plugins/disk-arcana/` directory for a local desktop smoke test.
 
+## Archive folders (DISK-0009)
+
+Indexed `.disk-archive` snapshots (zstd + BLAKE3) via `disk archive create|list|restore`.
+See `docs/archive-folders.md`.
+
 Crates:
 
 - `disk-proto`   — generated tonic bindings, single source of truth for the wire format.

@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod archive_cmd;
 mod commands;
 mod daemon;
 mod paths;
@@ -63,6 +64,9 @@ enum Command {
 
     /// Manage sync conflicts: list unresolved or resolve by action.
     Conflicts(ConflictsArgs),
+
+    /// Create, inspect, or restore indexed `.disk-archive` folder snapshots.
+    Archive(ArchiveArgs),
 }
 
 /// `disk daemon <subcmd>` — wrapper.
@@ -117,6 +121,50 @@ pub struct ConfigReloadArgs {
     /// Daemon REST address. Defaults to `127.0.0.1:9444`.
     #[arg(long)]
     pub addr: Option<SocketAddr>,
+}
+
+/// `disk archive <subcmd>` — indexed folder archives (DISK-0009).
+#[derive(clap::Args, Debug)]
+pub struct ArchiveArgs {
+    #[command(subcommand)]
+    pub command: ArchiveCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ArchiveCommand {
+    /// Compress a folder into a content-addressed `.disk-archive` directory.
+    Create(ArchiveCreateArgs),
+    /// Print the JSON index entries for an archive.
+    List(ArchiveListArgs),
+    /// Restore files from an archive into a destination directory.
+    Restore(ArchiveRestoreArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ArchiveCreateArgs {
+    /// Source directory to archive.
+    #[arg(long)]
+    pub source: PathBuf,
+    /// Output archive directory (created if missing).
+    #[arg(long)]
+    pub output: PathBuf,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ArchiveListArgs {
+    /// Path to an archive directory containing `index.json`.
+    #[arg(long)]
+    pub archive: PathBuf,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ArchiveRestoreArgs {
+    /// Path to the archive directory.
+    #[arg(long)]
+    pub archive: PathBuf,
+    /// Destination directory for restored files.
+    #[arg(long)]
+    pub destination: PathBuf,
 }
 
 /// `disk conflicts <subcmd>` — wrapper for conflict management.
@@ -416,6 +464,11 @@ async fn main() -> Result<()> {
                 commands::run_conflicts_resolve(r.addr, r.path, r.all, r.action.as_str()).await
             }
             ConflictsCommand::Show(s) => commands::run_conflicts_show(s.addr, &s.path).await,
+        },
+        Some(Command::Archive(args)) => match args.command {
+            ArchiveCommand::Create(c) => archive_cmd::run_create(c.source, c.output),
+            ArchiveCommand::List(l) => archive_cmd::run_list(l.archive),
+            ArchiveCommand::Restore(r) => archive_cmd::run_restore(r.archive, r.destination),
         },
         None => {
             let version = env!("CARGO_PKG_VERSION");
@@ -826,6 +879,61 @@ node_id_hint = "from-bf"
         assert_eq!(r.server, "https://override:9999");
         assert_eq!(r.token_hex, "cafef00d"); // still from bf
         assert_eq!(r.node_id, "override-node");
+    }
+
+    #[test]
+    fn cli_parses_archive_create() {
+        let cli = Cli::try_parse_from([
+            "disk",
+            "archive",
+            "create",
+            "--source",
+            "/data/wiki",
+            "--output",
+            "/data/wiki.disk-archive",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Command::Archive(ArchiveArgs {
+                command: ArchiveCommand::Create(c),
+            })) => {
+                assert_eq!(c.source, PathBuf::from("/data/wiki"));
+                assert_eq!(c.output, PathBuf::from("/data/wiki.disk-archive"));
+            }
+            other => panic!("expected archive create, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_archive_list_and_restore() {
+        let list =
+            Cli::try_parse_from(["disk", "archive", "list", "--archive", "/tmp/arc"]).unwrap();
+        match list.command {
+            Some(Command::Archive(ArchiveArgs {
+                command: ArchiveCommand::List(l),
+            })) => assert_eq!(l.archive, PathBuf::from("/tmp/arc")),
+            other => panic!("expected archive list, got {other:?}"),
+        }
+
+        let restore = Cli::try_parse_from([
+            "disk",
+            "archive",
+            "restore",
+            "--archive",
+            "/tmp/arc",
+            "--destination",
+            "/tmp/out",
+        ])
+        .unwrap();
+        match restore.command {
+            Some(Command::Archive(ArchiveArgs {
+                command: ArchiveCommand::Restore(r),
+            })) => {
+                assert_eq!(r.archive, PathBuf::from("/tmp/arc"));
+                assert_eq!(r.destination, PathBuf::from("/tmp/out"));
+            }
+            other => panic!("expected archive restore, got {other:?}"),
+        }
     }
 
     // ── conflicts CLI parsing ────────────────────────────────────────────────
