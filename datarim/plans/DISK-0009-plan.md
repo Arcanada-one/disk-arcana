@@ -4,8 +4,8 @@ title: Archive Folders — compression, index, restore
 status: done
 created: 2026-07-21
 merged: 2026-07-21
-merge_commit: pending
-pr: pending
+merge_commit: 4b7ff10
+pr: 47
 complexity: L2
 prefix: DISK
 parent: DISK-0001
