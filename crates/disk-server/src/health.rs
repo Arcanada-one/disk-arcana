@@ -35,6 +35,11 @@
 //! - `GET /telemetry/config` — DISK-0026 PostHog public runtime config
 //! - `GET /telemetry` — DISK-0026 per-user analytics opt-in preference
 //! - `PUT /telemetry` — DISK-0026 update analytics opt-in + consent audit
+//! - `GET /agents/webhooks` — DISK-0028 list agent webhook subscriptions
+//! - `POST /agents/webhooks` — DISK-0028 register agent webhook
+//! - `DELETE /agents/webhooks` — DISK-0028 remove agent webhook
+//! - `GET /agents/revision` — DISK-0028 optimistic-lock revision lookup
+//! - `POST /agents/write` — DISK-0028 agent HTTP write with revision check
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -47,6 +52,7 @@ use crate::accounts::routes::{login, me, signup, AuthHttpState};
 use crate::accounts::{
     oauth_callback, oauth_start, refresh_token, resend_verification, verify_email,
 };
+use crate::agents::{agent_write, delete_webhook, get_revision, list_webhooks, register_webhook};
 use crate::billing::webhook::{stripe_webhook, WebhookState};
 use crate::compliance::{delete_account, export_data, list_consents, sub_processors};
 use crate::dashboard::{resolve_conflict, summary};
@@ -120,7 +126,15 @@ pub async fn serve(
                 get(get_selective_sync).put(put_selective_sync),
             )
             .route("/onboarding", get(get_onboarding).put(put_onboarding))
-            .route("/telemetry", get(get_telemetry).put(put_telemetry));
+            .route("/telemetry", get(get_telemetry).put(put_telemetry))
+            .route(
+                "/agents/webhooks",
+                get(list_webhooks)
+                    .post(register_webhook)
+                    .delete(delete_webhook),
+            )
+            .route("/agents/revision", get(get_revision))
+            .route("/agents/write", post(agent_write));
         crate::trash::scheduler::spawn_periodic_prune(state.clone());
         app = app.merge(auth_router.with_state(state));
     }

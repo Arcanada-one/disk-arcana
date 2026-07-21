@@ -8,6 +8,7 @@
 
 pub mod accounts;
 pub mod acl;
+pub mod agents;
 pub mod audit;
 pub mod auth;
 pub mod billing;
@@ -42,6 +43,7 @@ pub use acl::{
     CertFingerprint, EnforcedRole, EnforcementTable, GpgVerifier, LoadOutcome, NoopVerifier,
     RevokedSignerVerifier, SignatureVerifier, UnhealthyReason,
 };
+pub use agents::{agent_write, delete_webhook, get_revision, list_webhooks, register_webhook};
 pub use audit::{AuditEmitter, AuditError, AuditEvent, AuditKind};
 pub use auth::{ApiKey, AuthStore, CertIdentity, SessionToken};
 pub use billing::webhook::WebhookState;
