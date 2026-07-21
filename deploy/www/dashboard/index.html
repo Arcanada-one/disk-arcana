@@ -84,6 +84,17 @@
         <button id="logout-btn" type="button" class="text-sm text-slate-400 hover:text-slate-200">Log out</button>
       </div>
 
+      <div id="workspace-bar" class="flex flex-wrap items-end gap-3 border border-slate-800 rounded-lg p-4">
+        <label class="grid gap-1 text-sm min-w-[12rem]">
+          <span class="text-slate-400">Active workspace</span>
+          <select id="workspace-select"
+            class="bg-slate-900 border border-slate-700 rounded px-3 py-2">
+            <option value="">Personal workspace</option>
+          </select>
+        </label>
+        <p id="workspace-tenant-line" class="text-xs text-slate-500 pb-2"></p>
+      </div>
+
       <div id="verify-banner" class="hidden rounded-lg border border-amber-800/60 bg-amber-950/30 p-4">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -303,6 +314,83 @@
             </thead>
             <tbody id="snapshot-detail-files" class="text-slate-400"></tbody>
           </table>
+        </div>
+      </div>
+
+      <div class="border border-slate-800 rounded-lg p-4 overflow-x-auto">
+        <h2 class="font-medium mb-1">Organizations</h2>
+        <p id="orgs-hint" class="text-sm text-slate-400 mb-3">
+          Create a team workspace with a shared tenant ID. Switch workspaces above to scope vault operations to an organization.
+        </p>
+        <div class="flex flex-wrap gap-2 items-end mb-4">
+          <label class="grid gap-1 text-sm">
+            <span class="text-slate-400">Name</span>
+            <input id="org-name" type="text" maxlength="128"
+              class="bg-slate-900 border border-slate-700 rounded px-3 py-2 min-w-[10rem]"
+              placeholder="Acme Corp">
+          </label>
+          <label class="grid gap-1 text-sm">
+            <span class="text-slate-400">Slug (tenant ID)</span>
+            <input id="org-slug" type="text" pattern="[a-z0-9][a-z0-9-]*" maxlength="64"
+              class="bg-slate-900 border border-slate-700 rounded px-3 py-2 min-w-[8rem]"
+              placeholder="acme">
+          </label>
+          <button id="org-create-btn" type="button"
+            class="text-sm border border-emerald-700 text-emerald-300 rounded px-3 py-2 hover:border-emerald-500">
+            Create organization
+          </button>
+          <button id="orgs-refresh-btn" type="button"
+            class="text-sm border border-slate-700 rounded px-3 py-2 hover:border-emerald-500">
+            Refresh
+          </button>
+        </div>
+        <p id="orgs-loading" class="text-sm text-slate-400 hidden mb-2">Loading organizations…</p>
+        <p id="orgs-success" class="text-sm text-emerald-400 hidden mb-2"></p>
+        <table id="orgs-table" class="w-full text-sm text-left hidden mb-4">
+          <thead class="text-slate-400 border-b border-slate-800">
+            <tr>
+              <th class="py-2 pr-3 font-medium">Name</th>
+              <th class="py-2 pr-3 font-medium">Slug</th>
+              <th class="py-2 pr-3 font-medium">Your role</th>
+              <th class="py-2 font-medium">Tenant</th>
+            </tr>
+          </thead>
+          <tbody id="orgs-list" class="text-slate-300"></tbody>
+        </table>
+        <p id="orgs-empty" class="text-sm text-slate-500 hidden mb-4">No organizations yet.</p>
+        <div id="org-members-panel" class="hidden border-t border-slate-800 pt-4 mt-2">
+          <h3 class="text-sm font-medium text-slate-300 mb-2">Members</h3>
+          <div class="flex flex-wrap gap-2 items-end mb-3">
+            <label class="grid gap-1 text-sm">
+              <span class="text-slate-400">Email</span>
+              <input id="org-member-email" type="email"
+                class="bg-slate-900 border border-slate-700 rounded px-3 py-2 min-w-[12rem]"
+                placeholder="colleague@example.com">
+            </label>
+            <label class="grid gap-1 text-sm">
+              <span class="text-slate-400">Role</span>
+              <select id="org-member-role"
+                class="bg-slate-900 border border-slate-700 rounded px-3 py-2">
+                <option value="member">member</option>
+                <option value="admin">admin</option>
+              </select>
+            </label>
+            <button id="org-member-add-btn" type="button"
+              class="text-sm border border-emerald-700 text-emerald-300 rounded px-3 py-2 hover:border-emerald-500">
+              Add member
+            </button>
+          </div>
+          <table id="org-members-table" class="w-full text-sm text-left hidden">
+            <thead class="text-slate-400 border-b border-slate-800">
+              <tr>
+                <th class="py-2 pr-3 font-medium">User</th>
+                <th class="py-2 pr-3 font-medium">Email</th>
+                <th class="py-2 font-medium">Role</th>
+              </tr>
+            </thead>
+            <tbody id="org-members-list" class="text-slate-300"></tbody>
+          </table>
+          <p id="org-members-empty" class="text-sm text-slate-500 hidden">No members loaded.</p>
         </div>
       </div>
 
@@ -541,6 +629,11 @@
     const trashPage = { offset: 0, limit: 10, hasMore: false, total: 0 };
     let dashboardDevices = [];
     let onboardingDismissedServer = false;
+    const orgState = {
+      orgs: [],
+      context: null,
+      selectedOrgId: null,
+    };
     const telemetryState = {
       config: null,
       preference: null,
@@ -933,7 +1026,9 @@
         ? ''
         : ' · <span class="text-amber-400">email not verified</span>';
       document.getElementById('user-line').innerHTML =
-        data.user.email + ' · tenant <code class="text-slate-200">' + data.user.tenant_id + '</code>' + verifiedBadge;
+        data.user.email + verifiedBadge;
+
+      updateWorkspaceBar(data);
 
       updateVerifyBanner(data, null);
       updateOnboardingPanel(data);
@@ -1548,6 +1643,129 @@
       }
     }
 
+    function orgMemberRowHtml(member) {
+      return '<tr class="border-b border-slate-800/60">' +
+        '<td class="py-2 pr-3"><code class="text-xs">' + escapeHtml(member.user_id) + '</code></td>' +
+        '<td class="py-2 pr-3 text-slate-400">' + escapeHtml(member.email) + '</td>' +
+        '<td class="py-2 text-slate-400">' + escapeHtml(member.role) + '</td></tr>';
+    }
+
+    function orgRowHtml(org) {
+      return '<tr class="border-b border-slate-800/60">' +
+        '<td class="py-2 pr-3">' + escapeHtml(org.name) + '</td>' +
+        '<td class="py-2 pr-3"><code class="text-xs">' + escapeHtml(org.slug) + '</code></td>' +
+        '<td class="py-2 pr-3 text-slate-400">' + escapeHtml(org.role) + '</td>' +
+        '<td class="py-2"><code class="text-xs">' + escapeHtml(org.tenant_id) + '</code></td></tr>';
+    }
+
+    function canManageOrgMembers() {
+      const role = orgState.context && orgState.context.organization
+        ? orgState.context.organization.role
+        : null;
+      return role === 'owner' || role === 'admin';
+    }
+
+    function updateWorkspaceBar(data) {
+      const select = document.getElementById('workspace-select');
+      const tenantLine = document.getElementById('workspace-tenant-line');
+      const activeOrgId = orgState.context && orgState.context.active_org_id
+        ? orgState.context.active_org_id
+        : '';
+      const activeTenant = orgState.context
+        ? orgState.context.active_tenant_id
+        : data.user.tenant_id;
+      const personalTenant = orgState.context
+        ? orgState.context.personal_tenant_id
+        : data.user.tenant_id;
+
+      select.innerHTML = '<option value="">Personal (' + escapeHtml(personalTenant) + ')</option>' +
+        orgState.orgs.map(o =>
+          '<option value="' + escapeHtml(o.org_id) + '"' +
+          (o.org_id === activeOrgId ? ' selected' : '') + '>' +
+          escapeHtml(o.name) + ' (' + escapeHtml(o.tenant_id) + ')</option>'
+        ).join('');
+
+      const mode = orgState.context && orgState.context.mode === 'organization'
+        ? 'Organization'
+        : 'Personal';
+      tenantLine.textContent = mode + ' workspace · active tenant ' + activeTenant;
+
+      const membersPanel = document.getElementById('org-members-panel');
+      const addBtn = document.getElementById('org-member-add-btn');
+      if (activeOrgId) {
+        membersPanel.classList.remove('hidden');
+        orgState.selectedOrgId = activeOrgId;
+        loadOrgMembers(activeOrgId);
+        addBtn.classList.toggle('hidden', !canManageOrgMembers());
+        document.getElementById('org-member-email').parentElement.classList.toggle('hidden', !canManageOrgMembers());
+        document.getElementById('org-member-role').parentElement.classList.toggle('hidden', !canManageOrgMembers());
+      } else {
+        membersPanel.classList.add('hidden');
+        orgState.selectedOrgId = null;
+      }
+    }
+
+    async function loadOrgContext() {
+      orgState.context = await api('/orgs/context');
+    }
+
+    async function loadOrgs() {
+      const loading = document.getElementById('orgs-loading');
+      const table = document.getElementById('orgs-table');
+      const empty = document.getElementById('orgs-empty');
+      const success = document.getElementById('orgs-success');
+      loading.classList.remove('hidden');
+      table.classList.add('hidden');
+      empty.classList.add('hidden');
+      success.classList.add('hidden');
+      try {
+        const data = await api('/orgs');
+        orgState.orgs = data.orgs || [];
+        if (!orgState.orgs.length) {
+          empty.classList.remove('hidden');
+        } else {
+          document.getElementById('orgs-list').innerHTML =
+            orgState.orgs.map(orgRowHtml).join('');
+          table.classList.remove('hidden');
+        }
+      } finally {
+        loading.classList.add('hidden');
+      }
+    }
+
+    async function loadOrgMembers(orgId) {
+      const table = document.getElementById('org-members-table');
+      const empty = document.getElementById('org-members-empty');
+      table.classList.add('hidden');
+      empty.classList.add('hidden');
+      try {
+        const data = await api('/orgs/members?org_id=' + encodeURIComponent(orgId));
+        if (!data.members || !data.members.length) {
+          empty.classList.remove('hidden');
+        } else {
+          document.getElementById('org-members-list').innerHTML =
+            data.members.map(orgMemberRowHtml).join('');
+          table.classList.remove('hidden');
+        }
+      } catch (err) {
+        empty.textContent = err.message;
+        empty.classList.remove('hidden');
+      }
+    }
+
+    async function switchWorkspace(orgId) {
+      orgState.context = await api('/orgs/context', {
+        method: 'PUT',
+        body: JSON.stringify({ org_id: orgId || null }),
+      });
+    }
+
+    async function loadOrganizationsUi(summary) {
+      await loadOrgContext();
+      await loadOrgs();
+      updateWorkspaceBar(summary);
+    }
+
     function sharingInviteRowHtml(inv) {
       const status = inv.redeemed
         ? '<span class="text-slate-500">redeemed</span>'
@@ -1693,6 +1911,7 @@
         await loadOnboardingState(data.user.user_id);
         await refreshTelemetry(data.user.user_id);
         showDashboard(data);
+        await loadOrganizationsUi(data);
         await loadConsents();
       } finally {
         dashLoading.classList.add('hidden');
@@ -2017,6 +2236,93 @@
         ok.textContent = res.message || ('Emptied trash for vault ' + vault);
         ok.classList.remove('hidden');
         await loadTrash(vault, 0);
+      } catch (err) {
+        showDashError(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    document.getElementById('workspace-select').onchange = async () => {
+      const select = document.getElementById('workspace-select');
+      const orgId = select.value;
+      select.disabled = true;
+      clearDashError();
+      try {
+        await switchWorkspace(orgId);
+        await loadDashboard();
+      } catch (err) {
+        showDashError(err.message);
+      } finally {
+        select.disabled = false;
+      }
+    };
+
+    document.getElementById('org-create-btn').onclick = async () => {
+      const btn = document.getElementById('org-create-btn');
+      const name = document.getElementById('org-name').value.trim();
+      const slug = document.getElementById('org-slug').value.trim();
+      if (!name || !slug) {
+        showDashError('Organization name and slug are required');
+        return;
+      }
+      btn.disabled = true;
+      clearDashError();
+      document.getElementById('orgs-success').classList.add('hidden');
+      try {
+        const created = await api('/orgs', {
+          method: 'POST',
+          body: JSON.stringify({ name, slug }),
+        });
+        const ok = document.getElementById('orgs-success');
+        ok.textContent = 'Created organization "' + created.name + '" (tenant ' + created.tenant_id + ')';
+        ok.classList.remove('hidden');
+        document.getElementById('org-name').value = '';
+        document.getElementById('org-slug').value = '';
+        await switchWorkspace(created.org_id);
+        await loadDashboard();
+      } catch (err) {
+        showDashError(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    document.getElementById('orgs-refresh-btn').onclick = async () => {
+      const btn = document.getElementById('orgs-refresh-btn');
+      btn.disabled = true;
+      try {
+        const data = await api('/dashboard/summary');
+        await loadOrganizationsUi(data);
+      } catch (err) {
+        showDashError(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    document.getElementById('org-member-add-btn').onclick = async () => {
+      const btn = document.getElementById('org-member-add-btn');
+      const orgId = orgState.selectedOrgId;
+      const email = document.getElementById('org-member-email').value.trim();
+      const role = document.getElementById('org-member-role').value;
+      if (!orgId || !email) {
+        showDashError('Select an organization workspace and enter a member email');
+        return;
+      }
+      btn.disabled = true;
+      clearDashError();
+      try {
+        await api('/orgs/members', {
+          method: 'POST',
+          body: JSON.stringify({ org_id: orgId, email, role }),
+        });
+        const ok = document.getElementById('orgs-success');
+        ok.textContent = 'Added ' + email + ' as ' + role;
+        ok.classList.remove('hidden');
+        document.getElementById('org-member-email').value = '';
+        await loadOrgMembers(orgId);
+        await loadOrgs();
       } catch (err) {
         showDashError(err.message);
       } finally {

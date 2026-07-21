@@ -1,6 +1,6 @@
 # DISK-0030 — Team / Org Workspaces
 
-**Status:** slice 1 on DEVS — organizations table + HTTP CRUD scaffold.  
+**Status:** slice 2 on DEVS — dashboard org panel + persisted active-org context.  
 **Parent:** DISK-0001 commercial / SaaS track.  
 **Tracking:** DISK-0030 in Datarim backlog.
 
@@ -12,8 +12,8 @@ Personal tenants (`tenant_id` derived from signup email) work for solo users. Te
 
 | Slice | In scope | Out of scope |
 |-------|----------|--------------|
-| 1 (this PR) | `organizations` + `organization_members` tables; `POST/GET /orgs`; `GET/POST /orgs/members` | Dashboard org switcher, JWT tenant override, billing per org, `disk org` CLI |
-| 2 (planned) | Dashboard org panel + active-org context in session | SSO group sync, SCIM |
+| 1 (merged #106) | `organizations` + `organization_members` tables; `POST/GET /orgs`; `GET/POST /orgs/members` | Dashboard org switcher, JWT tenant override, billing per org, `disk org` CLI |
+| 2 (this PR) | Dashboard org panel + workspace switcher; `GET/PUT /orgs/context` persisted active org | SSO group sync, SCIM |
 | 3 (planned) | `disk org` CLI + sync `x-disk-tenant` org context | Cross-org vault federation |
 
 ## Data model
@@ -54,11 +54,27 @@ Roles:
 
 Mounted on the health HTTP listener when `DISK_AUTH_MODE=enforce`.
 
+## Active workspace context (slice 2)
+
+| Method | Path | Auth | Notes |
+|--------|------|------|-------|
+| GET | `/orgs/context` | Bearer JWT | `{ mode, active_org_id?, active_tenant_id, personal_tenant_id, organization? }` |
+| PUT | `/orgs/context` | Bearer JWT | Body: `{ org_id: null \| "<id>" }` — must be org member when setting |
+
+Persisted in `user_org_context`. Stale org membership auto-clears to personal on read.
+
+## Dashboard (slice 2)
+
+- Workspace switcher (personal vs organization) in tenant dashboard header
+- Organizations panel: create org, list memberships, add members (admin+)
+- Active tenant label reflects selected workspace context
+
 ## Tests
 
-- `crates/disk-core/src/meta_db/orgs.rs` — create + member list unit test
-- `crates/disk-core/tests/schema_smoke.rs` — migration 022 tables exist
-- `crates/disk-server/src/orgs/routes.rs` — HTTP round-trip (create + add member)
+- `crates/disk-core/src/meta_db/orgs.rs` — create + member list + context unit tests
+- `crates/disk-core/tests/schema_smoke.rs` — migration 022/023 tables exist
+- `crates/disk-server/src/orgs/routes.rs` — HTTP round-trip (create + add member + context switch)
+- `deploy/www/dashboard/index.html` — org panel + workspace switcher UI
 
 ## References
 

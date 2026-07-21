@@ -2,4 +2,6 @@
 
 pub mod routes;
 
-pub use routes::{add_member, create_org, list_members, list_orgs};
+pub use routes::{
+    add_member, create_org, get_org_context, list_members, list_orgs, put_org_context,
+};

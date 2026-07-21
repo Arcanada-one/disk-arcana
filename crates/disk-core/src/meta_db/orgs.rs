@@ -249,6 +249,50 @@ impl MetaDb {
         }
         Ok(out)
     }
+
+    /// Load persisted active org id for a user (`None` = personal workspace).
+    pub async fn get_user_org_context(&self, user_id: &str) -> Result<Option<String>, MetaDbError> {
+        let row = sqlx::query(
+            r#"
+            SELECT active_org_id FROM user_org_context
+            WHERE user_id = ?1
+            LIMIT 1
+            "#,
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.and_then(|r| {
+            r.try_get::<Option<String>, _>("active_org_id")
+                .ok()
+                .flatten()
+        }))
+    }
+
+    /// Persist active org workspace; pass `None` to switch back to personal tenant.
+    pub async fn set_user_org_context(
+        &self,
+        user_id: &str,
+        active_org_id: Option<&str>,
+        now: i64,
+    ) -> Result<(), MetaDbError> {
+        sqlx::query(
+            r#"
+            INSERT INTO user_org_context (user_id, active_org_id, updated_at)
+            VALUES (?1, ?2, ?3)
+            ON CONFLICT(user_id) DO UPDATE SET
+                active_org_id = excluded.active_org_id,
+                updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(user_id)
+        .bind(active_org_id)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -284,5 +328,34 @@ mod tests {
         let members = db.list_organization_members("org_acme").await.unwrap();
         assert_eq!(members.len(), 1);
         assert_eq!(members[0].email, "alice@acme.test");
+    }
+
+    #[tokio::test]
+    async fn org_context_persists_and_clears() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("org-ctx.sqlite"))
+            .await
+            .unwrap();
+        seed_user(&db, "usr_a", "alice@acme.test", "alice").await;
+
+        db.create_organization("org_acme", "acme", "Acme Corp", "acme", "usr_a", 100)
+            .await
+            .unwrap();
+        db.add_organization_member("org_acme", "usr_a", OrgRole::Owner, 100)
+            .await
+            .unwrap();
+
+        assert!(db.get_user_org_context("usr_a").await.unwrap().is_none());
+
+        db.set_user_org_context("usr_a", Some("org_acme"), 200)
+            .await
+            .unwrap();
+        assert_eq!(
+            db.get_user_org_context("usr_a").await.unwrap().as_deref(),
+            Some("org_acme")
+        );
+
+        db.set_user_org_context("usr_a", None, 300).await.unwrap();
+        assert!(db.get_user_org_context("usr_a").await.unwrap().is_none());
     }
 }
