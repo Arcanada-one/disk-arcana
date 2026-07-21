@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Troubleshooting — Disk Arcana Help</title>
+  <meta name="description" content="Fix enrollment, sync, and authentication issues with Disk Arcana.">
+  <link rel="canonical" href="https://disk.arcanada.ai/docs/troubleshooting.html">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' }</script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
+  <article class="max-w-3xl mx-auto px-6 py-12">
+    <p><a href="index.html" class="text-emerald-400 text-sm hover:underline">← Help Center</a></p>
+    <h1 class="text-3xl font-bold tracking-tight mt-4 mb-6">Troubleshooting</h1>
+
+    <section class="mb-8 space-y-6 text-sm">
+      <div class="border border-slate-800 rounded-lg p-4">
+        <h2 class="font-semibold text-slate-100 mb-2">Enrollment: token rejected</h2>
+        <ul class="text-slate-400 list-disc list-inside space-y-1">
+          <li>Token expired — issue a new one with shorter TTL if handoff is slow</li>
+          <li>Hostname mismatch — token hostname must equal <code>disk enroll --hostname</code></li>
+          <li>Token already used — tokens are single-use</li>
+        </ul>
+      </div>
+
+      <div class="border border-slate-800 rounded-lg p-4">
+        <h2 class="font-semibold text-slate-100 mb-2">Daemon won't start before enroll</h2>
+        <p class="text-slate-400">Expected: <code>client.crt</code> is created during enrollment. Complete <a href="enroll-device.html" class="text-emerald-400">enroll</a> first, then <code>systemctl restart disk-arcana</code> (Linux).</p>
+      </div>
+
+      <div class="border border-slate-800 rounded-lg p-4">
+        <h2 class="font-semibold text-slate-100 mb-2">Files not syncing</h2>
+        <ul class="text-slate-400 list-disc list-inside space-y-1">
+          <li>Check selective sync includes — path may be excluded</li>
+          <li>Verify share is initialized: <code>disk share list</code></li>
+          <li>Inspect local status: <code>curl -sf http://127.0.0.1:9444/status</code></li>
+          <li>Dashboard <strong>Last seen</strong> should update within ~1 minute</li>
+        </ul>
+      </div>
+
+      <div class="border border-slate-800 rounded-lg p-4">
+        <h2 class="font-semibold text-slate-100 mb-2">Dashboard API errors / 401</h2>
+        <ul class="text-slate-400 list-disc list-inside space-y-1">
+          <li>Session expired — log in again (refresh token runs automatically on 401)</li>
+          <li>Dev override: open dashboard with <code>?api=https://your-host:9446</code></li>
+          <li>Reverse proxy must forward <code>/auth/*</code> and <code>/dashboard/*</code> to the health listener</li>
+        </ul>
+      </div>
+
+      <div class="border border-slate-800 rounded-lg p-4">
+        <h2 class="font-semibold text-slate-100 mb-2">Permission denied on download (selective sync)</h2>
+        <p class="text-slate-400">Path is outside configured include prefixes for that device. Update includes in dashboard <strong>Selective sync</strong> or clear includes to sync full vault.</p>
+      </div>
+
+      <div class="border border-slate-800 rounded-lg p-4">
+        <h2 class="font-semibold text-slate-100 mb-2">Windows-specific</h2>
+        <p class="text-slate-400">See <code>docs/windows-platform-notes.md</code> in the GitHub repo for path length, service account, and firewall notes.</p>
+      </div>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold mb-2">Still stuck?</h2>
+      <p class="text-sm text-slate-300">Email <a href="mailto:disk@arcanada.ai" class="text-emerald-400">disk@arcanada.ai</a> with tenant ID, node ID, vault ID, and relevant log excerpts from <code>/var/log/disk-arcana/</code> (redact secrets).</p>
+    </section>
+  </article>
+</body>
+</html>

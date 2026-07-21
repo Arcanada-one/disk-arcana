@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Use the dashboard — Disk Arcana Help</title>
+  <meta name="description" content="Tenant dashboard: vaults, devices, versions, snapshots, sharing, selective sync, trash.">
+  <link rel="canonical" href="https://disk.arcanada.ai/docs/dashboard.html">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' }</script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
+  <article class="max-w-3xl mx-auto px-6 py-12">
+    <p><a href="index.html" class="text-emerald-400 text-sm hover:underline">← Help Center</a></p>
+    <h1 class="text-3xl font-bold tracking-tight mt-4 mb-6">Use the dashboard</h1>
+
+    <p class="text-sm text-slate-300 mb-8">
+      The tenant dashboard at <a href="../dashboard/" class="text-emerald-400">disk.arcanada.ai/dashboard</a> is a single-page app
+      backed by the health HTTP API (<code>:9446</code> by default). Sign in with email/password or OAuth.
+    </p>
+
+    <section class="mb-8 space-y-6 text-sm">
+      <div>
+        <h2 class="text-lg font-semibold mb-2">Overview cards</h2>
+        <p class="text-slate-400">Plan tier, storage quota, enrolled devices, and vault count with usage bars.</p>
+      </div>
+      <div>
+        <h2 class="text-lg font-semibold mb-2">Vaults &amp; devices</h2>
+        <p class="text-slate-400">Lists vault IDs created via <code>disk share init</code> and nodes enrolled via <code>disk enroll</code>. Use <strong>Folders</strong> on a device row to configure selective sync.</p>
+      </div>
+      <div>
+        <h2 class="text-lg font-semibold mb-2">File version history</h2>
+        <p class="text-slate-400">Browse and restore prior revisions. Retention limits depend on your plan tier.</p>
+      </div>
+      <div>
+        <h2 class="text-lg font-semibold mb-2">Vault snapshots</h2>
+        <p class="text-slate-400">Capture a point-in-time index of all files in a vault and restore later.</p>
+      </div>
+      <div>
+        <h2 class="text-lg font-semibold mb-2">Sharing</h2>
+        <p class="text-slate-400">Create invite links (viewer or editor role). Accept invites via <code>?sharing_accept=&lt;token&gt;</code> deep link.</p>
+      </div>
+      <div>
+        <h2 class="text-lg font-semibold mb-2">Selective sync</h2>
+        <p class="text-slate-400">Per-device folder prefixes. Empty list = sync entire vault. Enforced on gRPC sync paths.</p>
+      </div>
+      <div>
+        <h2 class="text-lg font-semibold mb-2">Recycle bin</h2>
+        <p class="text-slate-400">Restore, permanently delete, or empty the bin. Expired items are pruned automatically by retention tier.</p>
+      </div>
+      <div>
+        <h2 class="text-lg font-semibold mb-2">Conflicts</h2>
+        <p class="text-slate-400">Unresolved sync conflicts appear with metadata-only resolve actions (no server-side file merge).</p>
+      </div>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-lg font-semibold mb-2">Deep links</h2>
+      <ul class="text-sm text-slate-300 font-mono space-y-1">
+        <li><code>?sharing=1</code> — open sharing panel</li>
+        <li><code>?selective_sync=1&amp;selective_sync_node=&lt;id&gt;</code> — selective sync</li>
+        <li><code>?api=https://host:9446</code> — override API base (dev)</li>
+      </ul>
+    </section>
+
+    <p class="text-sm"><a href="vaults-and-sync.html" class="text-emerald-400 hover:underline">Vaults and sync model →</a></p>
+  </article>
+</body>
+</html>

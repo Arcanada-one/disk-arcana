@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Getting started — Disk Arcana Help</title>
+  <meta name="description" content="First-time setup: account, client install, device enrollment, and first vault sync.">
+  <link rel="canonical" href="https://disk.arcanada.ai/docs/getting-started.html">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' }</script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
+  <article class="max-w-3xl mx-auto px-6 py-12 prose prose-invert prose-slate max-w-none">
+    <p><a href="index.html" class="text-emerald-400 text-sm no-underline hover:underline">← Help Center</a></p>
+    <h1 class="text-3xl font-bold tracking-tight not-prose mb-2">Getting started</h1>
+    <p class="text-slate-400 not-prose mb-8">Estimated time: 10–15 minutes for your first synced file.</p>
+
+    <ol class="space-y-8 list-decimal list-inside text-slate-300">
+      <li>
+        <strong class="text-slate-100">Create an account</strong>
+        <p class="mt-2 ml-6 text-sm">Open the <a href="../dashboard/" class="text-emerald-400">tenant dashboard</a>, sign up with email and password, or use OAuth.</p>
+      </li>
+      <li>
+        <strong class="text-slate-100">Verify your email</strong>
+        <p class="mt-2 ml-6 text-sm">Check your inbox for the verification link. The dashboard shows a banner until verification completes.</p>
+      </li>
+      <li>
+        <strong class="text-slate-100">Install the client</strong>
+        <p class="mt-2 ml-6 text-sm">Follow <a href="install-client.html" class="text-emerald-400">Install the client</a>. On Linux you can run:</p>
+        <pre class="ml-6 mt-2 bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm overflow-x-auto"><code>curl -fsSL https://disk.arcanada.ai/install.sh | sh</code></pre>
+      </li>
+      <li>
+        <strong class="text-slate-100">Enroll your machine</strong>
+        <p class="mt-2 ml-6 text-sm">An operator issues a one-time enrollment token; you run <code class="text-slate-200">disk enroll</code> on the device. See <a href="enroll-device.html" class="text-emerald-400">Enroll a device</a>.</p>
+      </li>
+      <li>
+        <strong class="text-slate-100">Initialize a vault share</strong>
+        <p class="mt-2 ml-6 text-sm">On the enrolled device:</p>
+        <pre class="ml-6 mt-2 bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm overflow-x-auto"><code>disk share init --preset obsidian-vault</code></pre>
+        <p class="mt-2 ml-6 text-sm">Pick a preset that matches your folder layout. The vault appears in the dashboard under <strong>Vaults</strong>.</p>
+      </li>
+      <li>
+        <strong class="text-slate-100">Confirm sync</strong>
+        <p class="mt-2 ml-6 text-sm">Add a file under the shared path. Within a minute the device <strong>Last seen</strong> timestamp should update in the dashboard. Check local status:</p>
+        <pre class="ml-6 mt-2 bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm overflow-x-auto"><code>curl -sf http://127.0.0.1:9444/status | jq .</code></pre>
+      </li>
+    </ol>
+
+    <h2 class="text-xl font-semibold mt-10 mb-3">Next steps</h2>
+    <ul class="text-sm text-slate-300 space-y-2">
+      <li><a href="vaults-and-sync.html" class="text-emerald-400">Vaults and sync model</a> — selective sync, sharing, trash</li>
+      <li><a href="dashboard.html" class="text-emerald-400">Use the dashboard</a> — versions, snapshots, collaborators</li>
+      <li><a href="troubleshooting.html" class="text-emerald-400">Troubleshooting</a> — if something fails along the way</li>
+    </ul>
+  </article>
+</body>
+</html>

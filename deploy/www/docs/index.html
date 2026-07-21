@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Disk Arcana — Help Center</title>
+  <meta name="description" content="Guides for installing Disk Arcana, enrolling devices, and syncing your vaults.">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://disk.arcanada.ai/docs/">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' }</script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
+  <div class="max-w-3xl mx-auto px-6 py-12">
+    <header class="mb-10">
+      <a href="../" class="text-sm text-emerald-400 hover:underline">← Disk Arcana</a>
+      <h1 class="text-3xl font-bold tracking-tight mt-4">Help Center</h1>
+      <p class="text-slate-400 mt-2">
+        Tutorials and how-to guides for the Disk Arcana cloud service.
+        Also available at <span class="text-slate-300">docs.disk.arcanada.one</span> when aliased to this site.
+      </p>
+    </header>
+
+    <section class="mb-10">
+      <h2 class="text-lg font-semibold mb-3">Start here</h2>
+      <ul class="space-y-4 text-sm">
+        <li class="border border-slate-800 rounded-lg p-4">
+          <a href="getting-started.html" class="text-emerald-400 font-medium hover:underline">Getting started</a>
+          <p class="text-slate-400 mt-1">Sign up, verify email, install the client, enroll your first device, and sync a vault.</p>
+        </li>
+      </ul>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-lg font-semibold mb-3">How-to guides</h2>
+      <ul class="space-y-4 text-sm">
+        <li class="border border-slate-800 rounded-lg p-4">
+          <a href="install-client.html" class="text-emerald-400 font-medium hover:underline">Install the client</a>
+          <p class="text-slate-400 mt-1">Linux, macOS, and Windows install paths for the <code class="text-slate-300">disk</code> CLI and daemon.</p>
+        </li>
+        <li class="border border-slate-800 rounded-lg p-4">
+          <a href="enroll-device.html" class="text-emerald-400 font-medium hover:underline">Enroll a device</a>
+          <p class="text-slate-400 mt-1">Issue an enrollment token and exchange it for an mTLS client certificate.</p>
+        </li>
+        <li class="border border-slate-800 rounded-lg p-4">
+          <a href="dashboard.html" class="text-emerald-400 font-medium hover:underline">Use the dashboard</a>
+          <p class="text-slate-400 mt-1">Manage vaults, devices, versions, snapshots, sharing, selective sync, and trash.</p>
+        </li>
+        <li class="border border-slate-800 rounded-lg p-4">
+          <a href="troubleshooting.html" class="text-emerald-400 font-medium hover:underline">Troubleshooting</a>
+          <p class="text-slate-400 mt-1">Enrollment failures, sync stalls, auth errors, and where to get support.</p>
+        </li>
+      </ul>
+    </section>
+
+    <section class="mb-10">
+      <h2 class="text-lg font-semibold mb-3">Reference</h2>
+      <ul class="space-y-4 text-sm">
+        <li class="border border-slate-800 rounded-lg p-4">
+          <a href="vaults-and-sync.html" class="text-emerald-400 font-medium hover:underline">Vaults and sync model</a>
+          <p class="text-slate-400 mt-1">Vault IDs, shares, selective sync prefixes, sharing roles, and recycle bin retention.</p>
+        </li>
+        <li class="border border-slate-800 rounded-lg p-4">
+          <a href="https://github.com/Arcanada-one/disk-arcana/blob/main/docs/installation.md" class="text-emerald-400 font-medium hover:underline">Developer installation guide (GitHub)</a>
+          <p class="text-slate-400 mt-1">Build from source, environment variables, and operator runbooks.</p>
+        </li>
+      </ul>
+    </section>
+
+    <div class="flex flex-wrap gap-3 text-sm">
+      <a href="../dashboard/" class="text-emerald-400 hover:underline">Open dashboard</a>
+      <span class="text-slate-600">·</span>
+      <a href="../legal/" class="text-slate-400 hover:text-slate-200">Legal</a>
+    </div>
+
+    <footer class="mt-12 pt-6 border-t border-slate-800 text-xs text-slate-500">
+      <p class="italic opacity-60 mb-2">One human life matters</p>
+      <p>Support: <a class="hover:text-slate-300" href="mailto:disk@arcanada.ai">disk@arcanada.ai</a></p>
+    </footer>
+  </div>
+</body>
+</html>
