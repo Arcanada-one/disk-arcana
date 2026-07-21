@@ -32,7 +32,8 @@ pub mod vector_clock;
 
 pub use config::Config;
 pub use e2ee::{
-    decrypt, encrypt, random_salt, E2eeError, EncryptedBlob, VaultKey, KEY_LEN, NONCE_LEN, SALT_LEN,
+    decrypt, encrypt, random_salt, EncryptedBlob, E2eeError, UploadPayload, VaultKey, KEY_LEN,
+    NONCE_LEN, SALT_LEN,
 };
 pub use error::{
     ConfigError, FilterError, MetaDbError, PathGuardError, ReconcileError, ScannerError,

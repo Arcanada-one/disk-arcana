@@ -553,6 +553,7 @@ impl SyncService for SyncServiceImpl {
                     deleted: false,
                     deleted_at: None,
                     node_id: self.server_node_id.clone(),
+                    encryption_nonce: None,
                 };
                 // Upsert failure is non-fatal: bytes are durable; next sync
                 // rebuilds the row from disk (convergent recovery).
@@ -958,6 +959,11 @@ fn proto_to_file_meta(m: &FileMetadata) -> FileMeta {
             Some(m.deleted_at)
         },
         node_id: m.node_id.clone(),
+        encryption_nonce: if m.encryption_nonce.is_empty() {
+            None
+        } else {
+            Some(m.encryption_nonce.clone())
+        },
     }
 }
 
@@ -978,6 +984,7 @@ fn file_meta_to_proto(m: &FileMeta) -> FileMetadata {
         deleted: m.deleted,
         deleted_at: m.deleted_at.unwrap_or(0),
         node_id: m.node_id.clone(),
+        encryption_nonce: m.encryption_nonce.clone().unwrap_or_default(),
         ..Default::default()
     }
 }
@@ -1125,6 +1132,7 @@ mod tests {
             deleted: false,
             deleted_at: None,
             node_id: "server".into(),
+            encryption_nonce: None,
         };
         db.upsert_file(&meta).await.unwrap();
 
@@ -1315,6 +1323,7 @@ mod tests {
             deleted: false,
             deleted_at: None,
             node_id: "server".into(),
+            encryption_nonce: None,
         };
         svc.meta_db
             .as_ref()
@@ -1364,6 +1373,7 @@ mod tests {
             deleted: false,
             deleted_at: None,
             node_id: "server".into(),
+            encryption_nonce: None,
         };
         // require_auth returns the node_label used at register_node time ("vac4-node").
         svc.meta_db
@@ -1428,6 +1438,7 @@ mod tests {
             deleted: true,
             deleted_at: Some(1_700_000_001),
             node_id: "server".into(),
+            encryption_nonce: None,
         };
         let db = svc.meta_db.as_ref().unwrap();
         db.upsert_file(&server_tomb).await.unwrap();
@@ -1497,6 +1508,7 @@ mod tests {
             deleted: false,
             deleted_at: None,
             node_id: "server".into(),
+            encryption_nonce: None,
         };
         let db = svc.meta_db.as_ref().unwrap();
         db.upsert_file(&file_meta).await.unwrap();
@@ -1575,6 +1587,7 @@ mod tests {
             deleted: false,
             deleted_at: None,
             node_id: "server".into(),
+            encryption_nonce: None,
         };
 
         let db_ref = svc.meta_db.as_ref().unwrap();
@@ -1668,6 +1681,7 @@ mod tests {
             deleted: false,
             deleted_at: None,
             node_id: "server".into(),
+            encryption_nonce: None,
         };
         let db_ref = svc.meta_db.as_ref().unwrap();
         // Server tombstone already in place (simulates fan-out already applied).
@@ -1764,6 +1778,7 @@ mod tests {
             deleted: false,
             deleted_at: None,
             node_id: "server".into(),
+            encryption_nonce: None,
         };
         let db = svc.meta_db.as_ref().unwrap();
         db.upsert_file(&synced_meta).await.unwrap();
@@ -1838,6 +1853,7 @@ mod tests {
             deleted: false,
             deleted_at: None,
             node_id: "server".into(),
+            encryption_nonce: None,
         };
         db_ref.upsert_file(&server_recreated).await.unwrap();
 
@@ -1852,6 +1868,7 @@ mod tests {
             deleted: true,
             deleted_at: Some(1_700_000_001),
             node_id: "server".into(),
+            encryption_nonce: None,
         };
         db_ref
             .upsert_node_baselines("rec-c", "default", &[c_baseline_tomb])
@@ -1931,6 +1948,7 @@ mod tests {
             deleted: false,
             deleted_at: None,
             node_id: "server".into(),
+            encryption_nonce: None,
         };
         db_ref.upsert_file(&server_recreated).await.unwrap();
 
@@ -1945,6 +1963,7 @@ mod tests {
             deleted: true,
             deleted_at: Some(1_700_000_001),
             node_id: "server".into(),
+            encryption_nonce: None,
         };
         db_ref
             .upsert_node_baselines("loss-c", "default", &[c_tomb_baseline])
@@ -2003,6 +2022,7 @@ mod tests {
             deleted: false,
             deleted_at: None,
             node_id: "server".into(),
+            encryption_nonce: None,
         }];
         let remote_client = vec![disk_core::types::FileMeta {
             path: std::path::PathBuf::from("vault/note.md"),
@@ -2014,6 +2034,7 @@ mod tests {
             deleted: false,
             deleted_at: None,
             node_id: "loss-c".into(),
+            encryption_nonce: None,
         }];
         let indexed_tomb = vec![disk_core::types::FileMeta {
             path: std::path::PathBuf::from("vault/note.md"),
@@ -2025,6 +2046,7 @@ mod tests {
             deleted: true,
             deleted_at: Some(1_700_000_001),
             node_id: "server".into(),
+            encryption_nonce: None,
         }];
         let actions = engine
             .reconcile(&local_server, &remote_client, &indexed_tomb)
@@ -2079,6 +2101,7 @@ mod tests {
             deleted: false,
             deleted_at: None,
             node_id: "server".into(),
+            encryption_nonce: None,
         };
         svc.meta_db
             .as_ref()
@@ -2099,6 +2122,7 @@ mod tests {
             deleted: false,
             deleted_at: None,
             node_id: "ct-node".into(),
+            encryption_nonce: None,
         };
         svc.meta_db
             .as_ref()

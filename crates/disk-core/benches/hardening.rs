@@ -53,6 +53,7 @@ fn make_meta(i: usize, deleted: bool) -> FileMeta {
         deleted,
         deleted_at: None,
         node_id: "bench".into(),
+        encryption_nonce: None,
     }
 }
 

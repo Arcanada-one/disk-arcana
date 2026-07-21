@@ -267,12 +267,13 @@ impl DiskClient {
         &self,
         share: &str,
         path: &str,
-        bytes: &[u8],
+        payload: &disk_core::UploadPayload,
     ) -> Result<(), ClientError> {
         let token = self.session_token().await?;
         let mut client = SyncServiceClient::new(self.channel.clone());
 
-        let content_hash = disk_core::delta::blake3_hash(bytes);
+        let bytes = &payload.wire_bytes;
+        let content_hash = payload.content_hash;
 
         // Build the stream of DeltaUploadRequest messages.
         let bearer_val: MetadataValue<tonic::metadata::Ascii> =
@@ -292,7 +293,7 @@ impl DiskClient {
         // subsequent messages carry only chunk data (server accumulates them).
         let mut msgs: Vec<disk_proto::disk::DeltaUploadRequest> = Vec::new();
         let mut first = true;
-        for chunk_result in disk_core::delta::chunks(bytes) {
+        for chunk_result in disk_core::delta::chunks(bytes.as_slice()) {
             let chunk = chunk_result
                 .map_err(|e| ClientError::MetadataError(format!("chunking error: {e}")))?;
             let proto_chunk = disk_proto::disk::DeltaChunk {

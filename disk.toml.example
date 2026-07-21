@@ -13,6 +13,11 @@ url     = "https://disk.example.com"
 # Per-node API key issued by AuthService.RegisterNode (DISK-0004).
 api_key = "REPLACE_ME"
 
+[vault]
+# Client-side E2EE (DISK-0015). When true, uploads encrypt before DeltaUpload.
+# Requires DISK_VAULT_PASSPHRASE and DISK_VAULT_SALT (hex) in the environment.
+e2ee_enabled = false
+
 [filter]
 # Skip files larger than this (megabytes). Omit to disable.
 max_file_size_mb = 200

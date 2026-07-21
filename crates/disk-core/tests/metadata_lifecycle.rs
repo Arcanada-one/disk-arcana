@@ -17,6 +17,7 @@ fn meta(path: &str, hash_byte: u8, size: u64) -> FileMeta {
         deleted: false,
         deleted_at: None,
         node_id: "node-A".into(),
+        encryption_nonce: None,
     }
 }
 
@@ -37,6 +38,16 @@ async fn upsert_then_get_round_trip() {
     assert_eq!(got.content_hash, [0x11; 32]);
     assert_eq!(got.size, 12);
     assert_eq!(got.path, PathBuf::from("notes/a.md"));
+}
+
+#[tokio::test]
+async fn encryption_nonce_round_trip() {
+    let db = fresh_db().await;
+    let mut m = meta("secret.bin", 0x99, 64);
+    m.encryption_nonce = Some(vec![0xAB; 24]);
+    db.upsert_file(&m).await.unwrap();
+    let got = db.get_file("secret.bin").await.unwrap().unwrap();
+    assert_eq!(got.encryption_nonce.as_deref(), Some([0xAB; 24].as_slice()));
 }
 
 #[tokio::test]
@@ -151,6 +162,7 @@ async fn node_baseline_upsert_and_load_round_trip() {
         deleted: false,
         deleted_at: None,
         node_id: "server".into(),
+        encryption_nonce: None,
     };
     let deleted_at_ts: i64 = 1_700_000_200;
     let tombstone = FileMeta {
@@ -163,6 +175,7 @@ async fn node_baseline_upsert_and_load_round_trip() {
         deleted: true,
         deleted_at: Some(deleted_at_ts),
         node_id: "client-baseline-test".into(),
+        encryption_nonce: None,
     };
 
     let baselines = vec![live.clone(), tombstone.clone()];
@@ -242,6 +255,7 @@ async fn files_rs_reads_back_deleted_flag() {
         deleted: true,
         deleted_at: Some(deleted_at_ts),
         node_id: "client-A".into(),
+        encryption_nonce: None,
     };
 
     db.upsert_file(&m).await.unwrap();
@@ -282,6 +296,7 @@ async fn files_rs_reads_back_deleted_flag() {
         deleted: false,
         deleted_at: None,
         node_id: "client-A".into(),
+        encryption_nonce: None,
     };
     db.upsert_file(&un_deleted).await.unwrap();
     let re_got = db.get_file("trash/gone.md").await.unwrap().unwrap();

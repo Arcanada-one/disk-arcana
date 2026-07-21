@@ -53,6 +53,9 @@ pub struct FileMeta {
     pub deleted_at: Option<i64>,
     /// Last writer node id.
     pub node_id: String,
+    /// XChaCha20 nonce when the indexed body is E2EE ciphertext (`None` = plaintext).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encryption_nonce: Option<Vec<u8>>,
 }
 
 /// Pair returned by the scanner when an inode survives a path change.

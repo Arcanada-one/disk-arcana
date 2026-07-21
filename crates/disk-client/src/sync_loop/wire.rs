@@ -25,6 +25,7 @@ use std::sync::Arc;
 use disk_core::filter::{Filter, FilterRules};
 use disk_core::scanner::FileScanner;
 use disk_core::types::{ConflictKind, ConflictRecord, FileMeta};
+use disk_core::{UploadPayload, VaultKey};
 use disk_proto::disk::{AclMismatchDetails, FileMetadata};
 use prost::Message;
 use tonic::{Code, Status};
@@ -120,6 +121,8 @@ pub struct RemoteSync<'a> {
     /// surface returns them.  Without this handle conflict detection is still
     /// functional — only the client-side index is missing.
     meta_db: Option<Arc<disk_core::MetaDb>>,
+    /// When set, uploads encrypt plaintext before `DeltaUpload` (DISK-0015).
+    e2ee_key: Option<VaultKey>,
 }
 
 impl<'a> RemoteSync<'a> {
@@ -133,6 +136,7 @@ impl<'a> RemoteSync<'a> {
             blob_cache: None,
             baselines: HashMap::new(),
             meta_db: None,
+            e2ee_key: None,
         }
     }
 
@@ -151,6 +155,7 @@ impl<'a> RemoteSync<'a> {
             blob_cache: None,
             baselines: HashMap::new(),
             meta_db: None,
+            e2ee_key: None,
         }
     }
 
@@ -161,6 +166,12 @@ impl<'a> RemoteSync<'a> {
     /// client-side `conflicts` index (queried by `GET /conflicts`) is missing.
     pub fn with_meta_db(mut self, db: Arc<disk_core::MetaDb>) -> Self {
         self.meta_db = Some(db);
+        self
+    }
+
+    /// Enable client-side E2EE for the upload path (DISK-0015 slice 2).
+    pub fn with_e2ee_key(mut self, key: VaultKey) -> Self {
+        self.e2ee_key = Some(key);
         self
     }
 
@@ -224,6 +235,7 @@ fn file_meta_to_proto(m: &FileMeta) -> FileMetadata {
         deleted: m.deleted,
         deleted_at: m.deleted_at.unwrap_or(0),
         node_id: m.node_id.clone(),
+        encryption_nonce: m.encryption_nonce.clone().unwrap_or_default(),
         ..Default::default()
     }
 }
@@ -306,16 +318,55 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                         continue;
                     }
                 };
+                let payload = if let Some(ref key) = self.e2ee_key {
+                    match UploadPayload::from_plaintext_encrypted(&bytes, key) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            tracing::warn!(
+                                path = %to_upload.path,
+                                error = %e,
+                                "upload skipped: E2EE encrypt failed"
+                            );
+                            continue;
+                        }
+                    }
+                } else {
+                    UploadPayload::from_plaintext(&bytes)
+                };
                 // DISK-0064: explicit match instead of `let _ = ...` so that
                 // a transport error is surfaced as a warning, not swallowed.
                 // A failed upload is a pure no-op; the server never saw the
                 // bytes, so the next cycle will simply request it again.
                 match self
                     .client
-                    .delta_upload(&self.share, &to_upload.path, &bytes)
+                    .delta_upload(&self.share, &to_upload.path, &payload)
                     .await
                 {
-                    Ok(_) => {}
+                    Ok(_) => {
+                        if !payload.encryption_nonce.is_empty() {
+                            if let Some(db) = &self.meta_db {
+                                let meta = FileMeta {
+                                    path: std::path::PathBuf::from(&to_upload.path),
+                                    content_hash: payload.content_hash,
+                                    size: payload.wire_bytes.len() as u64,
+                                    mtime_ns: 0,
+                                    inode: None,
+                                    vector_clock: disk_core::VectorClock::default(),
+                                    deleted: false,
+                                    deleted_at: None,
+                                    node_id: self.node_id.clone(),
+                                    encryption_nonce: Some(payload.encryption_nonce.clone()),
+                                };
+                                if let Err(e) = db.upsert_file(&meta).await {
+                                    tracing::warn!(
+                                        path = %to_upload.path,
+                                        error = %e,
+                                        "upload: failed to persist encryption_nonce (non-fatal)"
+                                    );
+                                }
+                            }
+                        }
+                    }
                     Err(e) => {
                         tracing::warn!(
                             path = %to_upload.path,
@@ -393,6 +444,7 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                     deleted: false,
                     deleted_at: None,
                     node_id: self.node_id.clone(),
+                    encryption_nonce: None,
                 });
             }
 
@@ -615,6 +667,7 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                                 .as_nanos() as i64,
                         ),
                         node_id: self.node_id.clone(),
+                        encryption_nonce: None,
                     });
                 }
 
@@ -733,6 +786,7 @@ mod tests {
             deleted: false,
             deleted_at: None,
             node_id: "client-a".into(),
+            encryption_nonce: None,
         };
         let proto = file_meta_to_proto(&meta);
         assert_eq!(proto.path, "notes/hello.md");

@@ -64,6 +64,7 @@ mod tests {
             deleted: false,
             deleted_at: None,
             node_id: "n".into(),
+            encryption_nonce: None,
         };
         assert_eq!(fast_path_hash(Some(&prior), 10, 1000), Some([42u8; 32]));
         assert_eq!(fast_path_hash(Some(&prior), 11, 1000), None);

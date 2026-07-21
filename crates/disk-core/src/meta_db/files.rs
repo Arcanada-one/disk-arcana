@@ -35,7 +35,8 @@ impl MetaDb {
                 vector_clock = ?7,
                 updated_at   = ?8,
                 deleted      = ?9,
-                deleted_at   = ?10
+                deleted_at   = ?10,
+                encryption_nonce = ?11
             WHERE vault_id = ?1 AND path = ?2 AND tenant_id IS NULL
             "#,
         )
@@ -49,6 +50,7 @@ impl MetaDb {
         .bind(now)
         .bind(deleted_int)
         .bind(meta.deleted_at)
+        .bind(meta.encryption_nonce.as_deref())
         .execute(&self.pool)
         .await?;
 
@@ -61,8 +63,8 @@ impl MetaDb {
             INSERT INTO files (
                 tenant_id, vault_id, path, content_hash, size, mtime_ns, inode,
                 vector_clock, sync_state, last_synced, deleted, deleted_at,
-                created_at, updated_at
-            ) VALUES (NULL, ?1, ?2, ?3, ?4, ?5, ?6, ?7, 'clean', NULL, ?8, ?9, ?10, ?10)
+                encryption_nonce, created_at, updated_at
+            ) VALUES (NULL, ?1, ?2, ?3, ?4, ?5, ?6, ?7, 'clean', NULL, ?8, ?9, ?10, ?11, ?11)
             "#,
         )
         .bind(VAULT_DEFAULT)
@@ -74,6 +76,7 @@ impl MetaDb {
         .bind(vc_json)
         .bind(deleted_int)
         .bind(meta.deleted_at)
+        .bind(meta.encryption_nonce.as_deref())
         .bind(now)
         .execute(&self.pool)
         .await?;
@@ -84,7 +87,8 @@ impl MetaDb {
     pub async fn get_file(&self, path: &str) -> Result<Option<FileMeta>, MetaDbError> {
         let row = sqlx::query(
             r#"
-            SELECT path, content_hash, size, mtime_ns, inode, vector_clock, deleted, deleted_at
+            SELECT path, content_hash, size, mtime_ns, inode, vector_clock, deleted, deleted_at,
+                   encryption_nonce
             FROM files
             WHERE vault_id = ?1 AND path = ?2
             "#,
@@ -112,7 +116,8 @@ impl MetaDb {
     pub async fn list_all_files(&self) -> Result<Vec<FileMeta>, MetaDbError> {
         let rows = sqlx::query(
             r#"
-            SELECT path, content_hash, size, mtime_ns, inode, vector_clock, deleted, deleted_at
+            SELECT path, content_hash, size, mtime_ns, inode, vector_clock, deleted, deleted_at,
+                   encryption_nonce
             FROM files
             WHERE vault_id = ?1
             ORDER BY path ASC
@@ -135,6 +140,7 @@ fn row_to_meta(row: sqlx::sqlite::SqliteRow) -> Result<FileMeta, MetaDbError> {
     let vector_clock_json: String = row.try_get("vector_clock")?;
     let deleted_int: i64 = row.try_get("deleted")?;
     let deleted_at: Option<i64> = row.try_get("deleted_at")?;
+    let encryption_nonce: Option<Vec<u8>> = row.try_get("encryption_nonce")?;
 
     if content_hash_blob.len() != 32 {
         return Err(MetaDbError::Invalid(format!(
@@ -157,6 +163,7 @@ fn row_to_meta(row: sqlx::sqlite::SqliteRow) -> Result<FileMeta, MetaDbError> {
         deleted: deleted_int != 0,
         deleted_at,
         node_id: String::new(),
+        encryption_nonce,
     })
 }
 

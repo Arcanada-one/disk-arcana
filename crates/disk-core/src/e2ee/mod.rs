@@ -5,8 +5,10 @@
 //! `blake3(ciphertext)` — not the plaintext digest.
 
 mod error;
+mod upload;
 
 pub use error::E2eeError;
+pub use upload::UploadPayload;
 
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::aead::rand_core::RngCore;

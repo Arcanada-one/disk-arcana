@@ -15,6 +15,7 @@ pub mod keychain;
 pub mod mtls;
 pub mod rest_api;
 pub mod sync_loop;
+pub mod vault_key;
 pub mod watcher;
 
 pub use blob_cache::BlobCache;
@@ -42,6 +43,7 @@ pub use sync_loop::{
     classify_client_error, classify_tonic_status, Backoff, LoopError, LoopState, LoopTrigger,
     RemoteSync, SyncLoop, SyncTransport, BACKOFF_BASE, BACKOFF_CAP, BACKOFF_JITTER, POLL_INTERVAL,
 };
+pub use vault_key::load_vault_key_from_env;
 pub use watcher::{
     translate_notify_event, FsEvent, FsEventDebouncer, FsWatcher, WatcherError,
     DEFAULT_DEBOUNCE_WINDOW,
