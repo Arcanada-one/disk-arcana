@@ -85,6 +85,8 @@ jobs:
         run: sh -n scripts/install.sh
       - name: OWASP evidence paths (DISK-0012)
         run: bash scripts/validate-owasp-evidence.sh
+      - name: load-test-harness.sh syntax (DISK-0012 G3)
+        run: sh -n scripts/load-test-harness.sh
       - name: Obsidian plugin unit tests (DISK-0008)
         run: |
           set -euo pipefail
@@ -185,6 +187,27 @@ jobs:
             echo "==> fuzz $target (20s)"
             cargo +nightly fuzz run "$target" -- -max_total_time=20
           done
+
+  load-harness-smoke:
+    name: Load harness smoke (1K, DISK-0012)
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 1K scanner load smoke
+        run: bash scripts/load-test-harness.sh smoke
+
+  load-harness-scale:
+    name: Load harness scale (10K, G3/T6.2)
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 10K scanner load harness
+        run: bash scripts/load-test-harness.sh scale
 
   build:
     name: Build (${{ matrix.target }})
