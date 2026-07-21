@@ -1,6 +1,6 @@
 # DISK-0024 — Trash / Recycle Bin
 
-**Status:** slice 2 on DEVS — dashboard recycle bin UI.  
+**Status:** slice 3 on DEVS — permanent delete + scheduled prune.  
 **Parent:** DISK-0001 commercial / SaaS track.  
 **Tracking:** DISK-0024 in Datarim backlog.
 
@@ -9,11 +9,12 @@
 | Slice | In scope | Out of scope |
 |-------|----------|--------------|
 | 1 (merged #84) | List trashed files (`deleted=1`), restore (undelete), tier retention auto-prune on list, `disk trash list\|restore` CLI | Dashboard undelete UI, permanent empty-trash button, cross-vault moves |
-| 2 (this PR) | Dashboard recycle bin panel: list, restore, retention banner, purge notice | Scheduled purge jobs, manual empty-trash |
+| 2 (merged #85) | Dashboard recycle bin panel: list, restore, retention banner, purge notice | Scheduled purge jobs, manual empty-trash |
+| 3 (this PR) | `POST /trash/delete`, `POST /trash/empty`, `disk trash delete\|empty`, dashboard Delete + Empty bin, hourly scheduled prune (`DISK_TRASH_PRUNE_INTERVAL_SECS`, default 3600) | Cross-vault moves, billing-gated trash limits |
 
 ## Retention by tier
 
-Trash items older than `max_age_secs` are permanently removed from the `files` index on each list request (`prune_expired_trash`).
+Trash items older than `max_age_secs` are permanently removed from the `files` index on each list request (`prune_expired_trash`) and by the background scheduler.
 
 | Tier | Max age |
 |------|---------|
@@ -29,6 +30,8 @@ Aligns with per-file version history age caps (DISK-0020).
 |--------|------|------|-------|
 | GET | `/trash?vault_id=&limit=&offset=` | Bearer JWT | Lists soft-deleted files; prunes expired rows first |
 | POST | `/trash/restore` | Bearer JWT | Body: `{ path, vault_id }` — undelete and rewrite live file when blob available |
+| POST | `/trash/delete` | Bearer JWT | Body: `{ path, vault_id }` — permanently remove one trashed file |
+| POST | `/trash/empty` | Bearer JWT | Body: `{ vault_id, confirm: true }` — permanently remove all trashed files in vault |
 
 Mounted on the health HTTP listener when `DISK_AUTH_MODE=enforce`.
 
@@ -37,6 +40,8 @@ Mounted on the health HTTP listener when `DISK_AUTH_MODE=enforce`.
 ```bash
 disk trash list --vault default
 disk trash restore --path docs/readme.md --vault default
+disk trash delete --path docs/readme.md --vault default
+disk trash empty --vault default --yes
 ```
 
 Env: `DISK_API_BASE`, `DISK_ACCESS_TOKEN`.
@@ -48,8 +53,9 @@ Env: `DISK_API_BASE`, `DISK_ACCESS_TOKEN`.
 
 ## Tests
 
-- `crates/disk-core/src/meta_db/trash.rs` — list/restore/prune unit test
-- `deploy/www/dashboard/index.html` — recycle bin panel (list, restore, retention)
+- `crates/disk-core/src/meta_db/trash.rs` — list/restore/prune/delete/empty unit tests
+- `crates/disk-server/src/trash/scheduler.rs` — scheduled prune integration test
+- `deploy/www/dashboard/index.html` — recycle bin panel (list, restore, delete, empty)
 
 ## References
 

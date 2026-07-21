@@ -94,6 +94,37 @@ pub struct RestoreTrashResponse {
     pub message: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct DeleteTrashRequest {
+    pub path: String,
+    #[serde(default = "default_vault")]
+    pub vault_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeleteTrashResponse {
+    pub deleted: bool,
+    pub path: String,
+    pub vault_id: String,
+    pub message: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EmptyTrashRequest {
+    #[serde(default = "default_vault")]
+    pub vault_id: String,
+    /// Must be `true` to permanently delete all trashed files in the vault.
+    pub confirm: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct EmptyTrashResponse {
+    pub emptied: bool,
+    pub vault_id: String,
+    pub deleted_count: u32,
+    pub message: String,
+}
+
 pub async fn list_trash(
     axum::extract::State(state): axum::extract::State<std::sync::Arc<AuthHttpState>>,
     headers: HeaderMap,
@@ -327,6 +358,100 @@ async fn resolve_trash_blob(
     }
 
     None
+}
+
+pub async fn delete_trash(
+    axum::extract::State(state): axum::extract::State<std::sync::Arc<AuthHttpState>>,
+    headers: HeaderMap,
+    Json(body): Json<DeleteTrashRequest>,
+) -> impl IntoResponse {
+    match delete_trash_inner(&state, &headers, body).await {
+        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Err((code, msg)) => (code, Json(json!({ "error": msg }))).into_response(),
+    }
+}
+
+async fn delete_trash_inner(
+    state: &AuthHttpState,
+    headers: &HeaderMap,
+    body: DeleteTrashRequest,
+) -> Result<DeleteTrashResponse, (StatusCode, &'static str)> {
+    let path = normalize_rel_path(&body.path).map_err(|msg| (StatusCode::BAD_REQUEST, msg))?;
+
+    let claims = verify_bearer(state, headers).await?;
+    let user = resolve_user_from_access(state, &claims).await?;
+    let tenant_key = Some(user.tenant_id.as_str());
+
+    let db = state
+        .tenant_router
+        .tenant_data(tenant_key)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
+
+    let deleted = db
+        .delete_trash_item(tenant_key, &body.vault_id, &path)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
+
+    if !deleted {
+        return Err((StatusCode::NOT_FOUND, "path not in trash"));
+    }
+
+    Ok(DeleteTrashResponse {
+        deleted: true,
+        path: path.clone(),
+        vault_id: body.vault_id,
+        message: format!("Permanently deleted {path} from trash"),
+    })
+}
+
+pub async fn empty_trash(
+    axum::extract::State(state): axum::extract::State<std::sync::Arc<AuthHttpState>>,
+    headers: HeaderMap,
+    Json(body): Json<EmptyTrashRequest>,
+) -> impl IntoResponse {
+    match empty_trash_inner(&state, &headers, body).await {
+        Ok(resp) => (StatusCode::OK, Json(resp)).into_response(),
+        Err((code, msg)) => (code, Json(json!({ "error": msg }))).into_response(),
+    }
+}
+
+async fn empty_trash_inner(
+    state: &AuthHttpState,
+    headers: &HeaderMap,
+    body: EmptyTrashRequest,
+) -> Result<EmptyTrashResponse, (StatusCode, &'static str)> {
+    if !body.confirm {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "confirm must be true to empty trash",
+        ));
+    }
+
+    let claims = verify_bearer(state, headers).await?;
+    let user = resolve_user_from_access(state, &claims).await?;
+    let tenant_key = Some(user.tenant_id.as_str());
+
+    let db = state
+        .tenant_router
+        .tenant_data(tenant_key)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
+
+    let deleted_count = db
+        .empty_trash(tenant_key, &body.vault_id)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "database error"))?;
+
+    Ok(EmptyTrashResponse {
+        emptied: true,
+        vault_id: body.vault_id.clone(),
+        deleted_count,
+        message: format!(
+            "Permanently deleted {deleted_count} file(s) from vault {}",
+            body.vault_id
+        ),
+    })
 }
 
 #[cfg(test)]

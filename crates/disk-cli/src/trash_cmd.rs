@@ -159,3 +159,49 @@ pub async fn run_trash_restore(
     );
     Ok(())
 }
+
+/// `disk trash delete --path <rel> [--vault default]`.
+pub async fn run_trash_delete(
+    api: Option<&str>,
+    token: Option<&str>,
+    vault: &str,
+    path: &str,
+) -> Result<()> {
+    let base = api_base(api);
+    let token = bearer_token(token)?;
+    let data = api_post(
+        &base,
+        &token,
+        "/trash/delete",
+        serde_json::json!({ "vault_id": vault, "path": path }),
+    )
+    .await?;
+    println!(
+        "{}",
+        data["message"].as_str().unwrap_or("deleted from trash")
+    );
+    Ok(())
+}
+
+/// `disk trash empty [--vault default]`.
+pub async fn run_trash_empty(
+    api: Option<&str>,
+    token: Option<&str>,
+    vault: &str,
+    confirm: bool,
+) -> Result<()> {
+    if !confirm {
+        anyhow::bail!("pass --yes to permanently empty the recycle bin");
+    }
+    let base = api_base(api);
+    let token = bearer_token(token)?;
+    let data = api_post(
+        &base,
+        &token,
+        "/trash/empty",
+        serde_json::json!({ "vault_id": vault, "confirm": true }),
+    )
+    .await?;
+    println!("{}", data["message"].as_str().unwrap_or("trash emptied"));
+    Ok(())
+}
