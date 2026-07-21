@@ -26,8 +26,17 @@ pub struct NewAgentWebhook<'a> {
     pub vault_id: &'a str,
     pub url: &'a str,
     pub secret_hash: &'a [u8; 32],
+    pub signing_secret: &'a str,
     pub events: &'a [String],
     pub label: Option<&'a str>,
+}
+
+/// Target for outbound webhook delivery (includes signing key).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentWebhookDeliveryTarget {
+    pub id: String,
+    pub url: String,
+    pub signing_secret: String,
 }
 
 /// Agent-facing revision counter for optimistic writes.
@@ -57,8 +66,9 @@ impl MetaDb {
         sqlx::query(
             r#"
             INSERT INTO agent_webhooks (
-                id, tenant_id, vault_id, url, secret_hash, events_json, label, enabled, created_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8)
+                id, tenant_id, vault_id, url, secret_hash, signing_secret,
+                events_json, label, enabled, created_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9)
             "#,
         )
         .bind(webhook.id)
@@ -66,6 +76,7 @@ impl MetaDb {
         .bind(webhook.vault_id)
         .bind(webhook.url)
         .bind(webhook.secret_hash.as_slice())
+        .bind(webhook.signing_secret)
         .bind(events_json)
         .bind(webhook.label)
         .bind(now)
@@ -128,6 +139,46 @@ impl MetaDb {
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected() > 0)
+    }
+
+    /// Enabled webhooks for a tenant/vault that subscribe to `event`.
+    pub async fn list_agent_webhooks_for_event(
+        &self,
+        tenant_id: Option<&str>,
+        vault_id: &str,
+        event: &str,
+    ) -> Result<Vec<AgentWebhookDeliveryTarget>, MetaDbError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, url, signing_secret, events_json
+            FROM agent_webhooks
+            WHERE tenant_id IS ?1 AND vault_id = ?2 AND enabled = 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(vault_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            let events_json: String = row.try_get("events_json")?;
+            let events: Vec<String> = serde_json::from_str(&events_json)
+                .map_err(|e| MetaDbError::Invalid(format!("events json: {e}")))?;
+            if !events.iter().any(|e| e == event) {
+                continue;
+            }
+            let signing_secret: Option<String> = row.try_get("signing_secret")?;
+            let Some(signing_secret) = signing_secret.filter(|s| !s.is_empty()) else {
+                continue;
+            };
+            out.push(AgentWebhookDeliveryTarget {
+                id: row.try_get("id")?,
+                url: row.try_get("url")?,
+                signing_secret,
+            });
+        }
+        Ok(out)
     }
 
     pub async fn get_agent_write_revision(
@@ -256,6 +307,7 @@ mod tests {
             vault_id: "default",
             url: "https://agent.example/hook",
             secret_hash: &secret_hash,
+            signing_secret: "whsec_test",
             events: &["agent.write_ok".into()],
             label: Some("dreamer"),
         })

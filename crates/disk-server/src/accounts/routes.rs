@@ -22,6 +22,7 @@ use super::jwt_mode::JwtMode;
 use super::jwt_service::{JwtConfig, VerifiedAccess};
 use super::oauth::OAuthConfig;
 use super::oauth_mode::OAuthMode;
+use crate::agents::AgentWebhookDispatcher;
 
 #[derive(Clone)]
 pub struct AuthHttpState {
@@ -34,6 +35,7 @@ pub struct AuthHttpState {
     pub jwt: JwtConfig,
     pub oauth: OAuthConfig,
     pub email_verify: EmailVerifyConfig,
+    pub agent_webhooks: AgentWebhookDispatcher,
 }
 
 /// Build HTTP auth state for integration tests (DISK-0016+).
@@ -70,6 +72,7 @@ pub fn auth_http_state_for_tests(meta_db: MetaDb) -> AuthHttpState {
             public_base_url: None,
             token_ttl_secs: 86_400,
         },
+        agent_webhooks: AgentWebhookDispatcher::noop(),
     }
 }
 

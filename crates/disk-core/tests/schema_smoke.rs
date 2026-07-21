@@ -516,3 +516,24 @@ async fn migration_020_agent_api_tables_exist() {
         );
     }
 }
+
+#[tokio::test]
+async fn migration_021_agent_webhook_signing_secret_column_exists() {
+    let dir = tempdir().expect("tempdir");
+    let db = MetaDb::open(&dir.path().join("agent-api-021.sqlite"))
+        .await
+        .expect("open");
+
+    let columns: Vec<String> = sqlx::query("PRAGMA table_info(agent_webhooks)")
+        .fetch_all(db.pool())
+        .await
+        .expect("table_info")
+        .iter()
+        .map(|r| r.get::<String, _>("name"))
+        .collect();
+
+    assert!(
+        columns.iter().any(|c| c == "signing_secret"),
+        "signing_secret column must exist after migration 021; got {columns:?}"
+    );
+}

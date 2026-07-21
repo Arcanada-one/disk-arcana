@@ -43,7 +43,10 @@ pub use acl::{
     CertFingerprint, EnforcedRole, EnforcementTable, GpgVerifier, LoadOutcome, NoopVerifier,
     RevokedSignerVerifier, SignatureVerifier, UnhealthyReason,
 };
-pub use agents::{agent_write, delete_webhook, get_revision, list_webhooks, register_webhook};
+pub use agents::{
+    agent_write, delete_webhook, get_revision, list_webhooks, register_webhook,
+    spawn_agent_webhook_dispatcher, AgentWebhookDispatcher, AgentWebhookJob,
+};
 pub use audit::{AuditEmitter, AuditError, AuditEvent, AuditKind};
 pub use auth::{ApiKey, AuthStore, CertIdentity, SessionToken};
 pub use billing::webhook::WebhookState;

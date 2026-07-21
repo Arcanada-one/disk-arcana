@@ -183,8 +183,12 @@ async fn main() -> anyhow::Result<()> {
         let key_bytes = key.into_bytes();
         let tenant_router = meta_router.clone();
         let version_blobs = disk_core::ContentBlobStore::new(cfg.sync_root.join(".version-blobs"));
+        let control_db = meta_router.control();
+        let http_client = reqwest::Client::new();
+        let agent_webhooks =
+            disk_server::spawn_agent_webhook_dispatcher(http_client, control_db.clone());
         Some(Arc::new(disk_server::AuthHttpState {
-            meta_db: meta_router.control(),
+            meta_db: control_db,
             tenant_router,
             sync_root: cfg.sync_root.clone(),
             version_blobs,
@@ -216,6 +220,7 @@ async fn main() -> anyhow::Result<()> {
                 public_base_url: cfg.email_verify_base_url.clone(),
                 token_ttl_secs: cfg.email_verify_ttl_secs,
             },
+            agent_webhooks,
         }))
     } else {
         None

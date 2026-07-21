@@ -14,6 +14,7 @@
 #![forbid(unsafe_code)]
 
 pub mod accounts;
+pub mod agents;
 pub mod archive;
 pub mod billing;
 pub mod config;
