@@ -25,7 +25,7 @@ use std::sync::Arc;
 use disk_core::filter::{Filter, FilterRules};
 use disk_core::scanner::FileScanner;
 use disk_core::types::{ConflictKind, ConflictRecord, FileMeta};
-use disk_core::{UploadPayload, VaultKey};
+use disk_core::{overlay_scanned_meta, E2eeCachedWire, UploadPayload, VaultKey};
 use disk_proto::disk::{AclMismatchDetails, FileMetadata};
 use prost::Message;
 use tonic::{Code, Status};
@@ -123,6 +123,8 @@ pub struct RemoteSync<'a> {
     meta_db: Option<Arc<disk_core::MetaDb>>,
     /// When set, uploads encrypt plaintext before `DeltaUpload` (DISK-0015).
     e2ee_key: Option<VaultKey>,
+    /// In-memory stable ciphertext index when MetaDb is absent or cold (slice 3).
+    e2ee_wire_cache: HashMap<String, E2eeCachedWire>,
 }
 
 impl<'a> RemoteSync<'a> {
@@ -137,6 +139,7 @@ impl<'a> RemoteSync<'a> {
             baselines: HashMap::new(),
             meta_db: None,
             e2ee_key: None,
+            e2ee_wire_cache: HashMap::new(),
         }
     }
 
@@ -156,6 +159,7 @@ impl<'a> RemoteSync<'a> {
             baselines: HashMap::new(),
             meta_db: None,
             e2ee_key: None,
+            e2ee_wire_cache: HashMap::new(),
         }
     }
 
@@ -216,6 +220,140 @@ impl<'a> RemoteSync<'a> {
     pub fn has_meta_db(&self) -> bool {
         self.meta_db.is_some()
     }
+
+    /// DISK-0015 slice 3: rewrite scanned plaintext hashes to ciphertext wire
+    /// indices before `ExchangeState`, reusing MetaDb / in-memory cache when
+    /// `(mtime_ns, size)` are unchanged.
+    async fn overlay_e2ee_exchange_files(&mut self, metas: &mut Vec<FileMeta>) {
+        let Some(key) = self.e2ee_key.clone() else {
+            return;
+        };
+
+        let mut db_index: HashMap<String, FileMeta> = HashMap::new();
+        if let Some(db) = &self.meta_db {
+            if let Ok(rows) = db.list_all_files().await {
+                for row in rows {
+                    db_index.insert(vault_relative_path_key(&row.path), row);
+                }
+            }
+        }
+
+        metas.retain_mut(|meta| {
+            let path_str = vault_relative_path_key(&meta.path);
+            let cached = db_index
+                .get(&path_str)
+                .and_then(E2eeCachedWire::from_file_meta)
+                .or_else(|| self.e2ee_wire_cache.get(&path_str).cloned());
+
+            if let Some(ref c) = cached {
+                if c.matches_scan(meta) {
+                    match overlay_scanned_meta(meta, &key, Some(c), &[]) {
+                        Ok(None) => return true,
+                        Ok(Some(_)) => unreachable!("cache hit must not re-encrypt"),
+                        Err(e) => {
+                            tracing::warn!(
+                                path = %path_str,
+                                error = %e,
+                                "E2EE exchange overlay: cache apply failed"
+                            );
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            let abs = self.scan_root.join(&meta.path);
+            let plaintext = match std::fs::read(&abs) {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!(
+                        path = %path_str,
+                        error = %e,
+                        "E2EE exchange overlay: cannot read file"
+                    );
+                    return false;
+                }
+            };
+
+            match overlay_scanned_meta(meta, &key, cached.as_ref(), &plaintext) {
+                Ok(Some(fresh)) => {
+                    self.e2ee_wire_cache.insert(path_str, fresh);
+                    true
+                }
+                Ok(None) => true,
+                Err(e) => {
+                    tracing::warn!(
+                        path = %path_str,
+                        error = %e,
+                        "E2EE exchange overlay: encrypt failed"
+                    );
+                    false
+                }
+            }
+        });
+    }
+
+    async fn persist_e2ee_wire_meta(
+        &mut self,
+        rel_path: &str,
+        content_hash: [u8; 32],
+        encryption_nonce: Vec<u8>,
+        mtime_ns: i64,
+        plaintext_size: u64,
+    ) {
+        let cached = E2eeCachedWire {
+            content_hash,
+            encryption_nonce: encryption_nonce.clone(),
+            mtime_ns,
+            size: plaintext_size,
+        };
+        self.e2ee_wire_cache.insert(rel_path.to_owned(), cached);
+
+        if let Some(db) = &self.meta_db {
+            let meta = FileMeta {
+                path: std::path::PathBuf::from(rel_path),
+                content_hash,
+                size: plaintext_size,
+                mtime_ns,
+                inode: None,
+                vector_clock: disk_core::VectorClock::default(),
+                deleted: false,
+                deleted_at: None,
+                node_id: self.node_id.clone(),
+                encryption_nonce: Some(encryption_nonce),
+            };
+            if let Err(e) = db.upsert_file(&meta).await {
+                tracing::warn!(
+                    path = %rel_path,
+                    error = %e,
+                    "E2EE: failed to persist wire index (non-fatal)"
+                );
+            }
+        }
+    }
+}
+
+fn vault_relative_path_key(path: &std::path::Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+#[cfg(unix)]
+fn file_mtime_ns(path: &std::path::Path) -> i64 {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path)
+        .map(|m| m.mtime() * 1_000_000_000 + m.mtime_nsec())
+        .unwrap_or(0)
+}
+
+#[cfg(not(unix))]
+fn file_mtime_ns(path: &std::path::Path) -> i64 {
+    use std::time::UNIX_EPOCH;
+    std::fs::metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos() as i64)
+        .unwrap_or(0)
 }
 
 /// Convert a domain [`FileMeta`] into its proto [`FileMetadata`] equivalent.
@@ -263,7 +401,12 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                 self.node_id.clone(),
             );
             match scanner.scan() {
-                Ok(metas) => metas.iter().map(file_meta_to_proto).collect(),
+                Ok(mut metas) => {
+                    if self.e2ee_key.is_some() {
+                        self.overlay_e2ee_exchange_files(&mut metas).await;
+                    }
+                    metas.iter().map(file_meta_to_proto).collect()
+                }
                 Err(_) => Vec::new(),
             }
         };
@@ -344,27 +487,16 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                 {
                     Ok(_) => {
                         if !payload.encryption_nonce.is_empty() {
-                            if let Some(db) = &self.meta_db {
-                                let meta = FileMeta {
-                                    path: std::path::PathBuf::from(&to_upload.path),
-                                    content_hash: payload.content_hash,
-                                    size: payload.wire_bytes.len() as u64,
-                                    mtime_ns: 0,
-                                    inode: None,
-                                    vector_clock: disk_core::VectorClock::default(),
-                                    deleted: false,
-                                    deleted_at: None,
-                                    node_id: self.node_id.clone(),
-                                    encryption_nonce: Some(payload.encryption_nonce.clone()),
-                                };
-                                if let Err(e) = db.upsert_file(&meta).await {
-                                    tracing::warn!(
-                                        path = %to_upload.path,
-                                        error = %e,
-                                        "upload: failed to persist encryption_nonce (non-fatal)"
-                                    );
-                                }
-                            }
+                            let mtime_ns = file_mtime_ns(&file_path);
+                            let plaintext_size = bytes.len() as u64;
+                            self.persist_e2ee_wire_meta(
+                                &to_upload.path,
+                                payload.content_hash,
+                                payload.encryption_nonce.clone(),
+                                mtime_ns,
+                                plaintext_size,
+                            )
+                            .await;
                         }
                     }
                     Err(e) => {

@@ -5,9 +5,11 @@
 //! `blake3(ciphertext)` — not the plaintext digest.
 
 mod error;
+mod exchange_overlay;
 mod upload;
 
 pub use error::E2eeError;
+pub use exchange_overlay::{overlay_scanned_meta, E2eeCachedWire};
 pub use upload::UploadPayload;
 
 use argon2::{Algorithm, Argon2, Params, Version};
