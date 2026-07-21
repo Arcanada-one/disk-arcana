@@ -154,6 +154,10 @@ pub struct ServerConfig {
     pub oauth_client_secret: Option<String>,
     pub oauth_redirect_uri: Option<String>,
     pub oauth_public_base_url: Option<String>,
+    /// Email verification mode (DISK-0016 slice 3).
+    pub email_verify_mode: crate::accounts::EmailVerifyMode,
+    pub email_verify_base_url: Option<String>,
+    pub email_verify_ttl_secs: u64,
 }
 
 impl ServerConfig {
@@ -301,6 +305,32 @@ impl ServerConfig {
             ));
         }
 
+        let email_verify_mode_raw =
+            std::env::var("DISK_EMAIL_VERIFY_MODE").unwrap_or_else(|_| "disabled".to_string());
+        let email_verify_mode = crate::accounts::EmailVerifyMode::parse(&email_verify_mode_raw)?;
+        let email_verify_base_url = std::env::var("DISK_EMAIL_VERIFY_BASE_URL")
+            .ok()
+            .filter(|s| !s.is_empty());
+        let email_verify_ttl_secs = std::env::var("DISK_EMAIL_VERIFY_TTL_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(86_400);
+
+        if email_verify_mode.is_active() && !auth_mode.is_active() {
+            return Err(ConfigError::InvalidValue(
+                "DISK_EMAIL_VERIFY_MODE",
+                "email verification requires DISK_AUTH_MODE=enforce".into(),
+            ));
+        }
+        if email_verify_mode == crate::accounts::EmailVerifyMode::Stub
+            && email_verify_base_url.is_none()
+        {
+            return Err(ConfigError::InvalidValue(
+                "DISK_EMAIL_VERIFY_BASE_URL",
+                "required when DISK_EMAIL_VERIFY_MODE=stub".into(),
+            ));
+        }
+
         Ok(Self {
             bind_addr,
             enrollment_bind_addr,
@@ -338,6 +368,9 @@ impl ServerConfig {
             oauth_client_secret,
             oauth_redirect_uri,
             oauth_public_base_url,
+            email_verify_mode,
+            email_verify_base_url,
+            email_verify_ttl_secs,
         })
     }
 }

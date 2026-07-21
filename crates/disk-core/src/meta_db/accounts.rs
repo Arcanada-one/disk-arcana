@@ -149,6 +149,29 @@ impl MetaDb {
 
         Ok(row.map(|r| map_user_row(&r)))
     }
+
+    /// Mark a user's email as verified (or unverified for tests).
+    pub async fn set_email_verified(
+        &self,
+        user_id: &str,
+        verified: bool,
+    ) -> Result<(), MetaDbError> {
+        let now = unix_now();
+        let flag = if verified { 1 } else { 0 };
+        sqlx::query(
+            r#"
+            UPDATE user_accounts
+            SET email_verified = ?1, updated_at = ?2
+            WHERE id = ?3
+            "#,
+        )
+        .bind(flag)
+        .bind(now)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
 }
 
 fn map_user_row(r: &sqlx::sqlite::SqliteRow) -> UserAccount {

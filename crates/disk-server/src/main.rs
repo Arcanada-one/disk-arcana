@@ -192,6 +192,11 @@ async fn main() -> anyhow::Result<()> {
                 redirect_uri: cfg.oauth_redirect_uri.clone(),
                 public_base_url: cfg.oauth_public_base_url.clone(),
             },
+            email_verify: disk_server::EmailVerifyConfig {
+                mode: cfg.email_verify_mode,
+                public_base_url: cfg.email_verify_base_url.clone(),
+                token_ttl_secs: cfg.email_verify_ttl_secs,
+            },
         }))
     } else {
         None
