@@ -80,6 +80,27 @@ impl MetaDb {
         Ok(new_version_id)
     }
 
+    /// Count historical revisions for a path (excludes the live `files` row).
+    pub async fn count_file_versions(
+        &self,
+        tenant_id: Option<&str>,
+        vault_id: &str,
+        path: &str,
+    ) -> Result<u32, MetaDbError> {
+        let row: (i64,) = sqlx::query_as(
+            r#"
+            SELECT COUNT(*) FROM file_versions
+            WHERE tenant_id IS ?1 AND vault_id = ?2 AND path = ?3
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(vault_id)
+        .bind(path)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.0.max(0) as u32)
+    }
+
     /// List version history for a path (newest first).
     pub async fn list_file_versions(
         &self,
@@ -87,8 +108,10 @@ impl MetaDb {
         vault_id: &str,
         path: &str,
         limit: u32,
+        offset: u32,
     ) -> Result<Vec<FileVersionRow>, MetaDbError> {
         let cap = limit.clamp(1, 200);
+        let skip = offset.min(10_000);
         let rows = sqlx::query(
             r#"
             SELECT version_id, parent_version_id, path, content_hash, size, mtime_ns,
@@ -96,13 +119,14 @@ impl MetaDb {
             FROM file_versions
             WHERE tenant_id IS ?1 AND vault_id = ?2 AND path = ?3
             ORDER BY version_id DESC
-            LIMIT ?4
+            LIMIT ?4 OFFSET ?5
             "#,
         )
         .bind(tenant_id)
         .bind(vault_id)
         .bind(path)
         .bind(cap as i64)
+        .bind(skip as i64)
         .fetch_all(&self.pool)
         .await?;
 
@@ -469,7 +493,7 @@ mod tests {
         assert_eq!(v2, 2);
 
         let history = db
-            .list_file_versions(Some("t1"), "default", "a.md", 20)
+            .list_file_versions(Some("t1"), "default", "a.md", 20, 0)
             .await
             .unwrap();
         assert_eq!(history.len(), 1);

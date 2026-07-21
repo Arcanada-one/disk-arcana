@@ -159,14 +159,18 @@
         <ul id="conflict-list" class="text-sm text-slate-300 space-y-2"></ul>
       </div>
 
-      <div class="border border-slate-800 rounded-lg p-4">
+      <div class="border border-slate-800 rounded-lg p-4 overflow-x-auto">
         <h2 class="font-medium mb-1">File version history</h2>
-        <p class="text-sm text-slate-400 mb-3">List and restore prior revisions (retention depends on your plan tier).</p>
+        <p id="version-retention-hint" class="text-sm text-slate-400 mb-3">
+          List and restore prior revisions. Retention depends on your plan tier.
+        </p>
         <div class="flex flex-wrap gap-2 items-end mb-3">
           <label class="grid gap-1 text-sm">
             <span class="text-slate-400">Vault</span>
-            <input id="version-vault" type="text" value="default"
-              class="bg-slate-900 border border-slate-700 rounded px-3 py-2 w-32">
+            <select id="version-vault"
+              class="bg-slate-900 border border-slate-700 rounded px-3 py-2 min-w-[8rem]">
+              <option value="default">default</option>
+            </select>
           </label>
           <label class="grid gap-1 text-sm flex-1 min-w-[12rem]">
             <span class="text-slate-400">Path</span>
@@ -178,7 +182,33 @@
             List versions
           </button>
         </div>
-        <ul id="version-list" class="text-xs text-slate-400 space-y-2 hidden"></ul>
+        <p id="version-loading" class="text-sm text-slate-400 hidden mb-2">Loading version history…</p>
+        <p id="version-success" class="text-sm text-emerald-400 hidden mb-2"></p>
+        <table id="version-table" class="w-full text-sm text-left hidden">
+          <thead class="text-slate-400 border-b border-slate-800">
+            <tr>
+              <th class="py-2 pr-3 font-medium">Version</th>
+              <th class="py-2 pr-3 font-medium">Created</th>
+              <th class="py-2 pr-3 font-medium">Size</th>
+              <th class="py-2 pr-3 font-medium">Hash</th>
+              <th class="py-2 pr-3 font-medium">Author</th>
+              <th class="py-2 font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="version-list" class="text-slate-300"></tbody>
+        </table>
+        <div id="version-empty" class="text-sm text-slate-500 hidden"></div>
+        <div id="version-pagination" class="mt-3 flex flex-wrap items-center gap-2 hidden">
+          <button id="version-prev-btn" type="button"
+            class="text-xs border border-slate-700 rounded px-2 py-1 hover:border-emerald-500 disabled:opacity-40">
+            Previous
+          </button>
+          <span id="version-page-label" class="text-xs text-slate-500"></span>
+          <button id="version-next-btn" type="button"
+            class="text-xs border border-slate-700 rounded px-2 py-1 hover:border-emerald-500 disabled:opacity-40">
+            Next
+          </button>
+        </div>
       </div>
 
       <div class="border border-slate-800 rounded-lg p-4">
@@ -219,6 +249,8 @@
     const apiBase = (params.get('api') || localStorage.getItem('diskApiBase') || location.origin).replace(/\/$/, '');
     localStorage.setItem('diskApiBase', apiBase);
     document.getElementById('api-base-label').textContent = apiBase;
+
+    const versionPage = { offset: 0, limit: 10, hasMore: false, total: 0 };
 
     const tokenKey = 'diskAccessToken';
     const refreshKey = 'diskRefreshToken';
@@ -472,6 +504,126 @@
           }
         });
       });
+
+      populateVersionVaults(data.vaults);
+    }
+
+    function populateVersionVaults(vaults) {
+      const select = document.getElementById('version-vault');
+      const current = select.value || 'default';
+      const ids = vaults.length ? vaults.map(v => v.vault_id) : ['default'];
+      if (!ids.includes(current)) ids.unshift(current);
+      select.innerHTML = ids.map(id =>
+        '<option value="' + escapeHtml(id) + '"' + (id === current ? ' selected' : '') + '>' +
+          escapeHtml(id) + '</option>'
+      ).join('');
+    }
+
+    function hashPrefix(hex) {
+      return hex ? hex.slice(0, 8) + '…' : '—';
+    }
+
+    function versionRowHtml(v, path, vault, canRestore) {
+      const badge = v.is_current
+        ? '<span class="text-xs text-emerald-400 border border-emerald-800 rounded px-1.5 py-0.5 ml-1">current</span>'
+        : '';
+      const blobWarn = v.blob_available
+        ? ''
+        : '<span class="text-xs text-amber-400 ml-1">blob missing</span>';
+      const restoreBtn = canRestore && v.blob_available && !v.is_current
+        ? '<button type="button" data-version-id="' + v.version_id +
+          '" class="version-restore text-xs border border-slate-700 rounded px-2 py-0.5 hover:border-emerald-500">Restore</button>'
+        : '<span class="text-slate-600 text-xs">—</span>';
+      return '<tr class="border-b border-slate-800/60">' +
+        '<td class="py-2 pr-3"><code>v' + v.version_id + '</code>' + badge + blobWarn + '</td>' +
+        '<td class="py-2 pr-3 text-slate-400">' + formatDate(v.created_at) + '</td>' +
+        '<td class="py-2 pr-3 text-slate-400">' + formatBytes(v.size) + '</td>' +
+        '<td class="py-2 pr-3"><code class="text-xs" title="' + escapeHtml(v.content_hash_hex) + '">' +
+          hashPrefix(v.content_hash_hex) + '</code></td>' +
+        '<td class="py-2 pr-3 text-slate-400 text-xs">' + escapeHtml(v.created_by || '—') + '</td>' +
+        '<td class="py-2">' + restoreBtn + '</td></tr>';
+    }
+
+    function bindVersionRestore(path, vault) {
+      document.querySelectorAll('.version-restore').forEach(el => {
+        el.onclick = async () => {
+          const versionId = el.dataset.versionId;
+          if (!window.confirm('Restore version ' + versionId + ' of ' + path + '?')) return;
+          el.disabled = true;
+          clearDashError();
+          document.getElementById('version-success').classList.add('hidden');
+          try {
+            const res = await api('/versions/restore', {
+              method: 'POST',
+              body: JSON.stringify({ path, vault_id: vault, version_id: Number(versionId) }),
+            });
+            const ok = document.getElementById('version-success');
+            ok.textContent = res.message || ('Restored version ' + versionId);
+            ok.classList.remove('hidden');
+            await loadVersions(path, vault, versionPage.offset);
+          } catch (err) {
+            showDashError(err.message);
+            el.disabled = false;
+          }
+        };
+      });
+    }
+
+    async function loadVersions(path, vault, offset) {
+      const loading = document.getElementById('version-loading');
+      const table = document.getElementById('version-table');
+      const empty = document.getElementById('version-empty');
+      const pagination = document.getElementById('version-pagination');
+      const success = document.getElementById('version-success');
+      loading.classList.remove('hidden');
+      table.classList.add('hidden');
+      empty.classList.add('hidden');
+      pagination.classList.add('hidden');
+      success.classList.add('hidden');
+      clearDashError();
+      try {
+        const qs = new URLSearchParams({
+          path,
+          vault_id: vault,
+          limit: String(versionPage.limit),
+          offset: String(offset),
+        });
+        const data = await api('/versions?' + qs.toString());
+        versionPage.offset = data.pagination.offset;
+        versionPage.hasMore = data.pagination.has_more;
+        versionPage.total = data.pagination.total_historical;
+
+        document.getElementById('version-retention-hint').textContent =
+          'Plan: ' + data.plan_tier + ' · keep up to ' + data.retention.max_versions +
+          ' versions / ' + data.retention.max_age_days + ' days per file.';
+
+        const rows = [];
+        if (data.current) rows.push(versionRowHtml(data.current, path, vault, false));
+        data.versions.forEach(v => rows.push(versionRowHtml(v, path, vault, true)));
+
+        if (!rows.length) {
+          empty.textContent = data.file_exists
+            ? 'No prior revisions for this path (only the current version exists).'
+            : 'No file found at this path in vault "' + vault + '".';
+          empty.classList.remove('hidden');
+        } else {
+          document.getElementById('version-list').innerHTML = rows.join('');
+          table.classList.remove('hidden');
+          bindVersionRestore(path, vault);
+        }
+
+        if (data.pagination.total_historical > versionPage.limit || offset > 0) {
+          pagination.classList.remove('hidden');
+          const page = Math.floor(offset / versionPage.limit) + 1;
+          const pages = Math.max(1, Math.ceil(data.pagination.total_historical / versionPage.limit));
+          document.getElementById('version-page-label').textContent =
+            'Page ' + page + ' of ' + pages + ' (' + data.pagination.total_historical + ' historical)';
+          document.getElementById('version-prev-btn').disabled = offset === 0;
+          document.getElementById('version-next-btn').disabled = !data.pagination.has_more;
+        }
+      } finally {
+        loading.classList.add('hidden');
+      }
     }
 
     function escapeHtml(s) {
@@ -628,7 +780,6 @@
 
     document.getElementById('version-list-btn').onclick = async () => {
       const btn = document.getElementById('version-list-btn');
-      const list = document.getElementById('version-list');
       const path = document.getElementById('version-path').value.trim();
       const vault = document.getElementById('version-vault').value.trim() || 'default';
       if (!path) {
@@ -636,37 +787,36 @@
         return;
       }
       btn.disabled = true;
-      clearDashError();
+      versionPage.offset = 0;
       try {
-        const data = await api('/versions?path=' + encodeURIComponent(path) + '&vault_id=' + encodeURIComponent(vault));
-        if (!data.versions.length) {
-          list.innerHTML = '<li>No prior versions (current v' + (data.current_version_id || '?') + ').</li>';
-        } else {
-          list.innerHTML = data.versions.map(v =>
-            '<li class="flex flex-wrap items-center gap-2">' +
-            '<span>v' + v.version_id + ' · ' + formatDate(v.created_at) +
-            (v.blob_available ? '' : ' · blob missing') + '</span>' +
-            (v.blob_available
-              ? '<button type="button" data-version-id="' + v.version_id + '" class="version-restore text-emerald-400 hover:underline">Restore</button>'
-              : '') +
-            '</li>'
-          ).join('');
-          list.querySelectorAll('.version-restore').forEach(el => {
-            el.onclick = async () => {
-              if (!window.confirm('Restore version ' + el.dataset.versionId + '?')) return;
-              await api('/versions/restore', {
-                method: 'POST',
-                body: JSON.stringify({ path, vault_id: vault, version_id: Number(el.dataset.versionId) }),
-              });
-              await loadDashboard();
-            };
-          });
-        }
-        list.classList.remove('hidden');
+        await loadVersions(path, vault, 0);
       } catch (err) {
         showDashError(err.message);
       } finally {
         btn.disabled = false;
+      }
+    };
+
+    document.getElementById('version-prev-btn').onclick = async () => {
+      const path = document.getElementById('version-path').value.trim();
+      const vault = document.getElementById('version-vault').value.trim() || 'default';
+      if (!path) return;
+      const next = Math.max(0, versionPage.offset - versionPage.limit);
+      try {
+        await loadVersions(path, vault, next);
+      } catch (err) {
+        showDashError(err.message);
+      }
+    };
+
+    document.getElementById('version-next-btn').onclick = async () => {
+      const path = document.getElementById('version-path').value.trim();
+      const vault = document.getElementById('version-vault').value.trim() || 'default';
+      if (!path || !versionPage.hasMore) return;
+      try {
+        await loadVersions(path, vault, versionPage.offset + versionPage.limit);
+      } catch (err) {
+        showDashError(err.message);
       }
     };
 
@@ -701,10 +851,22 @@
     };
 
     (async () => {
+      const prefilledPath = params.get('version_path');
+      const prefilledVault = params.get('version_vault');
+      if (prefilledPath) document.getElementById('version-path').value = prefilledPath;
+      if (prefilledVault) document.getElementById('version-vault').value = prefilledVault;
+
       const token = localStorage.getItem(tokenKey);
       if (!token) return;
       try {
         await loadDashboard();
+        if (prefilledPath) {
+          await loadVersions(
+            prefilledPath,
+            prefilledVault || document.getElementById('version-vault').value || 'default',
+            0
+          );
+        }
       } catch {
         localStorage.removeItem(tokenKey);
         localStorage.removeItem(refreshKey);
