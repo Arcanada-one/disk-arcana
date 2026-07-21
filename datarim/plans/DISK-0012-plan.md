@@ -35,7 +35,7 @@ This branch completes the **tail** deliverables solvable on DEVS without operato
 | Fuzz: `proto_decode` | **Done** | This branch |
 | Fuzz: `reconcile` | **Done** | This branch |
 | `cargo audit` + gitleaks | **Done** (main) | lint job |
-| Security audit (OWASP) | **Deferred** | Doc-only / operator review |
+| Security audit (OWASP) | **Done** | PR DISK-0012-owasp-audit — checklist v1.0 + RB-010 + CI evidence gate |
 | Load test 10K / 3 nodes | **Partial** | 1K scanner smoke script; multi-node deferred |
 | Criterion benchmarks | **Done** | `benches/hardening.rs` |
 | Scheduled deep fuzz | **Done** | `fuzz-deep.yml` weekly |
@@ -76,7 +76,8 @@ cargo test --workspace --all-features
 
 ## Deferred (operator / future)
 
-- OWASP-style gRPC security audit write-up
+- OWASP operator walkthrough rows (T1.5, T1.6, T5.3, T6.3) — `DISK-RB-010`
+- Auth API-key rate limiting (gap G1 in OWASP doc)
 - 10K-file / 3-node load test harness (needs staging server)
 - macOS/aarch64 release matrix expansion
 
