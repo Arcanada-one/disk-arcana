@@ -285,7 +285,7 @@ fn unix_now() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::billing::{PlanTier, SnapshotRetention};
+    use crate::billing::PlanTier;
     use crate::meta_db::FileVersionUpsert;
     use crate::types::FileMeta;
     use crate::vector_clock::VectorClock;
