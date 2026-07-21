@@ -6,6 +6,7 @@ mod daemon;
 mod paths;
 mod share_init;
 mod vault;
+mod versions_cmd;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -71,6 +72,9 @@ enum Command {
 
     /// E2EE vault key unlock / lock (OS keychain).
     Vault(vault::VaultArgs),
+
+    /// File version history — list and restore via health HTTP API (DISK-0020).
+    Versions(VersionsArgs),
 }
 
 /// `disk daemon <subcmd>` — wrapper.
@@ -266,6 +270,73 @@ impl ResolveAction {
             ResolveAction::KeepRemote => "keep-remote",
         }
     }
+}
+
+/// `disk versions <subcmd>` — file version history (DISK-0020).
+#[derive(clap::Args, Debug)]
+pub struct VersionsArgs {
+    #[command(subcommand)]
+    pub command: VersionsCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum VersionsCommand {
+    /// List historical revisions for a vault-relative path.
+    List(VersionsListArgs),
+    /// Restore a historical revision (creates a new version on the server).
+    Restore(VersionsRestoreArgs),
+}
+
+/// `disk versions list --path <path>`.
+#[derive(clap::Args, Debug)]
+pub struct VersionsListArgs {
+    /// Vault-relative file path.
+    #[arg(long)]
+    pub path: String,
+
+    /// Vault / share id.
+    #[arg(long, default_value = "default")]
+    pub vault: String,
+
+    /// Page size (server clamps to 200).
+    #[arg(long, default_value_t = 20)]
+    pub limit: u32,
+
+    /// Pagination offset into historical rows.
+    #[arg(long, default_value_t = 0)]
+    pub offset: u32,
+
+    /// Health HTTP API base URL. Defaults to `DISK_API_BASE` or `http://127.0.0.1:9446`.
+    #[arg(long)]
+    pub api: Option<String>,
+
+    /// Bearer JWT. Defaults to `DISK_ACCESS_TOKEN`.
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+/// `disk versions restore --path <path> --version-id <n>`.
+#[derive(clap::Args, Debug)]
+pub struct VersionsRestoreArgs {
+    /// Vault-relative file path.
+    #[arg(long)]
+    pub path: String,
+
+    /// Historical `version_id` to restore.
+    #[arg(long)]
+    pub version_id: u64,
+
+    /// Vault / share id.
+    #[arg(long, default_value = "default")]
+    pub vault: String,
+
+    /// Health HTTP API base URL.
+    #[arg(long)]
+    pub api: Option<String>,
+
+    /// Bearer JWT.
+    #[arg(long)]
+    pub token: Option<String>,
 }
 
 /// `disk share <subcmd>` — wrapper for share management subcommands.
@@ -495,6 +566,29 @@ async fn main() -> Result<()> {
             vault::VaultCommand::Unlock(u) => vault::run_unlock(u),
             vault::VaultCommand::Lock(l) => vault::run_lock(l),
             vault::VaultCommand::Status(s) => vault::run_status(s),
+        },
+        Some(Command::Versions(args)) => match args.command {
+            VersionsCommand::List(l) => {
+                versions_cmd::run_versions_list(
+                    l.api.as_deref(),
+                    l.token.as_deref(),
+                    &l.path,
+                    &l.vault,
+                    l.limit,
+                    l.offset,
+                )
+                .await
+            }
+            VersionsCommand::Restore(r) => {
+                versions_cmd::run_versions_restore(
+                    r.api.as_deref(),
+                    r.token.as_deref(),
+                    &r.path,
+                    &r.vault,
+                    r.version_id,
+                )
+                .await
+            }
         },
         None => {
             let version = env!("CARGO_PKG_VERSION");
@@ -1108,6 +1202,55 @@ node_id_hint = "from-bf"
             remaining.is_empty(),
             "conflict must be resolved after run_conflicts_resolve"
         );
+    }
+
+    #[test]
+    fn cli_parses_versions_list() {
+        let cli = Cli::try_parse_from([
+            "disk",
+            "versions",
+            "list",
+            "--path",
+            "notes/a.md",
+            "--vault",
+            "wiki",
+            "--api",
+            "http://127.0.0.1:9446",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Command::Versions(VersionsArgs {
+                command: VersionsCommand::List(l),
+            })) => {
+                assert_eq!(l.path, "notes/a.md");
+                assert_eq!(l.vault, "wiki");
+                assert_eq!(l.api.as_deref(), Some("http://127.0.0.1:9446"));
+            }
+            other => panic!("expected versions list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_versions_restore() {
+        let cli = Cli::try_parse_from([
+            "disk",
+            "versions",
+            "restore",
+            "--path",
+            "notes/a.md",
+            "--version-id",
+            "3",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Command::Versions(VersionsArgs {
+                command: VersionsCommand::Restore(r),
+            })) => {
+                assert_eq!(r.path, "notes/a.md");
+                assert_eq!(r.version_id, 3);
+            }
+            other => panic!("expected versions restore, got {other:?}"),
+        }
     }
 
     // `disk conflicts show` subcommand parse────────────────────

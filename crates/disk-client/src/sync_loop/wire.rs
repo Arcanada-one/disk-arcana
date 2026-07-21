@@ -358,6 +358,47 @@ fn file_mtime_ns(path: &std::path::Path) -> i64 {
         .unwrap_or(0)
 }
 
+/// Convert a proto [`FileMetadata`] into a domain [`FileMeta`].
+fn proto_to_file_meta(m: &FileMetadata) -> FileMeta {
+    let content_hash: [u8; 32] = m.content_hash.as_slice().try_into().unwrap_or([0u8; 32]);
+
+    let mut vc = disk_core::VectorClock::new();
+    for (node, tick) in &m.vector_clock {
+        vc.0.insert(node.clone(), *tick);
+    }
+
+    FileMeta {
+        path: std::path::PathBuf::from(&m.path),
+        content_hash,
+        size: m.size,
+        mtime_ns: m.mtime_ns,
+        inode: if m.inode == 0 { None } else { Some(m.inode) },
+        vector_clock: vc,
+        deleted: m.deleted,
+        deleted_at: if m.deleted_at == 0 {
+            None
+        } else {
+            Some(m.deleted_at)
+        },
+        node_id: m.node_id.clone(),
+        encryption_nonce: if m.encryption_nonce.is_empty() {
+            None
+        } else {
+            Some(m.encryption_nonce.clone())
+        },
+        version_id: if m.version_id == 0 {
+            None
+        } else {
+            Some(m.version_id)
+        },
+        parent_version_id: if m.parent_version_id == 0 {
+            None
+        } else {
+            Some(m.parent_version_id)
+        },
+    }
+}
+
 /// Convert a domain [`FileMeta`] into its proto [`FileMetadata`] equivalent.
 fn file_meta_to_proto(m: &FileMeta) -> FileMetadata {
     FileMetadata {
@@ -376,7 +417,20 @@ fn file_meta_to_proto(m: &FileMeta) -> FileMetadata {
         deleted_at: m.deleted_at.unwrap_or(0),
         node_id: m.node_id.clone(),
         encryption_nonce: m.encryption_nonce.clone().unwrap_or_default(),
+        version_id: m.version_id.unwrap_or(0),
+        parent_version_id: m.parent_version_id.unwrap_or(0),
         ..Default::default()
+    }
+}
+
+/// Copy `version_id` / `parent_version_id` from MetaDb rows when available.
+fn overlay_version_ids_from_db(metas: &mut [FileMeta], db_index: &HashMap<String, FileMeta>) {
+    for meta in metas.iter_mut() {
+        let key = vault_relative_path_key(&meta.path);
+        if let Some(row) = db_index.get(&key) {
+            meta.version_id = row.version_id;
+            meta.parent_version_id = row.parent_version_id;
+        }
     }
 }
 
@@ -406,6 +460,15 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                 Ok(mut metas) => {
                     if self.e2ee_key.is_some() {
                         self.overlay_e2ee_exchange_files(&mut metas).await;
+                    }
+                    if let Some(db) = &self.meta_db {
+                        if let Ok(rows) = db.list_all_files().await {
+                            let index: HashMap<String, FileMeta> = rows
+                                .into_iter()
+                                .map(|row| (vault_relative_path_key(&row.path), row))
+                                .collect();
+                            overlay_version_ids_from_db(&mut metas, &index);
+                        }
                     }
                     metas.iter().map(file_meta_to_proto).collect()
                 }
@@ -563,25 +626,11 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                     }
                 }
 
-                // Accumulate a baseline entry for this path.
-                // mtime_ns, inode, and vector_clock are not available from
-                // the download payload alone; we leave them at defaults.
-                // The baseline is keyed only on content_hash for the merge
-                // path, so these fields are not load-bearing there.
-                downloaded_baselines.push(disk_core::types::FileMeta {
-                    path: std::path::PathBuf::from(&to_download.path),
-                    content_hash: hash,
-                    size: bytes.len() as u64,
-                    mtime_ns: 0,
-                    inode: None,
-                    vector_clock: disk_core::VectorClock::default(),
-                    deleted: false,
-                    deleted_at: None,
-                    node_id: self.node_id.clone(),
-                    encryption_nonce: None,
-                    version_id: None,
-                    parent_version_id: None,
-                });
+                // Accumulate a baseline entry (preserve server version ids from wire).
+                let mut baseline = proto_to_file_meta(to_download);
+                baseline.content_hash = hash;
+                baseline.size = bytes.len() as u64;
+                downloaded_baselines.push(baseline);
             }
 
             // ── Persist post-cycle baselines ────────────────────
@@ -925,8 +974,8 @@ mod tests {
             deleted_at: None,
             node_id: "client-a".into(),
             encryption_nonce: None,
-            version_id: None,
-            parent_version_id: None,
+            version_id: Some(3),
+            parent_version_id: Some(2),
         };
         let proto = file_meta_to_proto(&meta);
         assert_eq!(proto.path, "notes/hello.md");
@@ -934,6 +983,11 @@ mod tests {
         assert_eq!(proto.content_hash, [0xAB; 32]);
         assert_eq!(proto.inode, 12345);
         assert_eq!(proto.vector_clock.get("client-a").copied().unwrap_or(0), 1);
+        assert_eq!(proto.version_id, 3);
+        assert_eq!(proto.parent_version_id, 2);
+        let back = proto_to_file_meta(&proto);
+        assert_eq!(back.version_id, Some(3));
+        assert_eq!(back.parent_version_id, Some(2));
     }
 
     /// RemoteSync with an empty scan_root falls back to empty exchange (legacy mode).

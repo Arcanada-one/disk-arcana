@@ -1132,6 +1132,8 @@ fn file_meta_to_proto(m: &FileMeta) -> FileMetadata {
         deleted_at: m.deleted_at.unwrap_or(0),
         node_id: m.node_id.clone(),
         encryption_nonce: m.encryption_nonce.clone().unwrap_or_default(),
+        version_id: m.version_id.unwrap_or(0),
+        parent_version_id: m.parent_version_id.unwrap_or(0),
         ..Default::default()
     }
 }
@@ -1425,6 +1427,28 @@ mod tests {
             proto_out.deleted_at, deleted_at_ts,
             "domain→proto: deleted_at must survive conversion"
         );
+
+        // DISK-0020 slice 3: version_id / parent_version_id round-trip.
+        let version_domain = FileMeta {
+            path: "vault/versioned.md".into(),
+            content_hash: [0x11; 32],
+            size: 99,
+            mtime_ns: 2,
+            inode: None,
+            vector_clock: VectorClock::new(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "server".into(),
+            encryption_nonce: None,
+            version_id: Some(7),
+            parent_version_id: Some(6),
+        };
+        let version_proto = file_meta_to_proto(&version_domain);
+        assert_eq!(version_proto.version_id, 7);
+        assert_eq!(version_proto.parent_version_id, 6);
+        let version_back = proto_to_file_meta(&version_proto);
+        assert_eq!(version_back.version_id, Some(7));
+        assert_eq!(version_back.parent_version_id, Some(6));
 
         // Persist through node_baselines and reload.
         let db_dir = tempdir().unwrap();
