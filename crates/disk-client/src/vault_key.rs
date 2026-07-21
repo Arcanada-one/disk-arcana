@@ -15,9 +15,8 @@ pub fn load_vault_key_from_env() -> Result<Option<VaultKey>, E2eeError> {
             "DISK_VAULT_SALT required when DISK_VAULT_PASSPHRASE is set".into(),
         )
     })?;
-    let salt = hex::decode(salt_hex.trim()).map_err(|e| {
-        E2eeError::KeyDerivation(format!("invalid DISK_VAULT_SALT hex: {e}"))
-    })?;
+    let salt = hex::decode(salt_hex.trim())
+        .map_err(|e| E2eeError::KeyDerivation(format!("invalid DISK_VAULT_SALT hex: {e}")))?;
     Ok(Some(VaultKey::derive_from_passphrase(
         passphrase.as_bytes(),
         &salt,

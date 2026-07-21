@@ -381,8 +381,10 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
                     Arc::clone(&blob_cache),
                     baselines,
                     meta_db.clone(),
-                    e2ee_key.clone(),
                 );
+                if let Some(ref key) = e2ee_key {
+                    transport = transport.with_e2ee_key(key.clone());
+                }
                 let outcome = loop_sm
                     .run_iteration(&mut transport, trigger, &mut rng)
                     .await;
@@ -578,13 +580,9 @@ pub(crate) fn build_remote_sync_for_share<'a>(
     blob_cache: Arc<BlobCache>,
     baselines: HashMap<String, [u8; 32]>,
     meta_db: Option<Arc<MetaDb>>,
-    e2ee_key: Option<disk_core::VaultKey>,
 ) -> RemoteSync<'a> {
-    let mut transport = RemoteSync::with_scan_root(client, share_name, share_path, node_id)
+    let transport = RemoteSync::with_scan_root(client, share_name, share_path, node_id)
         .with_blob_cache(blob_cache, baselines);
-    if let Some(key) = e2ee_key {
-        transport = transport.with_e2ee_key(key);
-    }
     if let Some(db) = meta_db {
         transport.with_meta_db(db)
     } else {
@@ -874,7 +872,6 @@ client_key  = "/b"
             Arc::clone(&cache),
             baselines,
             None,
-            None,
         );
 
         // Assert the blob cache is attached.
@@ -1002,7 +999,6 @@ client_key  = "/b"
             Arc::clone(&cache),
             HashMap::new(),
             Some(Arc::clone(&db)),
-            None,
         );
 
         assert!(
