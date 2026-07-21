@@ -13,6 +13,7 @@ mod dashboard;
 mod files;
 mod node_baseline;
 mod nodes;
+mod onboarding;
 mod selective_sync;
 mod sharing;
 mod snapshots;

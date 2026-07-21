@@ -457,3 +457,22 @@ async fn migration_017_device_sync_includes_table_exists() {
         "device_sync_includes table must exist after migration 017; got {tables:?}"
     );
 }
+
+#[tokio::test]
+async fn migration_018_user_onboarding_table_exists() {
+    let dir = tempdir().expect("tempdir");
+    let db = MetaDb::open(&dir.path().join("onboarding-schema.sqlite"))
+        .await
+        .expect("open");
+
+    let tables: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .fetch_all(db.pool())
+            .await
+            .expect("sqlite_master");
+
+    assert!(
+        tables.iter().any(|t| t == "user_onboarding"),
+        "user_onboarding table must exist after migration 018; got {tables:?}"
+    );
+}

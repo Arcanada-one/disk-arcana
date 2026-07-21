@@ -524,6 +524,7 @@
     const snapshotPage = { offset: 0, limit: 10, hasMore: false, total: 0 };
     const trashPage = { offset: 0, limit: 10, hasMore: false, total: 0 };
     let dashboardDevices = [];
+    let onboardingDismissedServer = false;
     const pendingInviteKey = 'diskPendingInvite';
     let pendingInviteToken = params.get('sharing_accept') || localStorage.getItem(pendingInviteKey) || '';
     if (params.get('sharing_accept')) {
@@ -690,11 +691,32 @@
       return 'disk_onboarding_dismissed:' + userId;
     }
 
-    function isOnboardingDismissed(userId) {
+    function isOnboardingDismissedLocal(userId) {
       try {
         return localStorage.getItem(onboardingDismissKey(userId)) === '1';
       } catch (_) {
         return false;
+      }
+    }
+
+    function isOnboardingDismissed(userId) {
+      return onboardingDismissedServer || isOnboardingDismissedLocal(userId);
+    }
+
+    async function loadOnboardingState(userId) {
+      onboardingDismissedServer = false;
+      try {
+        const state = await api('/onboarding');
+        onboardingDismissedServer = !!state.dismissed;
+        if (!onboardingDismissedServer && isOnboardingDismissedLocal(userId)) {
+          await api('/onboarding', {
+            method: 'PUT',
+            body: JSON.stringify({ dismissed: true }),
+          });
+          onboardingDismissedServer = true;
+        }
+      } catch (_) {
+        onboardingDismissedServer = isOnboardingDismissedLocal(userId);
       }
     }
 
@@ -1521,6 +1543,7 @@
       clearDashError();
       try {
         const data = await api('/dashboard/summary');
+        await loadOnboardingState(data.user.user_id);
         showDashboard(data);
         await loadConsents();
       } finally {
@@ -1623,21 +1646,20 @@
       }
     };
 
-    document.getElementById('onboarding-dismiss-btn').onclick = () => {
-      const line = document.getElementById('user-line').textContent || '';
-      const match = line.match(/tenant\s/);
-      if (!match) {
-        document.getElementById('onboarding-panel').classList.add('hidden');
-        return;
-      }
-      api('/dashboard/summary').then(summary => {
+    document.getElementById('onboarding-dismiss-btn').onclick = async () => {
+      const panel = document.getElementById('onboarding-panel');
+      try {
+        const summary = await api('/dashboard/summary');
+        await api('/onboarding', {
+          method: 'PUT',
+          body: JSON.stringify({ dismissed: true }),
+        });
+        onboardingDismissedServer = true;
         try {
           localStorage.setItem(onboardingDismissKey(summary.user.user_id), '1');
         } catch (_) { /* ignore */ }
-        document.getElementById('onboarding-panel').classList.add('hidden');
-      }).catch(() => {
-        document.getElementById('onboarding-panel').classList.add('hidden');
-      });
+      } catch (_) { /* hide even when API unavailable */ }
+      panel.classList.add('hidden');
     };
 
     document.getElementById('export-data-btn').onclick = async () => {
