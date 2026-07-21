@@ -631,7 +631,7 @@ mod integration_tests {
         with_stub_oauth_server(db, |addr| async move {
             let base = format!("http://{addr}");
             let client = reqwest::Client::new();
-            let redirect_uri = format!("http://127.0.0.1/dashboard/oauth-callback.html");
+            let redirect_uri = "http://127.0.0.1/dashboard/oauth-callback.html".to_string();
 
             let start: Value = client
                 .get(format!(
