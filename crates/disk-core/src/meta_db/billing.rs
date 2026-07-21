@@ -6,8 +6,6 @@ use super::MetaDb;
 use crate::billing::PlanTier;
 use crate::error::MetaDbError;
 
-const VAULT_DEFAULT: &str = "default";
-
 impl MetaDb {
     /// Resolve the plan tier for a tenant (or default single-tenant when `None`).
     pub async fn get_plan_tier(
@@ -123,21 +121,75 @@ impl MetaDb {
         Ok(())
     }
 
-    /// Sum `files.size` for quota enforcement (single-tenant uses `tenant_id IS NULL`).
+    /// Sum `files.size` across all vaults for quota enforcement.
     pub async fn sum_storage_bytes(&self, tenant_id: Option<&str>) -> Result<u64, MetaDbError> {
         let row = sqlx::query(
             r#"
             SELECT COALESCE(SUM(size), 0) AS total
             FROM files
-            WHERE tenant_id IS ?1 AND vault_id = ?2 AND deleted = 0
+            WHERE tenant_id IS ?1 AND deleted = 0
             "#,
         )
         .bind(tenant_id)
-        .bind(VAULT_DEFAULT)
         .fetch_one(&self.pool)
         .await?;
         let total: i64 = row.get("total");
         Ok(total.max(0) as u64)
+    }
+
+    /// Count registered vaults for a tenant (`x-disk-share` names).
+    pub async fn count_tenant_vaults(&self, tenant_id: Option<&str>) -> Result<u32, MetaDbError> {
+        let row = sqlx::query(
+            r#"
+            SELECT COUNT(*) AS cnt FROM tenant_vaults WHERE tenant_id IS ?1
+            "#,
+        )
+        .bind(tenant_id)
+        .fetch_one(&self.pool)
+        .await?;
+        let cnt: i64 = row.get("cnt");
+        Ok(cnt.max(0) as u32)
+    }
+
+    /// Whether a vault/share is already registered for the tenant.
+    pub async fn tenant_vault_exists(
+        &self,
+        tenant_id: Option<&str>,
+        vault_id: &str,
+    ) -> Result<bool, MetaDbError> {
+        let row = sqlx::query(
+            r#"
+            SELECT 1 AS ok FROM tenant_vaults
+            WHERE tenant_id IS ?1 AND vault_id = ?2
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(vault_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.is_some())
+    }
+
+    /// Idempotently register a vault after a successful upload.
+    pub async fn register_tenant_vault(
+        &self,
+        tenant_id: Option<&str>,
+        vault_id: &str,
+    ) -> Result<(), MetaDbError> {
+        let now = unix_now();
+        let _ = sqlx::query(
+            r#"
+            INSERT OR IGNORE INTO tenant_vaults (tenant_id, vault_id, created_at)
+            VALUES (?1, ?2, ?3)
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(vault_id)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 }
 

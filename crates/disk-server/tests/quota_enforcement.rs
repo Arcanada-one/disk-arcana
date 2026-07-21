@@ -102,7 +102,8 @@ async fn spawn_server_with_quota(
         .unwrap()
         .with_test_limits(limits);
 
-    let auth_svc = AuthServiceServer::new(AuthServiceImpl::new(store.clone()));
+    let auth_impl = AuthServiceImpl::new(store.clone()).with_quota_enforcer(enforcer.clone());
+    let auth_svc = AuthServiceServer::new(auth_impl);
     let sync_impl = SyncServiceImpl::new(store.clone(), sync_root)
         .with_meta_db(meta_db, "server-test")
         .with_quota_enforcer(enforcer);
@@ -200,4 +201,64 @@ async fn upload_allowed_when_within_quota() {
     let resp = sync.delta_upload(req).await.unwrap().into_inner();
     assert!(resp.accepted);
     assert_eq!(std::fs::read(sync_root.join("ok.bin")).unwrap(), content);
+}
+
+#[tokio::test]
+async fn register_node_rejected_when_node_quota_exceeded() {
+    let root = tempdir().unwrap();
+    let db_path = root.path().join("meta.db");
+    let meta_db = MetaDb::open(&db_path).await.unwrap();
+
+    let limits = QuotaLimits {
+        max_storage_bytes: 1_000_000,
+        max_nodes: 1,
+        max_vaults: 5,
+    };
+
+    let sync_root = root.path().to_path_buf();
+    let (port, cert_pem) = spawn_server_with_quota(sync_root, meta_db, limits).await;
+    let ch = connect(port, &cert_pem).await;
+
+    let _tok = authenticate(&ch, "node-one").await;
+
+    let mut auth = AuthServiceClient::new(ch);
+    let err = auth
+        .register_node(Request::new(NodeRegisterRequest {
+            node_id: "node-two".into(),
+            display_name: "Two".into(),
+            platform: "test".into(),
+            ..Default::default()
+        }))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), Code::ResourceExhausted);
+    assert!(err.message().contains("node quota"));
+}
+
+#[tokio::test]
+async fn upload_rejected_when_vault_quota_exceeded() {
+    let root = tempdir().unwrap();
+    let db_path = root.path().join("meta.db");
+    let meta_db = MetaDb::open(&db_path).await.unwrap();
+
+    let limits = QuotaLimits {
+        max_storage_bytes: 1_000_000,
+        max_nodes: 10,
+        max_vaults: 1,
+    };
+
+    let sync_root = root.path().to_path_buf();
+    let (port, cert_pem) = spawn_server_with_quota(sync_root.clone(), meta_db, limits).await;
+    let ch = connect(port, &cert_pem).await;
+    let tok = authenticate(&ch, "vault-uploader").await;
+
+    let content: Vec<u8> = vec![3u8; 10];
+    let req = make_upload_request("first.bin", &content, &tok, "default");
+    let mut sync = SyncServiceClient::new(ch.clone());
+    sync.delta_upload(req).await.unwrap();
+
+    let req2 = make_upload_request("second.bin", &content, &tok, "wiki");
+    let err = sync.delta_upload(req2).await.unwrap_err();
+    assert_eq!(err.code(), Code::ResourceExhausted);
+    assert!(err.message().contains("vault quota"));
 }

@@ -154,6 +154,11 @@ impl AuthStore {
         self.inner.nodes.len()
     }
 
+    /// Whether `node_id` is already registered.
+    pub fn has_node(&self, node_id: &str) -> bool {
+        self.inner.nodes.contains_key(node_id)
+    }
+
     /// Return the number of active sessions.
     pub fn session_count(&self) -> usize {
         self.inner.sessions.len()

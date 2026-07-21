@@ -275,3 +275,22 @@ async fn migration_006_tenant_billing_table_exists() {
         "tenant_billing table must exist after migration 006; got {tables:?}"
     );
 }
+
+#[tokio::test]
+async fn migration_007_tenant_vaults_table_exists() {
+    let dir = tempdir().expect("tempdir");
+    let db = MetaDb::open(&dir.path().join("vaults-schema.sqlite"))
+        .await
+        .expect("open");
+
+    let tables: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .fetch_all(db.pool())
+            .await
+            .expect("sqlite_master");
+
+    assert!(
+        tables.iter().any(|t| t == "tenant_vaults"),
+        "tenant_vaults table must exist after migration 007; got {tables:?}"
+    );
+}
