@@ -42,7 +42,7 @@ disk admin pending-token --hostname walkthrough-node --ttl-secs 60
 # Wait past TTL — expect expired error
 ```
 
-Document DISK-0044 bootstrap path if cold enroll without pre-issued cert is required.
+Document cold-boot path: `docs/runbooks/DISK-RB-011-cold-boot-enroll.md` (DISK-0044).
 
 ### 3. ACL default deny (T3.3) — spot check
 
