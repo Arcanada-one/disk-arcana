@@ -28,6 +28,7 @@ pub mod path_guard;
 pub mod platform;
 pub mod reconciler;
 pub mod scanner;
+pub mod selective_sync;
 pub mod tenant;
 pub mod tenant_db;
 pub mod tombstone;
