@@ -286,6 +286,54 @@
         </div>
       </div>
 
+      <div class="border border-slate-800 rounded-lg p-4 overflow-x-auto">
+        <h2 class="font-medium mb-1">Recycle bin</h2>
+        <p id="trash-retention-hint" class="text-sm text-slate-400 mb-3">
+          Soft-deleted files you can still restore. Retention depends on your plan tier.
+        </p>
+        <div class="flex flex-wrap gap-2 items-end mb-3">
+          <label class="grid gap-1 text-sm">
+            <span class="text-slate-400">Vault</span>
+            <select id="trash-vault"
+              class="bg-slate-900 border border-slate-700 rounded px-3 py-2 min-w-[8rem]">
+              <option value="default">default</option>
+            </select>
+          </label>
+          <button id="trash-list-btn" type="button"
+            class="text-sm border border-slate-700 rounded px-3 py-2 hover:border-emerald-500">
+            Refresh list
+          </button>
+        </div>
+        <p id="trash-loading" class="text-sm text-slate-400 hidden mb-2">Loading recycle bin…</p>
+        <p id="trash-pruned-hint" class="text-sm text-amber-400 hidden mb-2"></p>
+        <p id="trash-success" class="text-sm text-emerald-400 hidden mb-2"></p>
+        <table id="trash-table" class="w-full text-sm text-left hidden">
+          <thead class="text-slate-400 border-b border-slate-800">
+            <tr>
+              <th class="py-2 pr-3 font-medium">Path</th>
+              <th class="py-2 pr-3 font-medium">Deleted</th>
+              <th class="py-2 pr-3 font-medium">Expires</th>
+              <th class="py-2 pr-3 font-medium">Size</th>
+              <th class="py-2 pr-3 font-medium">Blob</th>
+              <th class="py-2 font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="trash-list" class="text-slate-300"></tbody>
+        </table>
+        <div id="trash-empty" class="text-sm text-slate-500 hidden"></div>
+        <div id="trash-pagination" class="mt-3 flex flex-wrap items-center gap-2 hidden">
+          <button id="trash-prev-btn" type="button"
+            class="text-xs border border-slate-700 rounded px-2 py-1 hover:border-emerald-500 disabled:opacity-40">
+            Previous
+          </button>
+          <span id="trash-page-label" class="text-xs text-slate-500"></span>
+          <button id="trash-next-btn" type="button"
+            class="text-xs border border-slate-700 rounded px-2 py-1 hover:border-emerald-500 disabled:opacity-40">
+            Next
+          </button>
+        </div>
+      </div>
+
       <div class="border border-slate-800 rounded-lg p-4">
         <p class="text-sm text-slate-400 mb-3">Download a JSON export of your account and tenant metadata (GDPR portability).</p>
         <button id="export-data-btn" type="button"
@@ -327,6 +375,7 @@
 
     const versionPage = { offset: 0, limit: 10, hasMore: false, total: 0 };
     const snapshotPage = { offset: 0, limit: 10, hasMore: false, total: 0 };
+    const trashPage = { offset: 0, limit: 10, hasMore: false, total: 0 };
 
     const tokenKey = 'diskAccessToken';
     const refreshKey = 'diskRefreshToken';
@@ -583,6 +632,7 @@
 
       populateVaultSelect('version-vault', data.vaults);
       populateVaultSelect('snapshot-vault', data.vaults);
+      populateVaultSelect('trash-vault', data.vaults);
     }
 
     function populateVaultSelect(selectId, vaults) {
@@ -840,6 +890,110 @@
             'Page ' + page + ' of ' + pages + ' (' + data.pagination.total + ' total)';
           document.getElementById('snapshot-prev-btn').disabled = offset === 0;
           document.getElementById('snapshot-next-btn').disabled = !data.pagination.has_more;
+        }
+      } finally {
+        loading.classList.add('hidden');
+      }
+    }
+
+    function trashRowHtml(item, vault) {
+      const blob = item.blob_available
+        ? '<span class="text-emerald-400">ok</span>'
+        : '<span class="text-amber-400">missing</span>';
+      const restoreBtn = item.blob_available
+        ? '<button type="button" data-trash-path="' + escapeHtml(item.path) + '" data-vault="' +
+          escapeHtml(vault) +
+          '" class="trash-restore text-xs border border-slate-700 rounded px-2 py-0.5 hover:border-emerald-500">Restore</button>'
+        : '<span class="text-slate-600 text-xs">—</span>';
+      return '<tr class="border-b border-slate-800/60">' +
+        '<td class="py-2 pr-3"><code>' + escapeHtml(item.path) + '</code></td>' +
+        '<td class="py-2 pr-3 text-slate-400">' + formatDate(item.deleted_at) + '</td>' +
+        '<td class="py-2 pr-3 text-slate-400" title="Permanent purge after this time">' +
+          formatDate(item.expires_at) + '</td>' +
+        '<td class="py-2 pr-3 text-slate-400">' + formatBytes(item.size) + '</td>' +
+        '<td class="py-2 pr-3">' + blob + '</td>' +
+        '<td class="py-2">' + restoreBtn + '</td></tr>';
+    }
+
+    function bindTrashRestore(vault) {
+      document.querySelectorAll('.trash-restore').forEach(el => {
+        el.onclick = async () => {
+          const path = el.dataset.trashPath;
+          if (!window.confirm('Restore "' + path + '" from trash in vault "' + vault + '"?')) return;
+          el.disabled = true;
+          clearDashError();
+          document.getElementById('trash-success').classList.add('hidden');
+          try {
+            const res = await api('/trash/restore', {
+              method: 'POST',
+              body: JSON.stringify({ path, vault_id: vault }),
+            });
+            const ok = document.getElementById('trash-success');
+            ok.textContent = res.message || ('Restored ' + path);
+            ok.classList.remove('hidden');
+            await loadTrash(vault, trashPage.offset);
+          } catch (err) {
+            showDashError(err.message);
+            el.disabled = false;
+          }
+        };
+      });
+    }
+
+    async function loadTrash(vault, offset) {
+      const loading = document.getElementById('trash-loading');
+      const table = document.getElementById('trash-table');
+      const empty = document.getElementById('trash-empty');
+      const pagination = document.getElementById('trash-pagination');
+      const success = document.getElementById('trash-success');
+      const pruned = document.getElementById('trash-pruned-hint');
+      loading.classList.remove('hidden');
+      table.classList.add('hidden');
+      empty.classList.add('hidden');
+      pagination.classList.add('hidden');
+      success.classList.add('hidden');
+      pruned.classList.add('hidden');
+      clearDashError();
+      try {
+        const qs = new URLSearchParams({
+          vault_id: vault,
+          limit: String(trashPage.limit),
+          offset: String(offset),
+        });
+        const data = await api('/trash?' + qs.toString());
+        trashPage.offset = data.pagination.offset;
+        trashPage.hasMore = data.pagination.has_more;
+        trashPage.total = data.pagination.total;
+
+        document.getElementById('trash-retention-hint').textContent =
+          'Plan: ' + data.plan_tier + ' · keep deleted files for ' +
+          data.retention.max_age_days + ' days before permanent purge.';
+
+        if (data.pruned_expired > 0) {
+          pruned.textContent = 'Purged ' + data.pruned_expired + ' expired item(s) on this refresh.';
+          pruned.classList.remove('hidden');
+        }
+
+        if (!data.items.length) {
+          empty.textContent = offset === 0
+            ? 'Recycle bin is empty for vault "' + vault + '".'
+            : 'No more trashed files on this page.';
+          empty.classList.remove('hidden');
+        } else {
+          document.getElementById('trash-list').innerHTML =
+            data.items.map(item => trashRowHtml(item, vault)).join('');
+          table.classList.remove('hidden');
+          bindTrashRestore(vault);
+        }
+
+        if (data.pagination.total > trashPage.limit || offset > 0) {
+          pagination.classList.remove('hidden');
+          const page = Math.floor(offset / trashPage.limit) + 1;
+          const pages = Math.max(1, Math.ceil(data.pagination.total / trashPage.limit));
+          document.getElementById('trash-page-label').textContent =
+            'Page ' + page + ' of ' + pages + ' (' + data.pagination.total + ' total)';
+          document.getElementById('trash-prev-btn').disabled = offset === 0;
+          document.getElementById('trash-next-btn').disabled = !data.pagination.has_more;
         }
       } finally {
         loading.classList.add('hidden');
@@ -1104,6 +1258,40 @@
       document.getElementById('snapshot-detail').classList.add('hidden');
     };
 
+    document.getElementById('trash-list-btn').onclick = async () => {
+      const btn = document.getElementById('trash-list-btn');
+      const vault = document.getElementById('trash-vault').value.trim() || 'default';
+      btn.disabled = true;
+      trashPage.offset = 0;
+      try {
+        await loadTrash(vault, 0);
+      } catch (err) {
+        showDashError(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    document.getElementById('trash-prev-btn').onclick = async () => {
+      const vault = document.getElementById('trash-vault').value.trim() || 'default';
+      const next = Math.max(0, trashPage.offset - trashPage.limit);
+      try {
+        await loadTrash(vault, next);
+      } catch (err) {
+        showDashError(err.message);
+      }
+    };
+
+    document.getElementById('trash-next-btn').onclick = async () => {
+      const vault = document.getElementById('trash-vault').value.trim() || 'default';
+      if (!trashPage.hasMore) return;
+      try {
+        await loadTrash(vault, trashPage.offset + trashPage.limit);
+      } catch (err) {
+        showDashError(err.message);
+      }
+    };
+
     document.getElementById('delete-account-btn').onclick = async () => {
       const btn = document.getElementById('delete-account-btn');
       const confirmEmail = document.getElementById('delete-confirm-email').value.trim();
@@ -1138,9 +1326,11 @@
       const prefilledPath = params.get('version_path');
       const prefilledVault = params.get('version_vault');
       const prefilledSnapshotVault = params.get('snapshot_vault');
+      const prefilledTrashVault = params.get('trash_vault');
       if (prefilledPath) document.getElementById('version-path').value = prefilledPath;
       if (prefilledVault) document.getElementById('version-vault').value = prefilledVault;
       if (prefilledSnapshotVault) document.getElementById('snapshot-vault').value = prefilledSnapshotVault;
+      if (prefilledTrashVault) document.getElementById('trash-vault').value = prefilledTrashVault;
 
       const token = localStorage.getItem(tokenKey);
       if (!token) return;
@@ -1156,6 +1346,12 @@
         if (params.get('snapshots') === '1' || prefilledSnapshotVault) {
           await loadSnapshots(
             prefilledSnapshotVault || document.getElementById('snapshot-vault').value || 'default',
+            0
+          );
+        }
+        if (params.get('trash') === '1' || prefilledTrashVault) {
+          await loadTrash(
+            prefilledTrashVault || document.getElementById('trash-vault').value || 'default',
             0
           );
         }

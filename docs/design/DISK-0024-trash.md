@@ -1,6 +1,6 @@
 # DISK-0024 — Trash / Recycle Bin
 
-**Status:** slice 1 on DEVS — list/restore API + tier retention prune.  
+**Status:** slice 2 on DEVS — dashboard recycle bin UI.  
 **Parent:** DISK-0001 commercial / SaaS track.  
 **Tracking:** DISK-0024 in Datarim backlog.
 
@@ -8,8 +8,8 @@
 
 | Slice | In scope | Out of scope |
 |-------|----------|--------------|
-| 1 (this PR) | List trashed files (`deleted=1`), restore (undelete), tier retention auto-prune on list, `disk trash list\|restore` CLI | Dashboard undelete UI, permanent empty-trash button, cross-vault moves |
-| 2 (planned) | Dashboard trash panel (list, restore, retention banner) | Scheduled purge jobs, admin audit export |
+| 1 (merged #84) | List trashed files (`deleted=1`), restore (undelete), tier retention auto-prune on list, `disk trash list\|restore` CLI | Dashboard undelete UI, permanent empty-trash button, cross-vault moves |
+| 2 (this PR) | Dashboard recycle bin panel: list, restore, retention banner, purge notice | Scheduled purge jobs, manual empty-trash |
 
 ## Retention by tier
 
@@ -49,7 +49,7 @@ Env: `DISK_API_BASE`, `DISK_ACCESS_TOKEN`.
 ## Tests
 
 - `crates/disk-core/src/meta_db/trash.rs` — list/restore/prune unit test
-- `crates/disk-server/src/trash/routes.rs` — HTTP list/restore round-trip
+- `deploy/www/dashboard/index.html` — recycle bin panel (list, restore, retention)
 
 ## References
 
