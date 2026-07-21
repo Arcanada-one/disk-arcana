@@ -60,6 +60,8 @@ check crates/disk-core/tests/load_scan.rs
 check scripts/load-test-harness.sh
 check scripts/load-test-scanner-smoke.sh
 check scripts/load-test-scanner-10k.sh
+check scripts/load-test-sync-smoke.sh
+check crates/disk-server/tests/load_sync_round_trip.rs
 check docs/load-test-harness.md
 
 # Meta
@@ -71,4 +73,4 @@ if [ "$missing" -ne 0 ]; then
     exit 1
 fi
 
-printf 'OWASP evidence validation OK (%s paths)\n' 35
+printf 'OWASP evidence validation OK (%s paths)\n' 37

@@ -93,7 +93,7 @@ See also `SECURITY.md` § Phase 3 threat model (V-7 … V-14).
 | ID | Control | Status | Evidence |
 |----|---------|--------|----------|
 | T6.1 | Documented message/size limits | verified | `SECURITY.md` V-13; `bomb_guard` constants |
-| T6.2 | 10K-file / multi-node load harness | **partial** | Local scanner scaffold: `crates/disk-core/tests/load_scan.rs`, `scripts/load-test-harness.sh`, `docs/load-test-harness.md`; multi-node soak deferred (staging) |
+| T6.2 | 10K-file / multi-node load harness | **partial** | Local scaffold: scanner `load_scan.rs` + 3-node sync `load_sync_round_trip.rs`, `scripts/load-test-harness.sh`; staging soak deferred |
 | T6.3 | Connection rate limiting at edge | operator | Cloudflare / firewall policy outside repo |
 
 ---
@@ -133,7 +133,7 @@ Source of truth: `proto/disk.proto`.
 
 | ID | Item | Tracking |
 |----|------|----------|
-| G3 | 10K load / soak (multi-node staging) | Operator gate — local 10K scanner scaffold shipped |
+| G3 | Staging soak / prod binary load | Operator gate — local scanner + 3-node sync scaffold shipped |
 | G4 | External pentest before SaaS | DISK-0017+ |
 
 ---
