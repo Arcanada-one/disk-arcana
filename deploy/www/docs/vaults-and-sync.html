@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vaults and sync — Disk Arcana Help</title>
+  <meta name="description" content="Reference for vault IDs, shares, selective sync, sharing roles, and trash retention.">
+  <link rel="canonical" href="https://disk.arcanada.ai/docs/vaults-and-sync.html">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' }</script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
+  <article class="max-w-3xl mx-auto px-6 py-12">
+    <p><a href="index.html" class="text-emerald-400 text-sm hover:underline">← Help Center</a></p>
+    <h1 class="text-3xl font-bold tracking-tight mt-4 mb-6">Vaults and sync model</h1>
+
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-3">Vaults</h2>
+      <p class="text-sm text-slate-300 mb-2">A <strong>vault</strong> is a named sync namespace (vault ID, e.g. <code>default</code> or <code>wiki</code>). Vaults belong to your tenant and are created when you run <code>disk share init</code> on an enrolled device.</p>
+      <p class="text-sm text-slate-400">The server routes sync traffic by vault ID (HTTP header <code>x-disk-share</code> / gRPC metadata).</p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-3">Shares</h2>
+      <p class="text-sm text-slate-300">A share maps a local directory on a device to a vault ID. Multiple devices can sync the same vault; the engine reconciles file metadata with vector clocks and handles renames via stable inode identity.</p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-3">Selective sync</h2>
+      <p class="text-sm text-slate-300 mb-2">Configure per-device folder <strong>include prefixes</strong> in the dashboard or via API/CLI:</p>
+      <ul class="text-sm text-slate-400 list-disc list-inside space-y-1">
+        <li>Empty includes → sync the full vault</li>
+        <li>Non-empty → only paths matching a prefix (or under <code>prefix/</code>) sync</li>
+        <li>Enforced on <code>exchange_state</code>, <code>DeltaDownload</code>, and <code>DeltaUpload</code></li>
+      </ul>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-3">Sharing &amp; roles</h2>
+      <table class="w-full text-sm text-left border border-slate-800 rounded-lg overflow-hidden">
+        <thead class="bg-slate-900 text-slate-400">
+          <tr><th class="p-3">Role</th><th class="p-3">Capabilities</th></tr>
+        </thead>
+        <tbody class="text-slate-300">
+          <tr class="border-t border-slate-800"><td class="p-3">Owner</td><td class="p-3">Full read/write; manage invites and trash purge</td></tr>
+          <tr class="border-t border-slate-800"><td class="p-3">Editor</td><td class="p-3">Read/write versions, snapshots, trash restore</td></tr>
+          <tr class="border-t border-slate-800"><td class="p-3">Viewer</td><td class="p-3">Read-only lists and downloads</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-3">Trash / recycle bin</h2>
+      <p class="text-sm text-slate-300">Deleted files move to trash with tier-based retention (Free / Pro / Team). Restore from dashboard or <code>disk trash restore</code>. Permanent delete and empty-bin require owner role on shared vaults.</p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-3">CLI quick reference</h2>
+      <pre class="bg-slate-900 border border-slate-700 rounded-lg p-4 text-xs overflow-x-auto"><code>disk share init --preset obsidian-vault
+disk selective-sync set --vault default --node my-laptop --include docs,photos
+disk sharing invites create --vault wiki --role viewer
+disk trash list --vault default</code></pre>
+    </section>
+  </article>
+</body>
+</html>

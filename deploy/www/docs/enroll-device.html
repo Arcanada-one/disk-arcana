@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Enroll a device — Disk Arcana Help</title>
+  <meta name="description" content="Issue an enrollment token and run disk enroll to obtain mTLS credentials.">
+  <link rel="canonical" href="https://disk.arcanada.ai/docs/enroll-device.html">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' }</script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
+  <article class="max-w-3xl mx-auto px-6 py-12">
+    <p><a href="index.html" class="text-emerald-400 text-sm hover:underline">← Help Center</a></p>
+    <h1 class="text-3xl font-bold tracking-tight mt-4 mb-6">Enroll a device</h1>
+
+    <p class="text-slate-300 text-sm mb-6">
+      Enrollment binds your machine to your tenant with an mTLS client certificate.
+      Tokens are single-use, hostname-bound, and expire quickly.
+    </p>
+
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-3">1. Issue a token (operator)</h2>
+      <p class="text-sm text-slate-400 mb-2">From a host that already has admin access:</p>
+      <pre class="bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm overflow-x-auto"><code>disk admin pending-token \
+  --server https://disk.arcanada.ai:9445 \
+  --hostname my-laptop \
+  --ttl-secs 600</code></pre>
+      <p class="text-sm text-slate-400 mt-2">Copy the <code>token=</code> value. Default enrollment listener is <code>:9445</code> (TLS, no client cert). Production sync uses <code>:9443</code> (mTLS) after enrollment.</p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-3">2. Enroll on the target machine</h2>
+      <pre class="bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm overflow-x-auto"><code>disk enroll \
+  --server https://disk.arcanada.ai:9445 \
+  --token &lt;hex-token&gt; \
+  --hostname my-laptop</code></pre>
+      <p class="text-sm text-slate-400 mt-2">On success the client writes <code>client.crt</code> / <code>client.key</code> and starts the daemon.</p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-3">3. Verify in the dashboard</h2>
+      <p class="text-sm text-slate-300">Open <a href="../dashboard/" class="text-emerald-400">dashboard</a> → <strong>Devices</strong>. Your node ID and platform should appear with a recent <strong>Last seen</strong> time after the daemon connects.</p>
+    </section>
+
+    <section class="mb-8 border border-amber-800/40 rounded-lg p-4 bg-amber-950/20">
+      <h2 class="text-lg font-semibold text-amber-200 mb-2">Common mistakes</h2>
+      <ul class="text-sm text-slate-300 space-y-2 list-disc list-inside">
+        <li>Hostname in the token must match <code>--hostname</code> on enroll</li>
+        <li>Expired or already-used tokens are rejected — issue a fresh token</li>
+        <li>Clock skew &gt; 5 minutes can break TLS — sync system time</li>
+      </ul>
+    </section>
+
+    <p class="text-sm"><a href="getting-started.html" class="text-emerald-400 hover:underline">← Getting started</a>
+      · <a href="vaults-and-sync.html" class="text-emerald-400 hover:underline">Vaults and sync →</a></p>
+  </article>
+</body>
+</html>

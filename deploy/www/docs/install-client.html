@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Install the client — Disk Arcana Help</title>
+  <meta name="description" content="Install disk CLI and daemon on Linux, macOS, or Windows.">
+  <link rel="canonical" href="https://disk.arcanada.ai/docs/install-client.html">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' }</script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased">
+  <article class="max-w-3xl mx-auto px-6 py-12">
+    <p><a href="index.html" class="text-emerald-400 text-sm hover:underline">← Help Center</a></p>
+    <h1 class="text-3xl font-bold tracking-tight mt-4 mb-6">Install the client</h1>
+
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-3">Linux (x86_64)</h2>
+      <pre class="bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm overflow-x-auto"><code>curl -fsSL https://disk.arcanada.ai/install.sh | sh</code></pre>
+      <p class="text-sm text-slate-400 mt-2">Inspect before running: download <code>install.sh</code> and review it. The installer places <code>disk</code> in <code>/usr/local/bin</code> by default.</p>
+      <p class="text-sm text-slate-400 mt-2">Environment: <code>DISK_INSTALL_PREFIX</code>, <code>DISK_VERSION</code> to pin a release tag.</p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-3">macOS</h2>
+      <pre class="bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm overflow-x-auto"><code>cargo build --release -p disk-cli
+sudo ./scripts/install-macos.sh --binary ./target/release/disk</code></pre>
+      <p class="text-sm text-slate-400 mt-2">Or download a release binary from <a href="https://github.com/Arcanada-one/disk-arcana/releases" class="text-emerald-400">GitHub Releases</a>.</p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-3">Windows</h2>
+      <p class="text-sm text-slate-300">Download <code>disk-arcana-windows-x86_64.zip</code> from GitHub Releases and follow the Windows E2E runbook in the repository (<code>docs/runbooks/DISK-RB-008-windows-vm-e2e.md</code>).</p>
+    </section>
+
+    <section class="mb-8">
+      <h2 class="text-xl font-semibold mb-3">After install</h2>
+      <ul class="text-sm text-slate-300 space-y-2 list-disc list-inside">
+        <li>Config: <code>/etc/disk-arcana/disk.toml</code> (Linux) or seeded path on macOS</li>
+        <li>Data: <code>/var/lib/disk-arcana/</code></li>
+        <li>Local status API: <code>http://127.0.0.1:9444/status</code> (loopback only)</li>
+        <li>Daemon may not start until enrollment completes — expected before first <code>disk enroll</code></li>
+      </ul>
+    </section>
+
+    <p class="text-sm"><a href="enroll-device.html" class="text-emerald-400 hover:underline">Next: Enroll a device →</a></p>
+  </article>
+</body>
+</html>
