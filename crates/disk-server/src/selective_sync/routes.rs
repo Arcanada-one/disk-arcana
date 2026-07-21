@@ -139,7 +139,6 @@ async fn put_selective_sync_inner(
 
 #[cfg(test)]
 mod integration_tests {
-    use super::*;
     use crate::health;
     use disk_core::meta_db::MetaDb;
     use std::time::Duration;
