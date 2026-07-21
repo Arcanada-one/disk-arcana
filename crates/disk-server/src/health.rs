@@ -51,10 +51,10 @@ use crate::billing::webhook::{stripe_webhook, WebhookState};
 use crate::compliance::{delete_account, export_data, list_consents, sub_processors};
 use crate::dashboard::{resolve_conflict, summary};
 use crate::onboarding::{get_onboarding, put_onboarding};
-use crate::telemetry::{get_telemetry, get_telemetry_config, put_telemetry};
 use crate::selective_sync::{get_selective_sync, put_selective_sync};
 use crate::sharing::{accept_invite, create_invite, list_invites, list_members, remove_member};
 use crate::snapshots::{create_snapshot, get_snapshot, list_snapshots, restore_snapshot};
+use crate::telemetry::{get_telemetry, get_telemetry_config, put_telemetry};
 use crate::trash::{delete_trash, empty_trash, list_trash, restore_trash};
 use crate::versions::{list_versions, restore_version};
 

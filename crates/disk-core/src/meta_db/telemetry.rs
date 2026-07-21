@@ -118,7 +118,10 @@ mod tests {
         let loaded = db.get_user_telemetry("usr1").await.unwrap();
         assert!(loaded.opt_in);
 
-        let disabled = db.upsert_user_telemetry_opt_in("usr1", false).await.unwrap();
+        let disabled = db
+            .upsert_user_telemetry_opt_in("usr1", false)
+            .await
+            .unwrap();
         assert!(!disabled.opt_in);
     }
 }

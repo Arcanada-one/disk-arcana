@@ -52,13 +52,13 @@ pub use enrollment::{EnrollErrorKind, EnrollmentServiceImpl};
 pub use middleware::{BombError, ReplayError, ReplayGuard};
 pub use multi_node::{lifecycle::revoke_node, vclock::VClock};
 pub use onboarding::{get_onboarding, put_onboarding};
-pub use telemetry::{get_telemetry, get_telemetry_config, put_telemetry};
 pub use publisher::{
     build_signed_payload, FileMetadata as PublisherFileMetadata, PublisherSignatureProof,
     PublisherVerifier, StubKeyFetcher, VerifyError,
 };
 pub use services::{AuthServiceImpl, SyncServiceImpl};
 pub use snapshots::{create_snapshot, get_snapshot, list_snapshots, restore_snapshot};
+pub use telemetry::{get_telemetry, get_telemetry_config, put_telemetry};
 pub use tls::{
     build_mtls_from_files, tls13_mtls_server_config, CertProvider, DevSelfSignedMtlsProvider,
     DevSelfSignedProvider, StaticPemProvider, TlsError,
