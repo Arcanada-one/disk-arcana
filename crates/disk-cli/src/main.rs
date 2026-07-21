@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod agents_cmd;
 mod archive_cmd;
 mod commands;
 mod daemon;
@@ -91,6 +92,9 @@ enum Command {
 
     /// Per-device folder subset sync rules (DISK-0023).
     SelectiveSync(SelectiveSyncArgs),
+
+    /// AI agent webhooks, revision lookup, and optimistic writes (DISK-0028).
+    Agents(AgentsArgs),
 }
 
 /// `disk daemon <subcmd>` — wrapper.
@@ -637,6 +641,110 @@ pub struct SelectiveSyncSetArgs {
     pub token: Option<String>,
 }
 
+/// `disk agents <subcmd>` — AI Agents API CLI (DISK-0028 slice 3).
+#[derive(clap::Args, Debug)]
+pub struct AgentsArgs {
+    #[command(subcommand)]
+    pub command: AgentsCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum AgentsCommand {
+    /// Manage outbound agent webhooks.
+    Webhooks(AgentsWebhooksArgs),
+    /// Read the agent-facing revision for a vault path.
+    Revision(AgentsRevisionArgs),
+    /// Optimistic write to a vault path over HTTP.
+    Write(AgentsWriteArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct AgentsWebhooksArgs {
+    #[command(subcommand)]
+    pub command: AgentsWebhooksCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum AgentsWebhooksCommand {
+    /// List registered webhooks for a vault.
+    List(AgentsWebhooksListArgs),
+    /// Register a new HTTPS webhook callback.
+    Register(AgentsWebhooksRegisterArgs),
+    /// Delete a webhook by id.
+    Delete(AgentsWebhooksDeleteArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct AgentsWebhooksListArgs {
+    #[arg(long, default_value = "default")]
+    pub vault: String,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct AgentsWebhooksRegisterArgs {
+    #[arg(long)]
+    pub url: String,
+    /// Comma-separated event names (e.g. `agent.write_ok,agent.write_conflict`).
+    #[arg(long, value_delimiter = ',')]
+    pub events: Vec<String>,
+    #[arg(long, default_value = "default")]
+    pub vault: String,
+    #[arg(long)]
+    pub label: Option<String>,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct AgentsWebhooksDeleteArgs {
+    #[arg(long)]
+    pub webhook_id: String,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct AgentsRevisionArgs {
+    #[arg(long)]
+    pub path: String,
+    #[arg(long, default_value = "default")]
+    pub vault: String,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct AgentsWriteArgs {
+    #[arg(long)]
+    pub path: String,
+    /// Local file to upload (mutually exclusive with --content-base64).
+    #[arg(long, conflicts_with = "content_base64")]
+    pub file: Option<PathBuf>,
+    /// Pre-encoded base64 payload (mutually exclusive with --file).
+    #[arg(long, conflicts_with = "file")]
+    pub content_base64: Option<String>,
+    #[arg(long, default_value = "default")]
+    pub vault: String,
+    #[arg(long)]
+    pub if_match_revision: Option<u64>,
+    #[arg(long)]
+    pub agent_id: Option<String>,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
 /// `disk share <subcmd>` — wrapper for share management subcommands.
 #[derive(clap::Args, Debug)]
 pub struct ShareArgs {
@@ -1014,6 +1122,52 @@ async fn main() -> Result<()> {
                     &s.vault,
                     &s.node,
                     &s.include,
+                )
+                .await
+            }
+        },
+        Some(Command::Agents(args)) => match args.command {
+            AgentsCommand::Webhooks(w) => match w.command {
+                AgentsWebhooksCommand::List(l) => {
+                    agents_cmd::run_webhooks_list(l.api.as_deref(), l.token.as_deref(), &l.vault)
+                        .await
+                }
+                AgentsWebhooksCommand::Register(r) => {
+                    agents_cmd::run_webhooks_register(
+                        r.api.as_deref(),
+                        r.token.as_deref(),
+                        &r.vault,
+                        &r.url,
+                        &r.events,
+                        r.label.as_deref(),
+                    )
+                    .await
+                }
+                AgentsWebhooksCommand::Delete(d) => {
+                    agents_cmd::run_webhooks_delete(
+                        d.api.as_deref(),
+                        d.token.as_deref(),
+                        &d.webhook_id,
+                    )
+                    .await
+                }
+            },
+            AgentsCommand::Revision(r) => {
+                agents_cmd::run_revision(r.api.as_deref(), r.token.as_deref(), &r.path, &r.vault)
+                    .await
+            }
+            AgentsCommand::Write(w) => {
+                agents_cmd::run_write(
+                    w.api.as_deref(),
+                    w.token.as_deref(),
+                    agents_cmd::AgentsWriteParams {
+                        path: &w.path,
+                        vault: &w.vault,
+                        file: w.file.as_deref(),
+                        content_base64: w.content_base64.as_deref(),
+                        if_match_revision: w.if_match_revision,
+                        agent_id: w.agent_id.as_deref(),
+                    },
                 )
                 .await
             }
@@ -1714,6 +1868,88 @@ node_id_hint = "from-bf"
                 assert_eq!(l.vault, "wiki");
             }
             other => panic!("expected trash list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_agents_revision() {
+        let cli = Cli::try_parse_from([
+            "disk",
+            "agents",
+            "revision",
+            "--path",
+            "notes/a.md",
+            "--vault",
+            "wiki",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Command::Agents(AgentsArgs {
+                command: AgentsCommand::Revision(r),
+            })) => {
+                assert_eq!(r.path, "notes/a.md");
+                assert_eq!(r.vault, "wiki");
+            }
+            other => panic!("expected agents revision, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_agents_webhooks_register() {
+        let cli = Cli::try_parse_from([
+            "disk",
+            "agents",
+            "webhooks",
+            "register",
+            "--url",
+            "https://hooks.example/agent",
+            "--events",
+            "agent.write_ok,agent.write_conflict",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Command::Agents(AgentsArgs {
+                command:
+                    AgentsCommand::Webhooks(AgentsWebhooksArgs {
+                        command: AgentsWebhooksCommand::Register(r),
+                    }),
+            })) => {
+                assert_eq!(r.url, "https://hooks.example/agent");
+                assert_eq!(r.events, vec!["agent.write_ok", "agent.write_conflict"]);
+            }
+            other => panic!("expected agents webhooks register, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_agents_write_file() {
+        let cli = Cli::try_parse_from([
+            "disk",
+            "agents",
+            "write",
+            "--path",
+            "notes/a.md",
+            "--file",
+            "/tmp/a.md",
+            "--if-match-revision",
+            "3",
+            "--agent-id",
+            "dreamer",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Command::Agents(AgentsArgs {
+                command: AgentsCommand::Write(w),
+            })) => {
+                assert_eq!(w.path, "notes/a.md");
+                assert_eq!(
+                    w.file.as_deref(),
+                    Some(PathBuf::from("/tmp/a.md").as_path())
+                );
+                assert_eq!(w.if_match_revision, Some(3));
+                assert_eq!(w.agent_id.as_deref(), Some("dreamer"));
+            }
+            other => panic!("expected agents write, got {other:?}"),
         }
     }
 

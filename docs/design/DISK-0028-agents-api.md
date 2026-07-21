@@ -1,6 +1,6 @@
 # DISK-0028 — AI Agents API (webhooks, agent-write protocol, optimistic locks)
 
-**Status:** slice 2 on DEVS — async webhook delivery with HMAC `X-Disk-Signature`.  
+**Status:** slice 3 on DEVS — `disk agents` CLI (`webhooks`, `write`, `revision`).  
 **Parent:** DISK-0001 commercial / SaaS track.  
 **Tracking:** DISK-0028 in Datarim backlog.
 
@@ -9,8 +9,8 @@
 | Slice | In scope | Out of scope |
 |-------|----------|--------------|
 | 1 (merged #98) | `agent_webhooks` + `agent_write_revisions` tables; `GET/POST/DELETE /agents/webhooks`; `GET /agents/revision`; `POST /agents/write` with `if_match_revision` optimistic locking | Async webhook delivery on file events, HMAC outbound signing, CLI `disk agents` |
-| 2 (this PR) | Persist `signing_secret`; background mpsc dispatcher; fire `agent.write_ok` / `agent.write_conflict` with HMAC `X-Disk-Signature` | `sync.file_*` gRPC hooks, agent API keys separate from user JWT |
-| 3 | `disk agents` CLI (`webhooks`, `write`, `revision`) | LAN sync acceleration (DISK-0027) |
+| 2 (merged #99) | Persist `signing_secret`; background mpsc dispatcher; fire `agent.write_ok` / `agent.write_conflict` with HMAC `X-Disk-Signature` | `sync.file_*` gRPC hooks, agent API keys separate from user JWT |
+| 3 (this PR) | `disk agents` CLI (`webhooks`, `write`, `revision`) | LAN sync acceleration (DISK-0027) |
 
 ## Agent-write protocol
 
@@ -66,12 +66,26 @@ Mounted on the health HTTP listener when `DISK_AUTH_MODE=enforce`.
 - **Migration 020:** `agent_webhooks`, `agent_write_revisions`
 - **Migration 021:** `agent_webhooks.signing_secret` for outbound HMAC
 
+## CLI (slice 3)
+
+| Command | Notes |
+|---------|-------|
+| `disk agents webhooks list [--vault default]` | Lists registered webhooks |
+| `disk agents webhooks register --url <https://...> --events <csv> [--label ...]` | Prints `webhook_secret` once |
+| `disk agents webhooks delete --webhook-id <id>` | Remove a webhook |
+| `disk agents revision --path <rel>` | Read current revision before write |
+| `disk agents write --path <rel> --file <path> [--if-match-revision N] [--agent-id ...]` | Optimistic write; `--content-base64` alternative to `--file` |
+
+Auth: `--token` or `DISK_ACCESS_TOKEN`. API base: `--api` or `DISK_API_BASE` (default `http://127.0.0.1:9446`).
+
 ## Tests
 
 - `crates/disk-core/src/agents/webhook_sig.rs` — sign/verify unit tests
 - `crates/disk-core/src/meta_db/agents.rs` — revision bump + webhook CRUD unit tests
 - `crates/disk-server/src/agents/dispatch.rs` — signed delivery integration test
 - `crates/disk-server/src/agents/routes.rs` — HTTP round-trip (write conflict + webhook CRUD)
+- `crates/disk-cli/src/agents_cmd.rs` — CLI HTTP helpers
+- `crates/disk-cli/src/main.rs` — clap parse tests for `disk agents`
 - `crates/disk-core/tests/schema_smoke.rs` — migration 020/021 tables exist
 
 ## References
