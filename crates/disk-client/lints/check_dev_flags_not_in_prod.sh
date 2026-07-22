@@ -10,6 +10,9 @@
 #   deploy/**                   — deployment manifests
 #   disk.toml.example           — the shipped template
 #
+# Comment-only lines (# …) are ignored (DISK-0059) so prod templates may
+# document forbidden flags without tripping the gate.
+#
 # Allowed locations (not flagged):
 #   scripts/dev-local-e2e.sh    — the bring-up script (explicitly dev-only)
 #   crates/*/tests/**           — test fixtures
@@ -35,6 +38,29 @@ echo "[lint] Repo root: $REPO_ROOT"
 
 VIOLATIONS=0
 
+# Return 0 when the matched line is a comment (leading # after whitespace).
+is_comment_line() {
+    local text="$1"
+    local stripped="${text#"${text%%[![:space:]]*}"}"
+    [[ "$stripped" == \#* ]]
+}
+
+# Drop grep hits that live on comment-only lines.
+filter_non_comment_hits() {
+  local line file rest linenum text
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    file="${line%%:*}"
+    rest="${line#*:}"
+    linenum="${rest%%:*}"
+    text="${rest#*:}"
+    if is_comment_line "$text"; then
+      continue
+    fi
+    printf '%s:%s:%s\n' "$file" "$linenum" "$text"
+  done
+}
+
 # Check committed config/deploy files.
 check_files() {
     local pattern="$1"
@@ -48,6 +74,7 @@ check_files() {
         | grep -v '/lints/' \
         | grep -v 'scripts/dev-local-e2e.sh' \
         | grep -v '\.md:' \
+        | filter_non_comment_hits \
         || true)"
     if [[ -n "$results" ]]; then
         echo "[lint] VIOLATION in $label files:"
@@ -63,7 +90,10 @@ check_files "*.yml"  "YML config"
 # Also check the deploy/ directory for any file type.
 DEPLOY_DIR="$REPO_ROOT/deploy"
 if [[ -d "$DEPLOY_DIR" ]]; then
-    DEPLOY_HITS="$(grep -rn -E "$DEV_FLAGS" "$DEPLOY_DIR" 2>/dev/null | grep -v '\.md:' || true)"
+    DEPLOY_HITS="$(grep -rn -E "$DEV_FLAGS" "$DEPLOY_DIR" 2>/dev/null \
+        | grep -v '\.md:' \
+        | filter_non_comment_hits \
+        || true)"
     if [[ -n "$DEPLOY_HITS" ]]; then
         echo "[lint] VIOLATION in deploy/ directory:"
         echo "$DEPLOY_HITS" | sed 's/^/  /'
@@ -77,6 +107,7 @@ if [[ "$VIOLATIONS" -gt 0 ]]; then
     echo "[lint] DISK_USE_STUB_CA and DISK_ACL_ALLOW_UNSIGNED are local-mode only."
     echo "[lint] They MUST NOT appear in production configs or deploy manifests."
     echo "[lint] Dev-only location: scripts/dev-local-e2e.sh (loopback bring-up)."
+    echo "[lint] Comment-only documentation lines (# …) are allowed (DISK-0059)."
     exit 1
 fi
 
