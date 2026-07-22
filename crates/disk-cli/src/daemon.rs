@@ -277,6 +277,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
     let manual_sync_rx = Arc::new(tokio::sync::Mutex::new(manual_sync_rx));
 
     let mut sync_task_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+    let config_snapshot = watcher.snapshot.clone();
     for share in cfg.shares.iter() {
         let share_name = share.name.clone();
         let share_path = share.path.clone();
@@ -301,6 +302,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
         // Clone the DaemonState handle into the per-share task so it can
         // write live loop state back via `update_share`.
         let state_for_task = state.clone();
+        let config_snapshot_for_loop = config_snapshot.clone();
 
         let handle = tokio::spawn(async move {
             // Build a DiskClient with bounded connect-retry.
@@ -443,6 +445,9 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
                     None,
                 );
                 state_for_task.update_share(&share_name, syncing_snap).await;
+
+                // Pick up tenant_id changes from hot-reloaded disk.toml (DISK-0030).
+                client.set_tenant_id(config_snapshot_for_loop.current().node.tenant_id.clone());
 
                 // Load per-share baselines from the MetaDb for this cycle.
                 // A fresh load each cycle picks up baselines written in the

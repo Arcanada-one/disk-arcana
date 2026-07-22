@@ -3,8 +3,10 @@
 mod agents_cmd;
 mod archive_cmd;
 mod commands;
+mod config_tenant;
 mod daemon;
 mod embeddings_cmd;
+mod org_cmd;
 mod paths;
 mod selective_sync_cmd;
 mod share_init;
@@ -102,6 +104,9 @@ enum Command {
 
     /// Embedding sidecar co-storage diagnostics (DISK-0029).
     Embeddings(EmbeddingsArgs),
+
+    /// Team / org workspaces — switch context and sync x-disk-tenant (DISK-0030).
+    Org(OrgArgs),
 }
 
 /// `disk daemon <subcmd>` — wrapper.
@@ -713,6 +718,132 @@ pub struct EmbeddingsWriteArgs {
     pub config: Option<PathBuf>,
 }
 
+/// `disk org <subcmd>` — team workspaces (DISK-0030 slice 3).
+#[derive(clap::Args, Debug)]
+pub struct OrgArgs {
+    #[command(subcommand)]
+    pub command: OrgCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum OrgCommand {
+    /// List organizations you belong to.
+    List(OrgListArgs),
+    /// Create a new organization.
+    Create(OrgCreateArgs),
+    /// Show active workspace context (personal vs organization).
+    Context(OrgContextArgs),
+    /// Switch workspace and sync tenant_id into disk.toml.
+    Switch(OrgSwitchArgs),
+    /// Mirror server active tenant into disk.toml (no server-side switch).
+    Sync(OrgSyncArgs),
+    /// Manage organization members.
+    Members(OrgMembersArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct OrgListArgs {
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct OrgCreateArgs {
+    #[arg(long)]
+    pub name: String,
+    #[arg(long)]
+    pub slug: String,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct OrgContextArgs {
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct OrgSwitchArgs {
+    /// Switch to personal workspace.
+    #[arg(long, conflicts_with = "org")]
+    pub personal: bool,
+    /// Organization id or slug to activate.
+    #[arg(long, conflicts_with = "personal")]
+    pub org: Option<String>,
+    /// Path to disk.toml. Defaults to platform install path.
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+    /// Skip daemon config reload after updating disk.toml.
+    #[arg(long)]
+    pub no_reload: bool,
+    /// Daemon REST address for config reload. Defaults to 127.0.0.1:9444.
+    #[arg(long)]
+    pub addr: Option<SocketAddr>,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct OrgSyncArgs {
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+    #[arg(long)]
+    pub no_reload: bool,
+    #[arg(long)]
+    pub addr: Option<SocketAddr>,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct OrgMembersArgs {
+    #[command(subcommand)]
+    pub command: OrgMembersCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum OrgMembersCommand {
+    /// List members of an organization.
+    List(OrgMembersListArgs),
+    /// Add an existing user to an organization (admin+).
+    Add(OrgMembersAddArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct OrgMembersListArgs {
+    #[arg(long)]
+    pub org: String,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct OrgMembersAddArgs {
+    #[arg(long)]
+    pub org: String,
+    #[arg(long)]
+    pub email: String,
+    #[arg(long, default_value = "member")]
+    pub role: String,
+    #[arg(long)]
+    pub api: Option<String>,
+    #[arg(long)]
+    pub token: Option<String>,
+}
+
 /// `disk agents <subcmd>` — AI Agents API CLI (DISK-0028 slice 3).
 #[derive(clap::Args, Debug)]
 pub struct AgentsArgs {
@@ -1224,6 +1355,52 @@ async fn main() -> Result<()> {
                     },
                 )
             }
+        },
+        Some(Command::Org(args)) => match args.command {
+            OrgCommand::List(l) => org_cmd::run_list(l.api.as_deref(), l.token.as_deref()).await,
+            OrgCommand::Create(c) => {
+                org_cmd::run_create(c.api.as_deref(), c.token.as_deref(), &c.name, &c.slug).await
+            }
+            OrgCommand::Context(c) => {
+                org_cmd::run_context(c.api.as_deref(), c.token.as_deref()).await
+            }
+            OrgCommand::Switch(s) => {
+                org_cmd::run_switch(
+                    s.api.as_deref(),
+                    s.token.as_deref(),
+                    s.personal,
+                    s.org.as_deref(),
+                    s.config.as_deref(),
+                    !s.no_reload,
+                    s.addr,
+                )
+                .await
+            }
+            OrgCommand::Sync(s) => {
+                org_cmd::run_sync(
+                    s.api.as_deref(),
+                    s.token.as_deref(),
+                    s.config.as_deref(),
+                    !s.no_reload,
+                    s.addr,
+                )
+                .await
+            }
+            OrgCommand::Members(m) => match m.command {
+                OrgMembersCommand::List(l) => {
+                    org_cmd::run_members_list(l.api.as_deref(), l.token.as_deref(), &l.org).await
+                }
+                OrgMembersCommand::Add(a) => {
+                    org_cmd::run_members_add(
+                        a.api.as_deref(),
+                        a.token.as_deref(),
+                        &a.org,
+                        &a.email,
+                        &a.role,
+                    )
+                    .await
+                }
+            },
         },
         Some(Command::Agents(args)) => match args.command {
             AgentsCommand::Webhooks(w) => match w.command {
@@ -2024,6 +2201,67 @@ node_id_hint = "from-bf"
                 assert!(w.vector_base64.is_none());
             }
             other => panic!("expected embeddings write, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_org_switch_personal() {
+        let cli = Cli::try_parse_from(["disk", "org", "switch", "--personal"]).unwrap();
+        match cli.command {
+            Some(Command::Org(OrgArgs {
+                command: OrgCommand::Switch(s),
+            })) => {
+                assert!(s.personal);
+                assert!(s.org.is_none());
+            }
+            other => panic!("expected org switch personal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_org_switch_org_slug() {
+        let cli =
+            Cli::try_parse_from(["disk", "org", "switch", "--org", "corp-team", "--no-reload"])
+                .unwrap();
+        match cli.command {
+            Some(Command::Org(OrgArgs {
+                command: OrgCommand::Switch(s),
+            })) => {
+                assert!(!s.personal);
+                assert_eq!(s.org.as_deref(), Some("corp-team"));
+                assert!(s.no_reload);
+            }
+            other => panic!("expected org switch --org, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_org_members_add() {
+        let cli = Cli::try_parse_from([
+            "disk",
+            "org",
+            "members",
+            "add",
+            "--org",
+            "corp-team",
+            "--email",
+            "dev@corp.test",
+            "--role",
+            "admin",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Command::Org(OrgArgs {
+                command:
+                    OrgCommand::Members(OrgMembersArgs {
+                        command: OrgMembersCommand::Add(a),
+                    }),
+            })) => {
+                assert_eq!(a.org, "corp-team");
+                assert_eq!(a.email, "dev@corp.test");
+                assert_eq!(a.role, "admin");
+            }
+            other => panic!("expected org members add, got {other:?}"),
         }
     }
 

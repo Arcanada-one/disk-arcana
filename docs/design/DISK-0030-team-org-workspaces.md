@@ -1,6 +1,6 @@
 # DISK-0030 — Team / Org Workspaces
 
-**Status:** slice 2 on DEVS — dashboard org panel + persisted active-org context.  
+**Status:** slice 3 on DEVS — `disk org` CLI + local `x-disk-tenant` sync via `disk.toml`.  
 **Parent:** DISK-0001 commercial / SaaS track.  
 **Tracking:** DISK-0030 in Datarim backlog.
 
@@ -12,9 +12,9 @@ Personal tenants (`tenant_id` derived from signup email) work for solo users. Te
 
 | Slice | In scope | Out of scope |
 |-------|----------|--------------|
-| 1 (merged #106) | `organizations` + `organization_members` tables; `POST/GET /orgs`; `GET/POST /orgs/members` | Dashboard org switcher, JWT tenant override, billing per org, `disk org` CLI |
-| 2 (this PR) | Dashboard org panel + workspace switcher; `GET/PUT /orgs/context` persisted active org | SSO group sync, SCIM |
-| 3 (planned) | `disk org` CLI + sync `x-disk-tenant` org context | Cross-org vault federation |
+| 1 (merged #106) | `organizations` + `organization_members` tables; `POST/GET /orgs`; `GET/POST /orgs/members` | Dashboard org switcher, JWT tenant override, billing per org |
+| 2 (merged #107) | Dashboard org panel + workspace switcher; `GET/PUT /orgs/context` persisted active org | SSO group sync, SCIM |
+| 3 (this PR) | `disk org` CLI + sync `x-disk-tenant` org context into `disk.toml` | Cross-org vault federation |
 
 ## Data model
 
@@ -69,12 +69,29 @@ Persisted in `user_org_context`. Stale org membership auto-clears to personal on
 - Organizations panel: create org, list memberships, add members (admin+)
 - Active tenant label reflects selected workspace context
 
+## CLI (slice 3)
+
+| Command | Notes |
+|---------|-------|
+| `disk org list` | List org memberships |
+| `disk org create --name --slug` | Create org (caller becomes owner) |
+| `disk org context` | Show active workspace |
+| `disk org switch --personal \| --org <id\|slug>` | `PUT /orgs/context` + update `[node].tenant_id` in `disk.toml` + daemon reload |
+| `disk org sync` | Mirror server `active_tenant_id` into `disk.toml` without switching |
+| `disk org members list --org` | List members |
+| `disk org members add --org --email --role` | Add member (admin+) |
+
+Daemon sync loops read `tenant_id` from the hot-reloaded config snapshot each cycle so `x-disk-tenant` tracks org switches without restart.
+
 ## Tests
 
 - `crates/disk-core/src/meta_db/orgs.rs` — create + member list + context unit tests
 - `crates/disk-core/tests/schema_smoke.rs` — migration 022/023 tables exist
 - `crates/disk-server/src/orgs/routes.rs` — HTTP round-trip (create + add member + context switch)
 - `deploy/www/dashboard/index.html` — org panel + workspace switcher UI
+- `crates/disk-cli/src/org_cmd.rs` — `disk org` HTTP CLI
+- `crates/disk-cli/src/config_tenant.rs` — `disk.toml` tenant_id patch + validate
+- `crates/disk-client/src/connection.rs` — `DiskClient::set_tenant_id` for hot reload
 
 ## References
 
