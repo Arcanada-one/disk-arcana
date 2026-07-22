@@ -44,6 +44,23 @@ disk enroll \
   --key-out ./client.key
 ```
 
+When the server URL is an **IP address** but the TLS certificate only carries a
+DNS SAN (typical prod: `https://65.108.236.39:9445` + cert for
+`disk.arcanada.ai`), add `--tls-domain disk.arcanada.ai` (DISK-0061 — mirrors
+sync-client `tls_domain` from DISK-0060):
+
+```bash
+disk enroll \
+  --server "https://65.108.236.39:9445" \
+  --tls-domain disk.arcanada.ai \
+  --token "<hex-from-step-2>" \
+  --cert-out ./client.crt \
+  --key-out ./client.key
+```
+
+Bootstrap TOML alternative: `tls_domain = "disk.arcanada.ai"` in
+`--from-bootstrap-file`.
+
 Expect: writes cert + key; `expires_at_unix_ms` in stdout.
 
 ### 4. Replay rejected
@@ -65,6 +82,7 @@ Expect: mTLS handshake succeeds; sync or auth RPCs reachable.
 - `crates/disk-server/tests/it_main_boot_wiring.rs` — dual listener boot markers
 - `crates/disk-server/tests/enrollment_expired_token.rs`
 - `crates/disk-server/tests/enrollment_token_replay.rs`
+- `crates/disk-client/tests/it_enrollment_tls_domain.rs` — IP endpoint + DNS-SAN cert (DISK-0061)
 
 ## Sign-off
 

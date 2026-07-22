@@ -1,7 +1,7 @@
 # DISK-0044 — Enrollment bootstrap (plan)
 
-**Status:** done (audit closeout; implementation = DISK-0037 dual listener)  
-**Branch:** `DISK-0044-enrollment-bootstrap`
+**Status:** done (audit closeout; implementation = DISK-0037 dual listener; DISK-0061 enrollment tls_domain)  
+**Branch:** merged via PR #52 + post-closeout doc touchups
 
 ## Goal
 

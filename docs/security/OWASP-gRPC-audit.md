@@ -41,7 +41,7 @@ See also `SECURITY.md` § Phase 3 threat model (V-7 … V-14).
 | T1.1 | TLS **1.3 only** (stricter than TLS 1.2+ minimum) | verified | `crates/disk-server/src/tls.rs` (`tls13_server_config`); `crates/disk-server/tests/tls_downgrade.rs` |
 | T1.2 | mTLS client cert required in production | verified | `build_mtls_from_files`; `crates/disk-server/tests/mtls_cert_required.rs` |
 | T1.3 | ALPN `h2` for gRPC | verified | `tls.rs` unit tests |
-| T1.4 | Client SNI when server address is IP | verified | `crates/disk-client/tests/it_tls_domain.rs` |
+| T1.4 | Client SNI when server address is IP | verified | `crates/disk-client/tests/it_tls_domain.rs`; enrollment path: `it_enrollment_tls_domain.rs` (DISK-0061) |
 | T1.5 | Cipher suite org policy review | operator | Document org baseline vs rustls 0.23 defaults on staging |
 | T1.6 | Certificate rotation runbook | operator | `documentation/runbooks/disk-arcana/DISK-RB-001-enroll.md` (KB) |
 

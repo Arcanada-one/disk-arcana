@@ -48,8 +48,10 @@ disk daemon / sync          ──►  DISK_BIND_ADDR (mTLS + ACL)
 | Enrollment service | `crates/disk-server/src/enrollment/` |
 | Client (no client cert) | `crates/disk-client/src/enrollment.rs` |
 | CLI defaults | `disk enroll --server https://disk.arcanada.ai:9445` |
+| IP-endpoint TLS name (DISK-0061) | `--tls-domain` / bootstrap `tls_domain` → `EnrollmentClient::connect` |
 | Real-binary E2E | `crates/disk-server/tests/it_enrollment_real_binary.rs` |
 | Boot wiring E2E | `crates/disk-server/tests/it_main_boot_wiring.rs` |
+| Enrollment TLS domain E2E | `crates/disk-client/tests/it_enrollment_tls_domain.rs` |
 
 ### Offline / pre-provisioned mode
 
