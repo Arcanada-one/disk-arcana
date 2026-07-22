@@ -187,44 +187,53 @@ async fn main() -> anyhow::Result<()> {
         let http_client = reqwest::Client::new();
         let agent_webhooks =
             disk_server::spawn_agent_webhook_dispatcher(http_client, control_db.clone());
-        Some(Arc::new(disk_server::AuthHttpState {
-            meta_db: control_db,
-            tenant_router,
-            sync_root: cfg.sync_root.clone(),
-            version_blobs,
-            signing_key: key_bytes.clone(),
-            jwt: disk_server::JwtConfig {
-                mode: cfg.jwt_mode,
-                local_signing_key: key_bytes,
-                token_ttl_secs: cfg.jwt_ttl_secs,
-                issuer: cfg
-                    .jwt_issuer
-                    .clone()
-                    .unwrap_or_else(|| disk_core::DEFAULT_ISSUER.to_string()),
-                jwks: Arc::new(disk_server::JwksCache::new(
-                    cfg.jwt_jwks_uri
+        let sync_agent_webhooks = agent_webhooks.clone();
+        Some((
+            Arc::new(disk_server::AuthHttpState {
+                meta_db: control_db,
+                tenant_router,
+                sync_root: cfg.sync_root.clone(),
+                version_blobs,
+                signing_key: key_bytes.clone(),
+                jwt: disk_server::JwtConfig {
+                    mode: cfg.jwt_mode,
+                    local_signing_key: key_bytes,
+                    token_ttl_secs: cfg.jwt_ttl_secs,
+                    issuer: cfg
+                        .jwt_issuer
                         .clone()
-                        .unwrap_or_else(|| "http://127.0.0.1:9/jwks".into()),
-                )),
-            },
-            oauth: disk_server::OAuthConfig {
-                mode: cfg.oauth_mode,
-                issuer: cfg.oauth_issuer.clone(),
-                client_id: cfg.oauth_client_id.clone(),
-                client_secret: cfg.oauth_client_secret.clone(),
-                redirect_uri: cfg.oauth_redirect_uri.clone(),
-                public_base_url: cfg.oauth_public_base_url.clone(),
-            },
-            email_verify: disk_server::EmailVerifyConfig {
-                mode: cfg.email_verify_mode,
-                public_base_url: cfg.email_verify_base_url.clone(),
-                token_ttl_secs: cfg.email_verify_ttl_secs,
-            },
-            agent_webhooks,
-        }))
+                        .unwrap_or_else(|| disk_core::DEFAULT_ISSUER.to_string()),
+                    jwks: Arc::new(disk_server::JwksCache::new(
+                        cfg.jwt_jwks_uri
+                            .clone()
+                            .unwrap_or_else(|| "http://127.0.0.1:9/jwks".into()),
+                    )),
+                },
+                oauth: disk_server::OAuthConfig {
+                    mode: cfg.oauth_mode,
+                    issuer: cfg.oauth_issuer.clone(),
+                    client_id: cfg.oauth_client_id.clone(),
+                    client_secret: cfg.oauth_client_secret.clone(),
+                    redirect_uri: cfg.oauth_redirect_uri.clone(),
+                    public_base_url: cfg.oauth_public_base_url.clone(),
+                },
+                email_verify: disk_server::EmailVerifyConfig {
+                    mode: cfg.email_verify_mode,
+                    public_base_url: cfg.email_verify_base_url.clone(),
+                    token_ttl_secs: cfg.email_verify_ttl_secs,
+                },
+                agent_webhooks,
+            }),
+            sync_agent_webhooks,
+        ))
     } else {
         None
     };
+
+    let auth_http_state = auth_state.as_ref().map(|(state, _)| Arc::clone(state));
+    let sync_agent_webhooks = auth_state
+        .map(|(_, webhooks)| webhooks)
+        .unwrap_or_else(disk_server::AgentWebhookDispatcher::noop);
 
     // gRPC service wrappers. EnrollmentServiceImpl is Clone (Arc-wrapped fields)
     // so we can host the same backing service on both listeners (DISK-0037).
@@ -254,7 +263,7 @@ async fn main() -> anyhow::Result<()> {
         if let Some(enforcer) = quota_enforcer {
             sync_impl = sync_impl.with_quota_enforcer(enforcer);
         }
-        sync_impl
+        sync_impl.with_agent_webhooks(sync_agent_webhooks)
     });
     let enroll_svc = EnrollmentServiceServer::new(enrollment_impl.clone());
     let enroll_svc_public = EnrollmentServiceServer::new(enrollment_impl);
@@ -277,7 +286,7 @@ async fn main() -> anyhow::Result<()> {
     let health_addr = cfg.health_bind_addr;
     let _health_task = tokio::spawn(async move {
         if let Err(e) =
-            disk_server::health::serve(health_addr, webhook_state, auth_state, health_shutdown)
+            disk_server::health::serve(health_addr, webhook_state, auth_http_state, health_shutdown)
                 .await
         {
             tracing::error!(error = %e, "health server exited with error");

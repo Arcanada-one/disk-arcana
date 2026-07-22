@@ -40,6 +40,9 @@ use disk_proto::disk::{
 };
 
 use crate::acl::{AclEnforcer, AclError, CertFingerprint, EnforcedRole};
+use crate::agents::{
+    sync_file_changed_payload, sync_file_deleted_payload, AgentWebhookDispatcher, AgentWebhookJob,
+};
 use crate::audit::{AuditEmitter, AuditEvent, AuditKind};
 use crate::auth::{AuthStore, CertIdentity, SessionToken};
 use crate::billing::QuotaEnforcer;
@@ -86,6 +89,8 @@ pub struct SyncServiceImpl {
     pub quota_enforcer: Option<QuotaEnforcer>,
     /// Content-addressed store for superseded file bytes (DISK-0020).
     pub version_blobs: ContentBlobStore,
+    /// Async agent webhook dispatcher (DISK-0028 slice 4 — gRPC sync hooks).
+    pub agent_webhooks: AgentWebhookDispatcher,
 }
 
 impl SyncServiceImpl {
@@ -104,6 +109,7 @@ impl SyncServiceImpl {
             publisher_verifier: None,
             quota_enforcer: None,
             version_blobs,
+            agent_webhooks: AgentWebhookDispatcher::noop(),
         }
     }
 
@@ -127,7 +133,14 @@ impl SyncServiceImpl {
             publisher_verifier: None,
             quota_enforcer: None,
             version_blobs,
+            agent_webhooks: AgentWebhookDispatcher::noop(),
         }
+    }
+
+    /// Attach agent webhook dispatch for gRPC sync events (DISK-0028 slice 4).
+    pub fn with_agent_webhooks(mut self, dispatcher: AgentWebhookDispatcher) -> Self {
+        self.agent_webhooks = dispatcher;
+        self
     }
 
     /// Attach a `MetaDb` handle and optional server node id to an existing instance.
@@ -695,7 +708,7 @@ impl SyncService for SyncServiceImpl {
                     .to_path_buf();
 
                 let meta = FileMeta {
-                    path: relative_path,
+                    path: relative_path.clone(),
                     content_hash: resulting_hash,
                     size: file_size,
                     mtime_ns,
@@ -715,9 +728,25 @@ impl SyncService for SyncServiceImpl {
                 };
                 // Upsert failure is non-fatal: bytes are durable; next sync
                 // rebuilds the row from disk (convergent recovery).
-                let _ = db
+                let upsert_ok = db
                     .upsert_file_scoped_versioned(tenant.as_deref(), &share, &meta, &ctx)
-                    .await;
+                    .await
+                    .is_ok();
+
+                if upsert_ok {
+                    let path_str = relative_path.to_string_lossy();
+                    self.agent_webhooks.enqueue(AgentWebhookJob {
+                        tenant_id: tenant.clone(),
+                        vault_id: share.clone(),
+                        event: "sync.file_changed".into(),
+                        payload: sync_file_changed_payload(
+                            &path_str,
+                            &hex::encode(resulting_hash),
+                            file_size,
+                            &node_id,
+                        ),
+                    });
+                }
             }
         }
 
@@ -992,6 +1021,9 @@ impl SyncService for SyncServiceImpl {
             for action in &actions {
                 if action.action == ActionType::DeleteLocal {
                     if let Some(m) = server_files.iter().find(|m| m.path == action.path) {
+                        if m.deleted {
+                            continue;
+                        }
                         let tombstone = disk_core::types::FileMeta {
                             deleted: true,
                             deleted_at: Some(now_secs),
@@ -1000,6 +1032,14 @@ impl SyncService for SyncServiceImpl {
                         db.upsert_file_scoped(tenant.as_deref(), vault_id, &tombstone)
                             .await
                             .map_err(|e| Status::internal(format!("tombstone upsert: {e}")))?;
+
+                        let path_str = action.path.to_string_lossy().to_string();
+                        self.agent_webhooks.enqueue(AgentWebhookJob {
+                            tenant_id: tenant.clone(),
+                            vault_id: vault_id.to_string(),
+                            event: "sync.file_deleted".into(),
+                            payload: sync_file_deleted_payload(&path_str, &node_id, now_secs),
+                        });
                     }
                 }
             }

@@ -1,6 +1,6 @@
 # DISK-0028 — AI Agents API (webhooks, agent-write protocol, optimistic locks)
 
-**Status:** slice 3 on DEVS — `disk agents` CLI (`webhooks`, `write`, `revision`).  
+**Status:** slice 4 on DEVS — gRPC `sync.file_*` webhook dispatch on upload + tombstone.  
 **Parent:** DISK-0001 commercial / SaaS track.  
 **Tracking:** DISK-0028 in Datarim backlog.
 
@@ -10,7 +10,8 @@
 |-------|----------|--------------|
 | 1 (merged #98) | `agent_webhooks` + `agent_write_revisions` tables; `GET/POST/DELETE /agents/webhooks`; `GET /agents/revision`; `POST /agents/write` with `if_match_revision` optimistic locking | Async webhook delivery on file events, HMAC outbound signing, CLI `disk agents` |
 | 2 (merged #99) | Persist `signing_secret`; background mpsc dispatcher; fire `agent.write_ok` / `agent.write_conflict` with HMAC `X-Disk-Signature` | `sync.file_*` gRPC hooks, agent API keys separate from user JWT |
-| 3 (this PR) | `disk agents` CLI (`webhooks`, `write`, `revision`) | LAN sync acceleration (DISK-0027) |
+| 3 (merged #100) | `disk agents` CLI (`webhooks`, `write`, `revision`) | LAN sync acceleration (DISK-0027) |
+| 4 (this PR) | Dispatch `sync.file_changed` on `DeltaUpload` commit; `sync.file_deleted` on `ExchangeState` DeleteLocal tombstone | Agent API keys separate from user JWT |
 
 ## Agent-write protocol
 
@@ -36,10 +37,11 @@ Tenant owners register HTTPS callback URLs per vault. Secrets are returned once 
 
 Supported event names:
 
-- `sync.file_changed` (registered; gRPC dispatch deferred)
-- `sync.file_deleted` (registered; gRPC dispatch deferred)
+- `sync.file_changed` (dispatched on successful gRPC `DeltaUpload` commit)
+- `sync.file_deleted` (dispatched when `ExchangeState` tombstones a DeleteLocal path)
 - `agent.write_ok` (dispatched on successful `/agents/write`)
 - `agent.write_conflict` (dispatched on revision mismatch)
+- `embeddings.stale` (dispatched via `POST /agents/embeddings-stale`)
 
 ## Outbound delivery (slice 2)
 
@@ -65,6 +67,15 @@ Mounted on the health HTTP listener when `DISK_AUTH_MODE=enforce`.
 
 - **Migration 020:** `agent_webhooks`, `agent_write_revisions`
 - **Migration 021:** `agent_webhooks.signing_secret` for outbound HMAC
+
+## gRPC sync hooks (slice 4)
+
+| Event | Trigger | Payload |
+|-------|---------|---------|
+| `sync.file_changed` | `DeltaUpload` bytes committed + MetaDb upsert OK | `{ path, content_hash_hex, size, node_id }` |
+| `sync.file_deleted` | `ExchangeState` DeleteLocal tombstone (first delete only) | `{ path, node_id, deleted_at }` |
+
+`SyncServiceImpl` shares the same `AgentWebhookDispatcher` instance as the health HTTP server (spawned once in `main.rs` when `DISK_AUTH_MODE=enforce`). When auth is disabled, sync hooks use `AgentWebhookDispatcher::noop()`.
 
 ## CLI (slice 3)
 
