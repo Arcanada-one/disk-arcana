@@ -252,6 +252,30 @@ pub fn agent_write_conflict_payload(
     })
 }
 
+/// Build a standard payload for gRPC sync uploads (`sync.file_changed`).
+pub fn sync_file_changed_payload(
+    path: &str,
+    content_hash_hex: &str,
+    size: u64,
+    node_id: &str,
+) -> Value {
+    json!({
+        "path": path,
+        "content_hash_hex": content_hash_hex,
+        "size": size,
+        "node_id": node_id,
+    })
+}
+
+/// Build a standard payload for gRPC sync tombstones (`sync.file_deleted`).
+pub fn sync_file_deleted_payload(path: &str, node_id: &str, deleted_at: i64) -> Value {
+    json!({
+        "path": path,
+        "node_id": node_id,
+        "deleted_at": deleted_at,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,6 +310,20 @@ mod tests {
             .and_then(|v| v.to_str().ok())
             .map(str::to_string);
         "ok"
+    }
+
+    #[test]
+    fn sync_payload_builders_include_path_and_node() {
+        let changed = sync_file_changed_payload("docs/a.md", "abc123", 42, "node-a");
+        assert_eq!(changed["path"], "docs/a.md");
+        assert_eq!(changed["content_hash_hex"], "abc123");
+        assert_eq!(changed["size"], 42);
+        assert_eq!(changed["node_id"], "node-a");
+
+        let deleted = sync_file_deleted_payload("docs/a.md", "node-a", 1_700_000_000);
+        assert_eq!(deleted["path"], "docs/a.md");
+        assert_eq!(deleted["node_id"], "node-a");
+        assert_eq!(deleted["deleted_at"], 1_700_000_000);
     }
 
     #[tokio::test]

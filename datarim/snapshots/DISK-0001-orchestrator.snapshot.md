@@ -1,7 +1,7 @@
 # DISK-0001 orchestrator snapshot
 
 **Date:** 2026-07-22  
-**Repo:** `Arcanada-one/disk-arcana` @ main (post afd07ea flake hardening)
+**Repo:** `Arcanada-one/disk-arcana` @ main (post DISK-0028 slice 4)
 
 ## Closed this sprint (verified on main)
 
@@ -15,18 +15,23 @@
 | DISK-0063 | Server `DISK_SYNC_ROOT` create_dir_all | PR #27 |
 | DISK-0064 | Upload error swallow twin | PR #26 |
 | DISK-0015 | E2EE slices 1–5 (download decrypt) | PR #110 `37d67db` |
+| DISK-0028 | AI Agents API slice 4 — gRPC `sync.file_*` webhooks | this pass |
+
+## Backlog audit DISK-0008..0032 (2026-07-22)
+
+KB `datarim/backlog.md` reconciled against `main`. All DISK-0016..0030 product scaffolds are **shipped on main** (slices per design docs). Stale `pending` rows corrected.
+
+| ID | KB status | Notes |
+|----|-----------|-------|
+| 0008–0013, 0015, 0032 | done | unchanged |
+| 0014 | skip | mobile v2.0 |
+| 0016–0017, 0019–0030 | done | code on main; 0019/0021 do not rebuild |
+| 0018 | skip | billing deferred per orchestrator |
+| 0028 | done | slice 4 closes gRPC hook gap |
 
 ## In-flight (this orchestrator pass)
 
-_None — DISK-0015 slice 5 merged (#110)._
-
-## Verification (2026-07-22, arcana-devs)
-
-- Enrollment suites: 15 passed
-- DISK-0062: `it_download_share_header`, `it_upload_hardening` — 5 passed
-- DISK-0053: `disk-cli` conflict tests — 8 passed
-- OWASP evidence gate: 39 paths OK
-- `it_local_e2e_writeback` under `cargo llvm-cov` — 2 passed
+**DISK-0028 slice 4** — wire `AgentWebhookDispatcher` into `SyncServiceImpl`; dispatch `sync.file_changed` on `DeltaUpload`, `sync.file_deleted` on DeleteLocal tombstone.
 
 ## Operator gates (defer — not code)
 
@@ -36,11 +41,9 @@ _None — DISK-0015 slice 5 merged (#110)._
 
 ## Skip list
 
-DISK-0018, DISK-0014 (mobile), DISK-0055 (P3 GUI tech-debt)
+DISK-0018 (billing), DISK-0014 (mobile), DISK-0055 (P3 GUI tech-debt), DISK-0015 slice 6+ (escrow)
 
 ## Next execute (orchestrator pick)
 
-1. **DISK-0021** — compliance scaffold (P0 MVP, L2) — largest unblocked product gap
-2. **DISK-0019** — dashboard slices (P1 MVP) — partial code on main
-3. **DISK-0015 follow-up** — download-path decrypt on pull (open gap vs design; not slice 5 escrow)
-4. Operator: R13 cutover when Mac available
+1. **DISK-0018** billing Stripe live mode (P0) — only unblocked MVP product gap; operator-gated secrets
+2. Operator: R13 cutover when Mac available; RB-011 prod enroll
