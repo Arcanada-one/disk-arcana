@@ -23,8 +23,8 @@ impl DownloadPayload {
         key: Option<&VaultKey>,
     ) -> Result<Self, E2eeError> {
         let wire_hash = *blake3::hash(wire_bytes).as_bytes();
-        let hash_is_placeholder = expected_content_hash.len() != 32
-            || expected_content_hash.iter().all(|&b| b == 0);
+        let hash_is_placeholder =
+            expected_content_hash.len() != 32 || expected_content_hash.iter().all(|&b| b == 0);
         if !hash_is_placeholder && wire_hash.as_slice() != expected_content_hash {
             return Err(E2eeError::WireHashMismatch);
         }
@@ -67,8 +67,16 @@ mod tests {
 
     #[test]
     fn plaintext_rejects_hash_mismatch() {
-        let err = DownloadPayload::from_wire_bytes(b"hello", &[], &[0u8; 32], None).unwrap_err();
+        let wrong_hash = [0xABu8; 32];
+        let err = DownloadPayload::from_wire_bytes(b"hello", &[], &wrong_hash, None).unwrap_err();
         assert_eq!(err, E2eeError::WireHashMismatch);
+    }
+
+    #[test]
+    fn plaintext_accepts_zero_hash_placeholder() {
+        let out =
+            DownloadPayload::from_wire_bytes(b"hello", &[], &[0u8; 32], None).expect("placeholder");
+        assert_eq!(out.plaintext, b"hello");
     }
 
     #[test]

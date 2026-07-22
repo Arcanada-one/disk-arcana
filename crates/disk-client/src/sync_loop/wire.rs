@@ -352,11 +352,7 @@ impl<'a> RemoteSync<'a> {
         meta: &FileMetadata,
         context: &str,
     ) -> Option<Vec<u8>> {
-        let expected_hash: [u8; 32] = meta
-            .content_hash
-            .as_slice()
-            .try_into()
-            .unwrap_or([0u8; 32]);
+        let expected_hash: [u8; 32] = meta.content_hash.as_slice().try_into().unwrap_or([0u8; 32]);
         match DownloadPayload::from_wire_bytes(
             wire_bytes,
             &meta.encryption_nonce,
