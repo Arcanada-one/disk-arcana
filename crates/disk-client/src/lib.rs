@@ -58,8 +58,9 @@ pub use sync_loop::{
 };
 pub use telemetry::{default_health_base, sync_outcome_label, ClientTelemetry};
 pub use vault_key::{
-    e2ee_keystore_label, load_vault_key_from_env, load_vault_key_from_keystore, lock_vault_key,
-    resolve_vault_key, unlock_vault_key, vault_key_status, VaultKeyError, VaultLockState,
+    e2ee_keystore_label, import_vault_key, load_vault_key_from_env, load_vault_key_from_keystore,
+    lock_vault_key, resolve_vault_key, unlock_vault_key, vault_key_status, VaultKeyError,
+    VaultLockState,
 };
 pub use watcher::{
     translate_notify_event, FsEvent, FsEventDebouncer, FsWatcher, WatcherError,

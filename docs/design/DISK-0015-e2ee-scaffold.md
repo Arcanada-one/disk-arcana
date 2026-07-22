@@ -1,6 +1,6 @@
 # DISK-0015 — E2EE scaffold
 
-**Status:** slices 1–5 shipped on `main`. Slice 6+ deferred (multi-device escrow).  
+**Status:** slices 1–6 shipped on `main`. Slice 6 = multi-device recovery escrow.  
 **Parent:** DISK-0001 §4.7 (future paid / SaaS feature).  
 **Tracking:** DISK-0015 — **done** (MVP E2EE) in Datarim backlog.
 
@@ -12,8 +12,8 @@
 | 2 (merged #58) | encrypt-on-upload, MetaDb nonce | ExchangeState reconcile |
 | 3 (merged #59) | ExchangeState ciphertext overlay | Keychain UX |
 | 4 (merged #60) | `disk vault unlock|lock|status`, keychain store, daemon `resolve_vault_key` | SaaS billing, multi-device escrow |
-| 5 (this PR) | Download-path decrypt in sync-loop pull + conflict apply | Multi-device escrow |
-| 6+ | Multi-device escrow | Billing → DISK-0018 |
+| 5 (merged #110) | Download-path decrypt in sync-loop pull + conflict apply | Multi-device escrow |
+| 6 (this PR) | Recovery-passphrase escrow blob + `disk vault escrow` CLI | Server-side escrow |
 
 ## Remaining gaps vs full zero-knowledge sync (post–slice 4)
 
@@ -23,7 +23,7 @@
 | ExchangeState ciphertext overlay | **Shipped** | `overlay_e2ee_exchange_files` |
 | `disk vault unlock\|lock\|status` + keychain | **Shipped** | `it_vault_unlock.rs` |
 | Download decrypt (pull → plaintext on disk) | **Shipped** | `DownloadPayload` + `RemoteSync::materialize_downloaded_bytes` |
-| Multi-device key escrow | **Open** | Slice 5+; out of MVP scaffold |
+| Multi-device key escrow | **Shipped (slice 6)** | `disk vault escrow create\|recover`; `{state_dir}/escrow/*.escrow.json` |
 
 ## Operator workflow (slice 4)
 

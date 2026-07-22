@@ -1183,6 +1183,11 @@ async fn main() -> Result<()> {
             vault::VaultCommand::Unlock(u) => vault::run_unlock(u),
             vault::VaultCommand::Lock(l) => vault::run_lock(l),
             vault::VaultCommand::Status(s) => vault::run_status(s),
+            vault::VaultCommand::Escrow(e) => match e.command {
+                vault::VaultEscrowCommand::Create(c) => vault::run_escrow_create(c),
+                vault::VaultEscrowCommand::Recover(r) => vault::run_escrow_recover(r),
+                vault::VaultEscrowCommand::Status(s) => vault::run_escrow_status(s),
+            },
         },
         Some(Command::Versions(args)) => match args.command {
             VersionsCommand::List(l) => {

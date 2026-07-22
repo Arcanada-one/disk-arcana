@@ -6,7 +6,11 @@ use std::path::PathBuf;
 use anyhow::{bail, Context, Result};
 use disk_client::config::DiskConfig;
 use disk_client::{
-    lock_vault_key, resolve_vault_key, unlock_vault_key, vault_key_status, VaultLockState,
+    import_vault_key, lock_vault_key, resolve_vault_key, unlock_vault_key, vault_key_status,
+    VaultLockState,
+};
+use disk_core::e2ee::{
+    create_escrow, escrow_path, read_escrow_file, recover_from_escrow, write_escrow_file,
 };
 
 use crate::paths;
@@ -26,6 +30,61 @@ pub enum VaultCommand {
     Lock(VaultLockArgs),
     /// Show whether the vault E2EE key is unlocked in the keychain.
     Status(VaultStatusArgs),
+    /// Multi-device recovery escrow (DISK-0015 slice 6).
+    Escrow(VaultEscrowArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct VaultEscrowArgs {
+    #[command(subcommand)]
+    pub command: VaultEscrowCommand,
+}
+
+#[derive(clap::Subcommand, Debug)]
+pub enum VaultEscrowCommand {
+    /// Wrap the unlocked vault key with a recovery passphrase and write `{state_dir}/escrow/`.
+    Create(VaultEscrowCreateArgs),
+    /// Recover the vault key from an escrow file and store it in the keychain.
+    Recover(VaultEscrowRecoverArgs),
+    /// Show whether an escrow file exists for this node.
+    Status(VaultEscrowStatusArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct VaultEscrowCreateArgs {
+    #[arg(long, default_value = paths::DEFAULT_CONFIG)]
+    pub config: PathBuf,
+
+    #[arg(long, default_value = paths::DEFAULT_STATE_DIR)]
+    pub state_dir: PathBuf,
+
+    #[arg(long)]
+    pub recovery_passphrase: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct VaultEscrowRecoverArgs {
+    #[arg(long, default_value = paths::DEFAULT_CONFIG)]
+    pub config: PathBuf,
+
+    #[arg(long, default_value = paths::DEFAULT_STATE_DIR)]
+    pub state_dir: PathBuf,
+
+    #[arg(long)]
+    pub recovery_passphrase: Option<String>,
+
+    /// Override escrow file path (default: `{state_dir}/escrow/{node_id}.escrow.json`).
+    #[arg(long)]
+    pub escrow_file: Option<PathBuf>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct VaultEscrowStatusArgs {
+    #[arg(long, default_value = paths::DEFAULT_CONFIG)]
+    pub config: PathBuf,
+
+    #[arg(long, default_value = paths::DEFAULT_STATE_DIR)]
+    pub state_dir: PathBuf,
 }
 
 #[derive(clap::Args, Debug)]
@@ -119,6 +178,56 @@ pub fn run_status(args: VaultStatusArgs) -> Result<()> {
     }
     if env_override {
         println!("note: DISK_VAULT_PASSPHRASE is set — daemon prefers env over keychain");
+    }
+    Ok(())
+}
+
+pub fn run_escrow_create(args: VaultEscrowCreateArgs) -> Result<()> {
+    let cfg = DiskConfig::load(&args.config)
+        .with_context(|| format!("load {}", args.config.display()))?;
+    let key = resolve_vault_key(&cfg.node.id, &args.state_dir)?
+        .context("vault must be unlocked before creating escrow (run `disk vault unlock` first)")?;
+    let recovery = read_passphrase(args.recovery_passphrase.as_deref())?;
+    let blob = create_escrow(&key, recovery.as_bytes()).context("create escrow blob")?;
+    let path = escrow_path(&args.state_dir, &cfg.node.id);
+    write_escrow_file(&path, &blob).context("write escrow file")?;
+    println!(
+        "escrow created for node '{}' at {}",
+        cfg.node.id,
+        path.display()
+    );
+    Ok(())
+}
+
+pub fn run_escrow_recover(args: VaultEscrowRecoverArgs) -> Result<()> {
+    let cfg = DiskConfig::load(&args.config)
+        .with_context(|| format!("load {}", args.config.display()))?;
+    let path = args
+        .escrow_file
+        .unwrap_or_else(|| escrow_path(&args.state_dir, &cfg.node.id));
+    let blob = read_escrow_file(&path).context("read escrow file")?;
+    let recovery = read_passphrase(args.recovery_passphrase.as_deref())?;
+    let key = recover_from_escrow(&blob, recovery.as_bytes()).context("recover vault key")?;
+    import_vault_key(&key, &cfg.node.id, &args.state_dir)?;
+    println!(
+        "vault recovered from escrow for node '{}' (key stored in keychain)",
+        cfg.node.id
+    );
+    Ok(())
+}
+
+pub fn run_escrow_status(args: VaultEscrowStatusArgs) -> Result<()> {
+    let cfg = DiskConfig::load(&args.config)
+        .with_context(|| format!("load {}", args.config.display()))?;
+    let path = escrow_path(&args.state_dir, &cfg.node.id);
+    if path.is_file() {
+        println!(
+            "escrow: present for node '{}' at {}",
+            cfg.node.id,
+            path.display()
+        );
+    } else {
+        println!("escrow: absent for node '{}'", cfg.node.id);
     }
     Ok(())
 }
