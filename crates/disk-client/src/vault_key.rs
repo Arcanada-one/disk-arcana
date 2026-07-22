@@ -145,6 +145,24 @@ pub fn unlock_vault_key(
     Ok(())
 }
 
+/// Import a raw vault key into the keychain (e.g. after escrow recovery).
+pub fn import_vault_key(
+    key: &VaultKey,
+    node_id: &str,
+    state_dir: &Path,
+) -> Result<(), VaultKeyError> {
+    let label = e2ee_keystore_label(node_id)?;
+    let store = open_e2ee_keystore(state_dir)?;
+    let salt = random_salt();
+    let record = StoredE2eeKey {
+        v: 1,
+        salt: hex::encode(salt),
+        key: hex::encode(key.as_bytes()),
+    };
+    store.store(&label, &serde_json::to_string(&record)?)?;
+    Ok(())
+}
+
 /// Remove the unlocked key material from the keychain (idempotent).
 pub fn lock_vault_key(node_id: &str, state_dir: &Path) -> Result<bool, VaultKeyError> {
     let label = e2ee_keystore_label(node_id)?;

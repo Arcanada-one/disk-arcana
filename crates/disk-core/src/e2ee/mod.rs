@@ -6,11 +6,16 @@
 
 mod download;
 mod error;
+mod escrow;
 mod exchange_overlay;
 mod upload;
 
 pub use download::DownloadPayload;
 pub use error::E2eeError;
+pub use escrow::{
+    create_escrow, escrow_path, read_escrow_file, recover_from_escrow, write_escrow_file,
+    EscrowBlob, ESCROW_FILE_SUFFIX, ESCROW_FORMAT_VERSION,
+};
 pub use exchange_overlay::{overlay_scanned_meta, E2eeCachedWire};
 pub use upload::UploadPayload;
 

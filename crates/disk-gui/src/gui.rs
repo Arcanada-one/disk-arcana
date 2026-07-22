@@ -264,16 +264,9 @@ impl DiskGuiApp {
             }
         }
     }
-}
 
-impl eframe::App for DiskGuiApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.drain_pending();
-        self.maybe_poll(ctx);
-        self.drain_conflicts();
-        self.drain_resolve(ctx);
-
-        // Top panel — menu bar.
+    /// Top menu bar — heading, Settings, Conflicts buttons.
+    fn render_top_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("Disk Arcana");
@@ -298,8 +291,10 @@ impl eframe::App for DiskGuiApp {
                 });
             });
         });
+    }
 
-        // Bottom status bar.
+    /// Bottom status bar — daemon connection indicator.
+    fn render_status_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 match &self.last_error {
@@ -327,201 +322,236 @@ impl eframe::App for DiskGuiApp {
                 }
             });
         });
+    }
 
-        // Settings modal window.
-        // We collect button intents into locals to avoid nested mutable borrows.
+    /// Settings modal — returns `(save_clicked, cancel_clicked)`.
+    fn render_settings_modal(&mut self, ctx: &egui::Context) -> (bool, bool) {
         let mut do_save = false;
         let mut do_cancel = false;
-        if self.settings_open {
-            let mut open = self.settings_open;
-            egui::Window::new("Settings")
-                .open(&mut open)
-                .resizable(false)
-                .collapsible(false)
-                .show(ctx, |ui| {
-                    if let Some(edit) = &mut self.settings_edit {
-                        egui::Grid::new("settings_grid")
-                            .num_columns(2)
-                            .spacing([12.0, 6.0])
-                            .show(ui, |ui| {
-                                ui.label("Daemon host:");
-                                ui.text_edit_singleline(&mut edit.host);
-                                ui.end_row();
+        if !self.settings_open {
+            return (do_save, do_cancel);
+        }
 
-                                ui.label("Daemon port:");
-                                ui.text_edit_singleline(&mut edit.port_str);
-                                ui.end_row();
+        let mut open = self.settings_open;
+        egui::Window::new("Settings")
+            .open(&mut open)
+            .resizable(false)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                if let Some(edit) = &mut self.settings_edit {
+                    egui::Grid::new("settings_grid")
+                        .num_columns(2)
+                        .spacing([12.0, 6.0])
+                        .show(ui, |ui| {
+                            ui.label("Daemon host:");
+                            ui.text_edit_singleline(&mut edit.host);
+                            ui.end_row();
 
-                                ui.label("Storage path:");
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut edit.storage_path)
-                                        .hint_text("(read-only display)"),
-                                );
-                                ui.end_row();
-                            });
+                            ui.label("Daemon port:");
+                            ui.text_edit_singleline(&mut edit.port_str);
+                            ui.end_row();
 
-                        if let Some(err) = &edit.port_error {
-                            ui.colored_label(egui::Color32::RED, err);
-                        }
-
-                        ui.separator();
-                        ui.horizontal(|ui| {
-                            if ui.button("Save").clicked() {
-                                do_save = true;
-                            }
-                            if ui.button("Cancel").clicked() {
-                                do_cancel = true;
-                            }
+                            ui.label("Storage path:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut edit.storage_path)
+                                    .hint_text("(read-only display)"),
+                            );
+                            ui.end_row();
                         });
-                    }
-                });
-            self.settings_open = open;
-        }
-        // Process Save/Cancel after the window closure to avoid nested borrows.
-        if do_save {
-            if let Some(edit) = &mut self.settings_edit {
-                let mut tmp = self.settings.clone();
-                if edit.try_apply(&mut tmp) {
-                    self.settings = tmp;
-                    if let Err(err) = self.settings.save() {
-                        error!("failed to save settings: {err:#}");
-                    }
-                    self.settings_open = false;
-                    self.last_poll = None;
-                    self.settings_edit = None;
-                }
-            }
-        }
-        if do_cancel {
-            self.settings_open = false;
-            self.settings_edit = None;
-        }
 
-        // Conflicts modal window.
-        // We collect the requested (path, action) into a local to avoid
-        // mutating `self` while `self.conflicts` is borrowed by the closure.
-        let mut do_resolve: Option<(String, String, &'static str)> = None;
-        if self.conflicts_open {
-            let mut open = self.conflicts_open;
-            egui::Window::new("Conflicts")
-                .open(&mut open)
-                .resizable(true)
-                .default_width(480.0)
-                .show(ctx, |ui| {
-                    if let Some(err) = &self.conflicts_error {
+                    if let Some(err) = &edit.port_error {
                         ui.colored_label(egui::Color32::RED, err);
                     }
-                    if self.conflicts_rx.is_some() {
-                        ui.label("refreshing…");
-                    }
-                    if self.conflicts.is_empty() && self.conflicts_rx.is_none() {
-                        ui.label("no unresolved conflicts");
-                    } else {
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            for item in &self.conflicts {
-                                egui::Frame::group(ui.style()).show(ui, |ui| {
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "{}: {}",
-                                            item.vault_id, item.path
-                                        ))
-                                        .strong(),
-                                    );
-                                    ui.label(format!("Type: {}", item.conflict_type));
-                                    if let Some(fork) = &item.fork_path {
-                                        ui.label(format!("Fork: {fork}"));
-                                    }
-                                    ui.horizontal(|ui| {
-                                        for (label, action) in CONFLICT_ACTIONS {
-                                            if ui.button(*label).clicked() {
-                                                do_resolve = Some((
-                                                    item.vault_id.clone(),
-                                                    item.path.clone(),
-                                                    *action,
-                                                ));
-                                            }
-                                        }
-                                    });
-                                });
-                                ui.add_space(4.0);
-                            }
-                        });
-                    }
-                });
-            self.conflicts_open = open;
-        }
-        if let Some((vault_id, path, action)) = do_resolve {
-            self.start_resolve_conflict(ctx, vault_id, path, action);
-        }
 
-        // Main central panel.
-        egui::CentralPanel::default().show(ctx, |ui| {
-            match &self.last_status {
-                None => {
-                    ui.centered_and_justified(|ui| {
-                        if self.last_error.is_some() {
-                            ui.label(egui::RichText::new("daemon not running").size(20.0));
-                        } else {
-                            ui.label(egui::RichText::new("connecting to daemon…").size(20.0));
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        if ui.button("Save").clicked() {
+                            do_save = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            do_cancel = true;
                         }
                     });
                 }
-                Some(status) => {
-                    // Daemon info.
-                    egui::Grid::new("daemon_info")
-                        .num_columns(2)
-                        .spacing([12.0, 4.0])
-                        .show(ui, |ui| {
-                            ui.label(egui::RichText::new("Node:").strong());
-                            ui.label(&status.node);
-                            ui.end_row();
+            });
+        self.settings_open = open;
+        (do_save, do_cancel)
+    }
 
-                            ui.label(egui::RichText::new("Uptime:").strong());
-                            ui.label(&status.daemon_uptime);
-                            ui.end_row();
+    fn apply_settings_save(&mut self) {
+        if let Some(edit) = &mut self.settings_edit {
+            let mut tmp = self.settings.clone();
+            if edit.try_apply(&mut tmp) {
+                self.settings = tmp;
+                if let Err(err) = self.settings.save() {
+                    error!("failed to save settings: {err:#}");
+                }
+                self.settings_open = false;
+                self.last_poll = None;
+                self.settings_edit = None;
+            }
+        }
+    }
 
-                            ui.label(egui::RichText::new("Config:").strong());
-                            ui.label(&status.config_version);
-                            ui.end_row();
-                        });
+    fn apply_settings_cancel(&mut self) {
+        self.settings_open = false;
+        self.settings_edit = None;
+    }
 
-                    ui.separator();
-                    ui.label(egui::RichText::new("Shares").strong().size(16.0));
+    /// Conflicts modal — returns `(vault_id, path, action)` when user picks a resolution.
+    fn render_conflicts_modal(
+        &mut self,
+        ctx: &egui::Context,
+    ) -> Option<(String, String, &'static str)> {
+        let mut do_resolve: Option<(String, String, &'static str)> = None;
+        if !self.conflicts_open {
+            return do_resolve;
+        }
 
-                    if status.shares.is_empty() {
-                        ui.label("No shares configured.");
-                    } else {
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            for share in &status.shares {
-                                egui::Frame::group(ui.style()).show(ui, |ui| {
-                                    ui.label(egui::RichText::new(&share.name).strong());
-                                    ui.label(format!("Path: {}", share.path));
-                                    ui.label(format!(
-                                        "Direction: {}  State: {}",
-                                        share.direction, share.state
-                                    ));
-                                    if share.pending_changes > 0 {
-                                        ui.label(format!(
-                                            "Pending: {} change(s)",
-                                            share.pending_changes
-                                        ));
-                                    }
-                                    if let Some(ts) = &share.last_success_at {
-                                        ui.label(format!("Last sync: {ts}"));
-                                    }
-                                    if let Some(err) = &share.last_error {
-                                        ui.colored_label(
-                                            egui::Color32::LIGHT_RED,
-                                            format!("Error: {err}"),
-                                        );
+        let mut open = self.conflicts_open;
+        egui::Window::new("Conflicts")
+            .open(&mut open)
+            .resizable(true)
+            .default_width(480.0)
+            .show(ctx, |ui| {
+                if let Some(err) = &self.conflicts_error {
+                    ui.colored_label(egui::Color32::RED, err);
+                }
+                if self.conflicts_rx.is_some() {
+                    ui.label("refreshing…");
+                }
+                if self.conflicts.is_empty() && self.conflicts_rx.is_none() {
+                    ui.label("no unresolved conflicts");
+                } else {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        for item in &self.conflicts {
+                            egui::Frame::group(ui.style()).show(ui, |ui| {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{}: {}",
+                                        item.vault_id, item.path
+                                    ))
+                                    .strong(),
+                                );
+                                ui.label(format!("Type: {}", item.conflict_type));
+                                if let Some(fork) = &item.fork_path {
+                                    ui.label(format!("Fork: {fork}"));
+                                }
+                                ui.horizontal(|ui| {
+                                    for (label, action) in CONFLICT_ACTIONS {
+                                        if ui.button(*label).clicked() {
+                                            do_resolve = Some((
+                                                item.vault_id.clone(),
+                                                item.path.clone(),
+                                                *action,
+                                            ));
+                                        }
                                     }
                                 });
-                                ui.add_space(4.0);
-                            }
-                        });
+                            });
+                            ui.add_space(4.0);
+                        }
+                    });
+                }
+            });
+        self.conflicts_open = open;
+        do_resolve
+    }
+
+    /// Main central panel — daemon status and share list.
+    fn render_central_panel(&self, ui: &mut egui::Ui) {
+        match &self.last_status {
+            None => {
+                ui.centered_and_justified(|ui| {
+                    if self.last_error.is_some() {
+                        ui.label(egui::RichText::new("daemon not running").size(20.0));
+                    } else {
+                        ui.label(egui::RichText::new("connecting to daemon…").size(20.0));
                     }
+                });
+            }
+            Some(status) => {
+                egui::Grid::new("daemon_info")
+                    .num_columns(2)
+                    .spacing([12.0, 4.0])
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new("Node:").strong());
+                        ui.label(&status.node);
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Uptime:").strong());
+                        ui.label(&status.daemon_uptime);
+                        ui.end_row();
+
+                        ui.label(egui::RichText::new("Config:").strong());
+                        ui.label(&status.config_version);
+                        ui.end_row();
+                    });
+
+                ui.separator();
+                ui.label(egui::RichText::new("Shares").strong().size(16.0));
+
+                if status.shares.is_empty() {
+                    ui.label("No shares configured.");
+                } else {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        for share in &status.shares {
+                            egui::Frame::group(ui.style()).show(ui, |ui| {
+                                ui.label(egui::RichText::new(&share.name).strong());
+                                ui.label(format!("Path: {}", share.path));
+                                ui.label(format!(
+                                    "Direction: {}  State: {}",
+                                    share.direction, share.state
+                                ));
+                                if share.pending_changes > 0 {
+                                    ui.label(format!(
+                                        "Pending: {} change(s)",
+                                        share.pending_changes
+                                    ));
+                                }
+                                if let Some(ts) = &share.last_success_at {
+                                    ui.label(format!("Last sync: {ts}"));
+                                }
+                                if let Some(err) = &share.last_error {
+                                    ui.colored_label(
+                                        egui::Color32::LIGHT_RED,
+                                        format!("Error: {err}"),
+                                    );
+                                }
+                            });
+                            ui.add_space(4.0);
+                        }
+                    });
                 }
             }
+        }
+    }
+}
+
+impl eframe::App for DiskGuiApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.drain_pending();
+        self.maybe_poll(ctx);
+        self.drain_conflicts();
+        self.drain_resolve(ctx);
+
+        self.render_top_bar(ctx);
+        self.render_status_bar(ctx);
+
+        let (do_save, do_cancel) = self.render_settings_modal(ctx);
+        if do_save {
+            self.apply_settings_save();
+        }
+        if do_cancel {
+            self.apply_settings_cancel();
+        }
+
+        if let Some((vault_id, path, action)) = self.render_conflicts_modal(ctx) {
+            self.start_resolve_conflict(ctx, vault_id, path, action);
+        }
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            self.render_central_panel(ui);
         });
     }
 }

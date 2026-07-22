@@ -61,6 +61,8 @@ async fn daemon_serves_status_and_terminates_on_sigterm() {
     let bin = env!("CARGO_BIN_EXE_disk");
     let dir = tempfile::tempdir().unwrap();
     let cfg = dir.path().join("disk.toml");
+    let state_dir = dir.path().join("state");
+    std::fs::create_dir_all(&state_dir).unwrap();
     std::fs::write(&cfg, CONFIG).unwrap();
 
     let mut child = Command::new(bin)
@@ -70,8 +72,10 @@ async fn daemon_serves_status_and_terminates_on_sigterm() {
             "--foreground",
             "--status-bind",
             "127.0.0.1:0",
-            "--config",
+            "--state-dir",
         ])
+        .arg(&state_dir)
+        .args(["--config"])
         .arg(&cfg)
         .env("RUST_LOG", "info")
         .stdout(Stdio::piped())
