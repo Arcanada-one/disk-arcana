@@ -1,8 +1,8 @@
 # DISK-0015 — E2EE scaffold
 
-**Status:** slices 1–4 shipped on `main` (PRs #57–#60). Slice 5+ deferred (multi-device escrow, download decrypt).  
+**Status:** slices 1–5 shipped on `main`. Slice 6+ deferred (multi-device escrow).  
 **Parent:** DISK-0001 §4.7 (future paid / SaaS feature).  
-**Tracking:** DISK-0015 — **done** (MVP scaffold) in Datarim backlog.
+**Tracking:** DISK-0015 — **done** (MVP E2EE) in Datarim backlog.
 
 ## Scope
 
@@ -12,7 +12,8 @@
 | 2 (merged #58) | encrypt-on-upload, MetaDb nonce | ExchangeState reconcile |
 | 3 (merged #59) | ExchangeState ciphertext overlay | Keychain UX |
 | 4 (merged #60) | `disk vault unlock|lock|status`, keychain store, daemon `resolve_vault_key` | SaaS billing, multi-device escrow |
-| 5+ | Multi-device escrow; download-path decrypt on pull | Billing → DISK-0018 |
+| 5 (this PR) | Download-path decrypt in sync-loop pull + conflict apply | Multi-device escrow |
+| 6+ | Multi-device escrow | Billing → DISK-0018 |
 
 ## Remaining gaps vs full zero-knowledge sync (post–slice 4)
 
@@ -21,7 +22,7 @@
 | Upload encrypt + wire `encryption_nonce` | **Shipped** | `wire.rs` upload path + MetaDb persistence |
 | ExchangeState ciphertext overlay | **Shipped** | `overlay_e2ee_exchange_files` |
 | `disk vault unlock\|lock\|status` + keychain | **Shipped** | `it_vault_unlock.rs` |
-| Download decrypt (pull → plaintext on disk) | **Open** | `decrypt()` exists in `disk_core::e2ee`; sync download path not wired |
+| Download decrypt (pull → plaintext on disk) | **Shipped** | `DownloadPayload` + `RemoteSync::materialize_downloaded_bytes` |
 | Multi-device key escrow | **Open** | Slice 5+; out of MVP scaffold |
 
 ## Operator workflow (slice 4)
@@ -62,12 +63,14 @@ disk vault unlock|lock|status   // CLI
 resolve_vault_key(node_id, state_dir) -> Option<VaultKey>
 unlock_vault_key(passphrase, node_id, state_dir, salt_override)
 overlay_scanned_meta(...)       // slice 3
+DownloadPayload::from_wire_bytes(...) // slice 5 pull decrypt
 ```
 
 ## Tests
 
 - `crates/disk-client/src/vault_key.rs` — unlock/lock round-trip
 - `crates/disk-cli/tests/it_vault_unlock.rs` — CLI integration
+- `crates/disk-core/src/e2ee/download.rs` — pull decrypt unit tests
 - `crates/disk-core/src/e2ee/exchange_overlay.rs` — overlay unit tests
 
 ## References

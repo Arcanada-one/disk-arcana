@@ -25,7 +25,7 @@ use std::sync::Arc;
 use disk_core::filter::{Filter, FilterRules};
 use disk_core::scanner::FileScanner;
 use disk_core::types::{ConflictKind, ConflictRecord, FileMeta};
-use disk_core::{overlay_scanned_meta, E2eeCachedWire, UploadPayload, VaultKey};
+use disk_core::{overlay_scanned_meta, DownloadPayload, E2eeCachedWire, UploadPayload, VaultKey};
 use disk_proto::disk::{AclMismatchDetails, FileMetadata};
 use prost::Message;
 use tonic::{Code, Status};
@@ -344,6 +344,33 @@ impl<'a> RemoteSync<'a> {
             }
         }
     }
+
+    /// DISK-0015 slice 5: verify wire hash and decrypt ciphertext downloads.
+    fn materialize_downloaded_bytes(
+        &self,
+        wire_bytes: &[u8],
+        meta: &FileMetadata,
+        context: &str,
+    ) -> Option<Vec<u8>> {
+        let expected_hash: [u8; 32] = meta.content_hash.as_slice().try_into().unwrap_or([0u8; 32]);
+        match DownloadPayload::from_wire_bytes(
+            wire_bytes,
+            &meta.encryption_nonce,
+            &expected_hash,
+            self.e2ee_key.as_ref(),
+        ) {
+            Ok(payload) => Some(payload.plaintext),
+            Err(e) => {
+                tracing::warn!(
+                    path = %meta.path,
+                    context = %context,
+                    error = %e,
+                    "download skipped: E2EE materialize failed"
+                );
+                None
+            }
+        }
+    }
 }
 
 fn vault_relative_path_key(path: &std::path::Path) -> String {
@@ -641,24 +668,37 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                     }
                 };
 
+                let plaintext =
+                    match self.materialize_downloaded_bytes(&bytes, to_download, "sync-download") {
+                        Some(p) => p,
+                        None => continue,
+                    };
+
                 let dest = self.scan_root.join(&to_download.path);
                 if let Some(parent) = dest.parent() {
                     let _ = std::fs::create_dir_all(parent);
                 }
-                let _ = std::fs::write(&dest, &bytes);
+                if let Err(e) = std::fs::write(&dest, &plaintext) {
+                    tracing::warn!(
+                        path = %to_download.path,
+                        error = %e,
+                        "download skipped: cannot write plaintext"
+                    );
+                    continue;
+                }
 
-                // Compute the blake3 hash of the downloaded content.
-                // This hash serves two purposes:
-                //   (a) keying the blob cache for future 3-way merges;
-                //   (b) recording as the new post-sync baseline in
-                //       node_baselines.
-                let hash: [u8; 32] = *blake3::hash(&bytes).as_bytes();
+                // Blob cache keys:
+                //   plaintext files → blake3(plaintext)
+                //   E2EE files      → blake3(ciphertext) so baselines align with wire hashes
+                let encrypted = !to_download.encryption_nonce.is_empty();
+                let cache_key: [u8; 32] = if encrypted {
+                    expected_hash.unwrap_or([0u8; 32])
+                } else {
+                    *blake3::hash(&plaintext).as_bytes()
+                };
 
-                // Cache bytes by their blake3 hash so that a future cycle
-                // can retrieve the common-ancestor content for 3-way merge
-                // without a round-trip to the server.
                 if let Some(ref cache) = self.blob_cache {
-                    if let Err(e) = cache.put(&hash, &bytes) {
+                    if let Err(e) = cache.put(&cache_key, &plaintext) {
                         tracing::debug!(
                             path = %to_download.path,
                             error = %e,
@@ -667,10 +707,21 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                     }
                 }
 
-                // Accumulate a baseline entry (preserve server version ids from wire).
                 let mut baseline = proto_to_file_meta(to_download);
-                baseline.content_hash = hash;
-                baseline.size = bytes.len() as u64;
+                baseline.content_hash = cache_key;
+                baseline.size = plaintext.len() as u64;
+                if encrypted {
+                    baseline.encryption_nonce = Some(to_download.encryption_nonce.clone());
+                    let mtime_ns = file_mtime_ns(&dest);
+                    self.persist_e2ee_wire_meta(
+                        &to_download.path,
+                        cache_key,
+                        to_download.encryption_nonce.clone(),
+                        mtime_ns,
+                        plaintext.len() as u64,
+                    )
+                    .await;
+                }
                 downloaded_baselines.push(baseline);
             }
 
@@ -750,6 +801,26 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                         }
                     };
 
+                let remote_meta = match conflict.remote.as_ref() {
+                    Some(m) => m,
+                    None => {
+                        tracing::warn!(
+                            path = %conflict.path,
+                            "conflict apply: missing remote metadata, skipping"
+                        );
+                        continue;
+                    }
+                };
+
+                let remote_plain = match self.materialize_downloaded_bytes(
+                    &remote_bytes,
+                    remote_meta,
+                    "conflict-download",
+                ) {
+                    Some(p) => p,
+                    None => continue,
+                };
+
                 // Resolve the base (common-ancestor) bytes from the blob cache.
                 //
                 // The baseline map (populated from node_baselines before the
@@ -768,7 +839,7 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                     rel_path,
                     base_bytes.as_deref(),
                     &local_bytes,
-                    &remote_bytes,
+                    &remote_plain,
                     &self.node_id,
                 );
 
@@ -807,7 +878,7 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                             Some(h)
                         };
                         let remote_hash: Option<[u8; 32]> = {
-                            let h = *blake3::hash(&remote_bytes).as_bytes();
+                            let h = *blake3::hash(&remote_plain).as_bytes();
                             Some(h)
                         };
                         let base_hash: Option<[u8; 32]> =

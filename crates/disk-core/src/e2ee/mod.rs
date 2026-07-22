@@ -4,10 +4,12 @@
 //! When `FileMetadata.encryption_nonce` is non-empty, `content_hash` is
 //! `blake3(ciphertext)` — not the plaintext digest.
 
+mod download;
 mod error;
 mod exchange_overlay;
 mod upload;
 
+pub use download::DownloadPayload;
 pub use error::E2eeError;
 pub use exchange_overlay::{overlay_scanned_meta, E2eeCachedWire};
 pub use upload::UploadPayload;

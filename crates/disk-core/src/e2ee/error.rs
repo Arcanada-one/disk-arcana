@@ -13,4 +13,10 @@ pub enum E2eeError {
     Encrypt(String),
     #[error("decrypt failed (wrong key or tampered ciphertext)")]
     DecryptFailed,
+    #[error("wire content hash does not match downloaded bytes")]
+    WireHashMismatch,
+    #[error("encryption nonce must be 24 bytes")]
+    InvalidNonce,
+    #[error("vault key required to decrypt encrypted download")]
+    VaultKeyRequired,
 }
