@@ -1059,6 +1059,10 @@ pub struct EnrollArgs {
     #[arg(long, default_value_t = false)]
     pub insecure_localhost: bool,
 
+    /// Expected TLS domain (cert SAN) when `--server` is an IP address (DISK-0061).
+    #[arg(long)]
+    pub tls_domain: Option<String>,
+
     /// Output path for the signed client cert (PEM).
     #[arg(long, default_value = crate::paths::DEFAULT_CLIENT_CERT)]
     pub cert_out: PathBuf,
@@ -1110,6 +1114,10 @@ pub struct PendingTokenArgs {
     /// Disable TLS — localhost test only.
     #[arg(long, default_value_t = false)]
     pub insecure_localhost: bool,
+
+    /// Expected TLS domain (cert SAN) when `--server` is an IP address (DISK-0061).
+    #[arg(long)]
+    pub tls_domain: Option<String>,
 }
 
 fn init_tracing() {
@@ -1497,11 +1505,17 @@ fn resolve_enroll_inputs(args: &EnrollArgs) -> Result<ResolvedEnroll> {
             .map(|s| s.into_bytes()),
     };
 
+    let tls_domain = args
+        .tls_domain
+        .clone()
+        .or_else(|| bf.as_ref().and_then(|b| b.tls_domain.clone()));
+
     Ok(ResolvedEnroll {
         server,
         token_hex,
         node_id,
         ca_pem,
+        tls_domain,
         insecure_localhost: args.insecure_localhost,
         cert_out: args.cert_out.clone(),
         key_out: args.key_out.clone(),
@@ -1513,6 +1527,7 @@ struct ResolvedEnroll {
     token_hex: String,
     node_id: String,
     ca_pem: Option<Vec<u8>>,
+    tls_domain: Option<String>,
     insecure_localhost: bool,
     cert_out: PathBuf,
     key_out: PathBuf,
@@ -1541,6 +1556,7 @@ async fn run_enroll(args: EnrollArgs) -> Result<()> {
         &inputs.server,
         inputs.ca_pem.as_deref(),
         inputs.insecure_localhost,
+        inputs.tls_domain.as_deref(),
     )
     .await
     .context("connect to enrollment endpoint")?;
@@ -1579,10 +1595,14 @@ async fn run_admin_pending_token(args: PendingTokenArgs) -> Result<()> {
         None => None,
     };
 
-    let client =
-        EnrollmentClient::connect(&args.server, ca_pem.as_deref(), args.insecure_localhost)
-            .await
-            .context("connect to enrollment endpoint")?;
+    let client = EnrollmentClient::connect(
+        &args.server,
+        ca_pem.as_deref(),
+        args.insecure_localhost,
+        args.tls_domain.as_deref(),
+    )
+    .await
+    .context("connect to enrollment endpoint")?;
 
     let resp = client
         .issue_pending_token(
@@ -1825,6 +1845,7 @@ node_id_hint = "from-bf"
             node_id: None,
             ca_cert: None,
             insecure_localhost: false,
+            tls_domain: None,
             cert_out: PathBuf::from("/tmp/c.crt"),
             key_out: PathBuf::from("/tmp/c.key"),
         };
@@ -1855,6 +1876,7 @@ node_id_hint = "from-bf"
             node_id: Some("override-node".into()),
             ca_cert: None,
             insecure_localhost: false,
+            tls_domain: None,
             cert_out: PathBuf::from("/tmp/c.crt"),
             key_out: PathBuf::from("/tmp/c.key"),
         };

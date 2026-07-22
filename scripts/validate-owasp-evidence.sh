@@ -20,6 +20,7 @@ check crates/disk-server/src/tls.rs
 check crates/disk-server/tests/tls_downgrade.rs
 check crates/disk-server/tests/mtls_cert_required.rs
 check crates/disk-client/tests/it_tls_domain.rs
+check crates/disk-client/tests/it_enrollment_tls_domain.rs
 
 # T2 Auth
 check crates/disk-server/tests/auth_required.rs

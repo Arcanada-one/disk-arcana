@@ -172,7 +172,7 @@ async fn spawn_stub_server() -> Fixture {
 async fn admin_pending_token_round_trip() {
     let fx = spawn_stub_server().await;
 
-    let client = EnrollmentClient::connect(&fx.server_url, Some(&fx.ca_pem), false)
+    let client = EnrollmentClient::connect(&fx.server_url, Some(&fx.ca_pem), false, None)
         .await
         .expect("connect");
 
@@ -194,7 +194,7 @@ async fn admin_pending_token_round_trip() {
 async fn admin_pending_token_rejects_missing_bearer() {
     let fx = spawn_stub_server().await;
 
-    let client = EnrollmentClient::connect(&fx.server_url, Some(&fx.ca_pem), false)
+    let client = EnrollmentClient::connect(&fx.server_url, Some(&fx.ca_pem), false, None)
         .await
         .expect("connect");
 
@@ -217,7 +217,7 @@ async fn enroll_round_trip_with_real_csr() {
 
     let (_key_pem, csr_pem) = gen_keypair_and_csr(node_id).expect("csr");
 
-    let client = EnrollmentClient::connect(&fx.server_url, Some(&fx.ca_pem), false)
+    let client = EnrollmentClient::connect(&fx.server_url, Some(&fx.ca_pem), false, None)
         .await
         .expect("connect");
 

@@ -77,6 +77,7 @@ impl EnrollmentClient {
         server: &str,
         tls_ca_cert_pem: Option<&[u8]>,
         insecure_localhost: bool,
+        tls_domain: Option<&str>,
     ) -> Result<Self, EnrollmentError> {
         let mut endpoint = Endpoint::new(server.to_owned())?;
 
@@ -84,6 +85,9 @@ impl EnrollmentClient {
             let mut tls = ClientTlsConfig::new();
             if let Some(pem) = tls_ca_cert_pem {
                 tls = tls.ca_certificate(tonic::transport::Certificate::from_pem(pem));
+            }
+            if let Some(domain) = tls_domain.filter(|s| !s.is_empty()) {
+                tls = tls.domain_name(domain.to_owned());
             }
             endpoint = endpoint.tls_config(tls)?;
         }
@@ -192,6 +196,9 @@ pub struct BootstrapFile {
     /// Optional PEM-encoded CA cert to pin TLS.
     #[serde(default)]
     pub ca_cert_pem: Option<String>,
+    /// Expected TLS domain when `server` is an IP address (DISK-0061).
+    #[serde(default)]
+    pub tls_domain: Option<String>,
 }
 
 /// Parse a bootstrap TOML file.
@@ -294,6 +301,18 @@ token = "deadbeef"
         assert_eq!(bf.token, "deadbeef");
         assert!(bf.node_id_hint.is_none());
         assert!(bf.ca_cert_pem.is_none());
+        assert!(bf.tls_domain.is_none());
+    }
+
+    #[test]
+    fn bootstrap_file_parses_tls_domain() {
+        let toml_str = r#"
+server = "https://65.108.236.39:9445"
+token = "deadbeef"
+tls_domain = "disk.arcanada.ai"
+"#;
+        let bf = parse_bootstrap_file(toml_str).unwrap();
+        assert_eq!(bf.tls_domain.as_deref(), Some("disk.arcanada.ai"));
     }
 
     #[test]
