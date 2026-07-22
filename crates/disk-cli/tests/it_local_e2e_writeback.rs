@@ -267,7 +267,10 @@ fn cert_fingerprint_hex(der: &[u8]) -> String {
 ///
 /// Uses a real `disk-arcana-server` binary found in the cargo target directory
 /// (same directory as the `disk` binary under test).
+/// Uses `std::sync::Mutex` intentionally — serializes port/server spawn across
+/// parallel `cargo llvm-cov` workers for the full test body.
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn share_state_transitions_after_poll_tick() {
     let _e2e_guard = E2E_SERVER_LOCK.lock().expect("e2e lock");
 
