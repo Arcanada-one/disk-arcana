@@ -50,8 +50,8 @@ pub use billing::{
 pub use config::Config;
 pub use content_store::{ContentBlobStore, ContentStoreError};
 pub use e2ee::{
-    decrypt, encrypt, overlay_scanned_meta, random_salt, E2eeCachedWire, E2eeError, EncryptedBlob,
-    UploadPayload, VaultKey, KEY_LEN, NONCE_LEN, SALT_LEN,
+    decrypt, encrypt, overlay_scanned_meta, random_salt, DownloadPayload, E2eeCachedWire,
+    E2eeError, EncryptedBlob, UploadPayload, VaultKey, KEY_LEN, NONCE_LEN, SALT_LEN,
 };
 pub use embeddings::{
     is_co_storage_path, normalize_source_rel, scan_share_embeddings, write_sidecar,
