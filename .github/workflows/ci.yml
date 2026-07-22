@@ -150,6 +150,9 @@ jobs:
         run: bash scripts/load-test-harness.sh all
       - name: Coverage gate (≥80 % lines, DISK-0032)
         run: cargo llvm-cov --workspace --all-features --fail-under-lines 80
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
       - name: Obsidian plugin integration (DISK-0008)
         run: bash scripts/test-obsidian-integration.sh
 

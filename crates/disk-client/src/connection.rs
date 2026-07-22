@@ -61,6 +61,18 @@ pub struct DiskClient {
     session_token: Arc<tokio::sync::RwLock<Option<String>>>,
 }
 
+impl DiskClient {
+    /// Update the SaaS tenant sent as `x-disk-tenant` on subsequent sync RPCs.
+    pub fn set_tenant_id(&mut self, tenant_id: Option<String>) {
+        self.tenant_id = tenant_id.filter(|t| !t.is_empty());
+    }
+
+    /// Active tenant id for sync RPC metadata (DISK-0017 / DISK-0030).
+    pub fn tenant_id(&self) -> Option<&str> {
+        self.tenant_id.as_deref()
+    }
+}
+
 /// Errors from client operations.
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
