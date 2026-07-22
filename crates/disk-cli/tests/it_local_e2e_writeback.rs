@@ -151,6 +151,40 @@ fn make_node_cert(ca_cert: &rcgen::Certificate, ca_key: &KeyPair) -> (String, St
     (node_cert.pem(), node_key.serialize_pem(), cert_der)
 }
 
+/// Wait until the mTLS gRPC accept loop is ready (DISK-0041 / enrollment IT
+/// race class: log line «listening» precedes tonic accept).
+async fn wait_mtls_server_ready(
+    mtls_port: u16,
+    ca_pem: &[u8],
+    node_cert_pem: &str,
+    node_key_pem: &str,
+) {
+    use disk_client::connection::{ClientConfig, DiskClient};
+
+    let config = ClientConfig {
+        endpoint: format!("https://127.0.0.1:{mtls_port}"),
+        tls_ca_cert_pem: Some(ca_pem.to_vec()),
+        tls_domain: Some("localhost".into()),
+        client_cert_pem: Some(node_cert_pem.as_bytes().to_vec()),
+        client_key_pem: Some(node_key_pem.as_bytes().to_vec()),
+        node_id: "e2e-writeback-node".into(),
+        api_key: None,
+        tenant_id: None,
+    };
+
+    let mut last_err = None;
+    for _ in 0..50 {
+        match DiskClient::connect(config.clone()).await {
+            Ok(_) => return,
+            Err(e) => {
+                last_err = Some(e);
+                tokio::time::sleep(Duration::from_millis(40)).await;
+            }
+        }
+    }
+    panic!("mTLS server not ready after retries: {last_err:?}");
+}
+
 /// Compute blake3(der_bytes) as a 64-char lowercase hex string.
 ///
 /// Mirrors `CertIdentity::from_der` in the server's `auth/cert_identity.rs`:
@@ -278,8 +312,8 @@ async fn share_state_transitions_after_poll_tick() {
             "server did not reach listening state in {SPAWN_ATTEMPTS} attempts; log:\n{last_log}"
         );
     };
-    // Brief sleep so tonic's accept loop is ready.
-    tokio::time::sleep(Duration::from_millis(120)).await;
+    // Prove the gRPC accept loop is live — fixed sleep alone races under parallel CI.
+    wait_mtls_server_ready(mtls_port, ca_pem.as_bytes(), &node_cert_pem, &node_key_pem).await;
 
     // ── 4. Write disk.toml for the daemon ─────────────────────────────────
     let disk_toml = format!(
@@ -354,9 +388,9 @@ async fn share_state_transitions_after_poll_tick() {
 
     // ── 7. Poll /status for idle + non-null last_success_at ───────────────
     //
-    // Timeout: 40 s.  The daemon's POLL_INTERVAL is 5 s so the first
-    // ExchangeState call happens within seconds of boot.
-    let final_body: Option<StatusBody> = tokio::time::timeout(Duration::from_secs(40), async {
+    // Timeout: 60 s.  POLL_INTERVAL is 5 s; under parallel `cargo test` the
+    // first tick may land while the server is still warming up.
+    let final_body: Option<StatusBody> = tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             tokio::time::sleep(Duration::from_millis(500)).await;
             let body: StatusBody = match http.get(&url).send().await {
@@ -392,7 +426,7 @@ async fn share_state_transitions_after_poll_tick() {
 
     let body = final_body.unwrap_or_else(|| {
         panic!(
-            "share did not reach idle+last_success_at within 40 s.\n\
+            "share did not reach idle+last_success_at within 60 s.\n\
              BEFORE: {before_json}\n\
              AFTER:  {after_json}\n\
              Check: mTLS cert wired? ACL fingerprint match? Server logs?"
