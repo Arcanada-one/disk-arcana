@@ -1,8 +1,8 @@
 # DISK-0015 — E2EE scaffold
 
-**Status:** slice 4 on DEVS — `disk vault unlock` / keychain UX.  
+**Status:** slices 1–4 shipped on `main` (PRs #57–#60). Slice 5+ deferred (multi-device escrow, download decrypt).  
 **Parent:** DISK-0001 §4.7 (future paid / SaaS feature).  
-**Tracking:** DISK-0015 in Datarim backlog.
+**Tracking:** DISK-0015 — **done** (MVP scaffold) in Datarim backlog.
 
 ## Scope
 
@@ -12,7 +12,17 @@
 | 2 (merged #58) | encrypt-on-upload, MetaDb nonce | ExchangeState reconcile |
 | 3 (merged #59) | ExchangeState ciphertext overlay | Keychain UX |
 | 4 (merged #60) | `disk vault unlock|lock|status`, keychain store, daemon `resolve_vault_key` | SaaS billing, multi-device escrow |
-| 5+ | Multi-device escrow | Billing → DISK-0018 |
+| 5+ | Multi-device escrow; download-path decrypt on pull | Billing → DISK-0018 |
+
+## Remaining gaps vs full zero-knowledge sync (post–slice 4)
+
+| Gap | Status | Notes |
+|-----|--------|-------|
+| Upload encrypt + wire `encryption_nonce` | **Shipped** | `wire.rs` upload path + MetaDb persistence |
+| ExchangeState ciphertext overlay | **Shipped** | `overlay_e2ee_exchange_files` |
+| `disk vault unlock\|lock\|status` + keychain | **Shipped** | `it_vault_unlock.rs` |
+| Download decrypt (pull → plaintext on disk) | **Open** | `decrypt()` exists in `disk_core::e2ee`; sync download path not wired |
+| Multi-device key escrow | **Open** | Slice 5+; out of MVP scaffold |
 
 ## Operator workflow (slice 4)
 

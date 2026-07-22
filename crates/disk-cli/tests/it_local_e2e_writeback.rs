@@ -30,8 +30,9 @@
 
 #![cfg(unix)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rcgen::{
@@ -44,6 +45,21 @@ use tokio::process::Command;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+/// Serialize E2E tests — they spawn real servers and contend for loopback
+/// ports/CPU under parallel `cargo llvm-cov` (DISK-0041 race class).
+static E2E_SERVER_LOCK: Mutex<()> = Mutex::new(());
+
+fn e2e_poll_timeout() -> Duration {
+    if std::env::var("CARGO_TARGET_DIR")
+        .map(|d| d.contains("llvm-cov"))
+        .unwrap_or(false)
+    {
+        Duration::from_secs(120)
+    } else {
+        Duration::from_secs(60)
+    }
+}
+
 fn parse_port_from_listening_line(line: &str) -> Option<u16> {
     let tail = line.rsplit_once(':')?.1;
     tail.trim().parse::<u16>().ok()
@@ -53,19 +69,44 @@ fn parse_port_from_listening_line(line: &str) -> Option<u16> {
 ///
 /// During `cargo test`, the test binary lives in `target/<profile>/deps/`.
 /// Stepping up two levels (`deps` → `<profile>`) gives the directory that
-/// holds `disk-arcana-server`.  Falls back to `PATH` lookup if not found.
+/// holds `disk-arcana-server`.  Also checks workspace `target/` trees used
+/// by `cargo llvm-cov` (`target/llvm-cov-target/debug/`).  Falls back to
+/// `PATH` lookup if not found.
 fn find_server_bin() -> PathBuf {
+    if let Ok(explicit) = std::env::var("DISK_ARCANA_SERVER_BIN") {
+        let path = PathBuf::from(&explicit);
+        if path.exists() {
+            return path;
+        }
+    }
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
     if let Ok(exe) = std::env::current_exe() {
-        if let Some(deps_dir) = exe.parent() {
-            if let Some(profile_dir) = deps_dir.parent() {
-                let candidate = profile_dir.join("disk-arcana-server");
-                if candidate.exists() {
-                    return candidate;
-                }
+        if let Some(profile_dir) = exe.parent().and_then(|d| d.parent()) {
+            candidates.push(profile_dir.join("disk-arcana-server"));
+        }
+    }
+
+    if let Ok(target_dir) = std::env::var("CARGO_TARGET_DIR") {
+        candidates.push(PathBuf::from(target_dir).join("debug/disk-arcana-server"));
+    }
+
+    if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
+        let ws = Path::new(&manifest).parent().and_then(|p| p.parent());
+        if let Some(ws) = ws {
+            for sub in ["target/debug", "target/llvm-cov-target/debug"] {
+                candidates.push(ws.join(sub).join("disk-arcana-server"));
             }
         }
     }
-    // Fall back: let the shell resolve it from PATH.
+
+    for candidate in candidates {
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
     PathBuf::from("disk-arcana-server")
 }
 
@@ -185,6 +226,31 @@ async fn wait_mtls_server_ready(
     panic!("mTLS server not ready after retries: {last_err:?}");
 }
 
+/// Poll `GET /status` until the daemon REST surface returns parseable JSON.
+async fn wait_daemon_status_ready(http: &reqwest::Client, url: &str) -> serde_json::Value {
+    let mut last_err = None;
+    for _ in 0..60 {
+        match http.get(url).send().await {
+            Ok(resp) => match resp.json::<serde_json::Value>().await {
+                Ok(body) => return body,
+                Err(e) => last_err = Some(format!("json: {e}")),
+            },
+            Err(e) => last_err = Some(format!("send: {e}")),
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("daemon /status not ready after retries: {last_err:?}");
+}
+
+/// Nudge the sync loop immediately instead of waiting for `POLL_INTERVAL`.
+async fn trigger_daemon_sync(http: &reqwest::Client, base_url: &str) {
+    let sync_url = format!("{base_url}/sync");
+    for _ in 0..3 {
+        let _ = http.post(&sync_url).send().await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
 /// Compute blake3(der_bytes) as a 64-char lowercase hex string.
 ///
 /// Mirrors `CertIdentity::from_der` in the server's `auth/cert_identity.rs`:
@@ -203,6 +269,8 @@ fn cert_fingerprint_hex(der: &[u8]) -> String {
 /// (same directory as the `disk` binary under test).
 #[tokio::test]
 async fn share_state_transitions_after_poll_tick() {
+    let _e2e_guard = E2E_SERVER_LOCK.lock().expect("e2e lock");
+
     // ── 1. Generate CA + server cert + node cert ──────────────────────────
     // Both certs are signed by the same CA so:
     //   - the server trusts the client cert (DISK_TLS_CA_PATH = that CA)
@@ -317,7 +385,7 @@ async fn share_state_transitions_after_poll_tick() {
 
     // ── 4. Write disk.toml for the daemon ─────────────────────────────────
     let disk_toml = format!(
-        "[node]\nid = \"e2e-writeback-node\"\n\n[node.default]\nintended_direction = \"bidirectional\"\n\n[server]\naddress = \"127.0.0.1:{mtls_port}\"\nclient_cert = \"{node_crt}\"\nclient_key  = \"{node_key}\"\nserver_ca   = \"{ca_crt}\"\n\n[[share]]\nname = \"test-share\"\npath = \"{vault}\"\n",
+        "[node]\nid = \"e2e-writeback-node\"\n\n[node.default]\nintended_direction = \"bidirectional\"\n\n[server]\naddress = \"127.0.0.1:{mtls_port}\"\ntls_domain = \"localhost\"\nclient_cert = \"{node_crt}\"\nclient_key  = \"{node_key}\"\nserver_ca   = \"{ca_crt}\"\n\n[[share]]\nname = \"test-share\"\npath = \"{vault}\"\n",
         mtls_port = mtls_port,
         node_crt = root.join("node.crt").display(),
         node_key = root.join("node.key").display(),
@@ -367,31 +435,46 @@ async fn share_state_transitions_after_poll_tick() {
             .expect("listening line absent before stdout closed")
     };
 
-    // Drain daemon stderr in background.
+    // Buffer daemon stderr for failure diagnostics (do not discard under llvm-cov).
     let daemon_stderr = daemon_child.stderr.take().expect("daemon stderr");
+    let daemon_log = Arc::new(Mutex::new(String::new()));
+    let daemon_log_bg = Arc::clone(&daemon_log);
     tokio::spawn(async move {
         let mut r = BufReader::new(daemon_stderr).lines();
-        while let Ok(Some(_)) = r.next_line().await {}
+        while let Ok(Some(line)) = r.next_line().await {
+            let mut log = daemon_log_bg.lock().expect("daemon log lock");
+            log.push_str(&line);
+            log.push('\n');
+            if log.len() > 16_384 {
+                let drain = log.len() - 8_192;
+                log.drain(..drain);
+            }
+        }
     });
 
-    let http = reqwest::Client::new();
-    let url = format!("http://127.0.0.1:{daemon_port}/status");
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("reqwest client");
+    let base_url = format!("http://127.0.0.1:{daemon_port}");
+    let url = format!("{base_url}/status");
 
     // ── 6. Capture before-state ───────────────────────────────────────────
-    // Allow a short boot window then capture the initial state.
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    let before_json: serde_json::Value = if let Ok(resp) = http.get(&url).send().await {
-        resp.json().await.unwrap_or_default()
-    } else {
-        serde_json::Value::Null
-    };
+    let before_json = wait_daemon_status_ready(&http, &url).await;
+    trigger_daemon_sync(&http, &base_url).await;
 
     // ── 7. Poll /status for idle + non-null last_success_at ───────────────
-    //
-    // Timeout: 60 s.  POLL_INTERVAL is 5 s; under parallel `cargo test` the
-    // first tick may land while the server is still warming up.
-    let final_body: Option<StatusBody> = tokio::time::timeout(Duration::from_secs(60), async {
+    let poll_timeout = e2e_poll_timeout();
+    let final_body: Option<StatusBody> = tokio::time::timeout(poll_timeout, async {
         loop {
+            if let Ok(Some(status)) = daemon_child.try_wait() {
+                let log = daemon_log.lock().expect("daemon log lock").clone();
+                panic!(
+                    "daemon exited before sync completed: {status:?}\n\
+                     daemon stderr tail:\n{log}"
+                );
+            }
+
             tokio::time::sleep(Duration::from_millis(500)).await;
             let body: StatusBody = match http.get(&url).send().await {
                 Ok(r) => match r.json().await {
@@ -412,6 +495,10 @@ async fn share_state_transitions_after_poll_tick() {
             if success_at_present && share.state == "idle" {
                 return body;
             }
+            // Re-trigger while syncing or warming up (llvm-cov can stretch ticks).
+            if share.state == "idle" || share.state == "server_unreachable" {
+                trigger_daemon_sync(&http, &base_url).await;
+            }
         }
     })
     .await
@@ -424,11 +511,14 @@ async fn share_state_transitions_after_poll_tick() {
         serde_json::Value::Null
     };
 
+    let daemon_log_tail = daemon_log.lock().expect("daemon log lock").clone();
     let body = final_body.unwrap_or_else(|| {
+        let secs = poll_timeout.as_secs();
         panic!(
-            "share did not reach idle+last_success_at within 60 s.\n\
+            "share did not reach idle+last_success_at within {secs} s.\n\
              BEFORE: {before_json}\n\
              AFTER:  {after_json}\n\
+             daemon stderr tail:\n{daemon_log_tail}\n\
              Check: mTLS cert wired? ACL fingerprint match? Server logs?"
         )
     });
