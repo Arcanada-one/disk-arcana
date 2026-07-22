@@ -14,13 +14,11 @@
 | DISK-0062 | Daemon pull `x-disk-share` | PR #25 `0c79c65` |
 | DISK-0063 | Server `DISK_SYNC_ROOT` create_dir_all | PR #27 |
 | DISK-0064 | Upload error swallow twin | PR #26 |
-| DISK-0015 | E2EE MVP scaffold (slices 1–4) | PRs #57–#60; design `docs/design/DISK-0015-e2ee-scaffold.md` |
+| DISK-0015 | E2EE slices 1–5 (download decrypt) | PR #110 `37d67db` |
 
 ## In-flight (this orchestrator pass)
 
-| Item | Summary |
-|------|---------|
-| Flake fix | `it_local_e2e_writeback` — llvm-cov serialization, `POST /sync`, 120s budget, `tls_domain`, daemon stderr tail |
+_None — DISK-0015 slice 5 merged (#110)._
 
 ## Verification (2026-07-22, arcana-devs)
 
