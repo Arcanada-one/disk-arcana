@@ -58,7 +58,7 @@ pub use enrollment::{EnrollErrorKind, EnrollmentServiceImpl};
 pub use middleware::{BombError, ReplayError, ReplayGuard};
 pub use multi_node::{lifecycle::revoke_node, vclock::VClock};
 pub use onboarding::{get_onboarding, put_onboarding};
-pub use orgs::{add_member, create_org, list_members, list_orgs};
+pub use orgs::{add_member, create_org, get_org_context, list_members, list_orgs, put_org_context};
 pub use publisher::{
     build_signed_payload, FileMetadata as PublisherFileMetadata, PublisherSignatureProof,
     PublisherVerifier, StubKeyFetcher, VerifyError,

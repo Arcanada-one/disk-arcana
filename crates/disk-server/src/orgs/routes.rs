@@ -316,6 +316,150 @@ pub async fn add_member(
         .into_response()
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PutOrgContextRequest {
+    pub org_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OrgContextOrganization {
+    pub org_id: String,
+    pub slug: String,
+    pub name: String,
+    pub tenant_id: String,
+    pub role: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OrgContextResponse {
+    pub mode: String,
+    pub active_org_id: Option<String>,
+    pub active_tenant_id: String,
+    pub personal_tenant_id: String,
+    pub organization: Option<OrgContextOrganization>,
+}
+
+async fn build_org_context(
+    state: &AuthHttpState,
+    user: &disk_core::meta_db::UserAccount,
+) -> Result<OrgContextResponse, (StatusCode, &'static str)> {
+    let active_org_id = state
+        .meta_db
+        .get_user_org_context(&user.id)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "db error"))?;
+
+    if let Some(org_id) = active_org_id.as_deref() {
+        let role = match state
+            .meta_db
+            .get_org_member_role(org_id, &user.id)
+            .await
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "db error"))?
+        {
+            Some(r) => r,
+            None => {
+                let _ = state
+                    .meta_db
+                    .set_user_org_context(&user.id, None, unix_now())
+                    .await;
+                return Ok(OrgContextResponse {
+                    mode: "personal".into(),
+                    active_org_id: None,
+                    active_tenant_id: user.tenant_id.clone(),
+                    personal_tenant_id: user.tenant_id.clone(),
+                    organization: None,
+                });
+            }
+        };
+        let org = state
+            .meta_db
+            .get_organization(org_id)
+            .await
+            .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "db error"))?
+            .ok_or((StatusCode::NOT_FOUND, "organization not found"))?;
+        return Ok(OrgContextResponse {
+            mode: "organization".into(),
+            active_org_id: Some(org_id.to_string()),
+            active_tenant_id: org.tenant_id.clone(),
+            personal_tenant_id: user.tenant_id.clone(),
+            organization: Some(OrgContextOrganization {
+                org_id: org.id,
+                slug: org.slug,
+                name: org.name,
+                tenant_id: org.tenant_id,
+                role: role.as_str().to_string(),
+            }),
+        });
+    }
+
+    Ok(OrgContextResponse {
+        mode: "personal".into(),
+        active_org_id: None,
+        active_tenant_id: user.tenant_id.clone(),
+        personal_tenant_id: user.tenant_id.clone(),
+        organization: None,
+    })
+}
+
+/// `GET /orgs/context` — active workspace (personal vs organization).
+pub async fn get_org_context(
+    headers: HeaderMap,
+    state: axum::extract::State<Arc<AuthHttpState>>,
+) -> impl IntoResponse {
+    let claims = match verify_bearer(&state, &headers).await {
+        Ok(c) => c,
+        Err((status, msg)) => return (status, msg).into_response(),
+    };
+    let user = match resolve_user_from_access(&state, &claims).await {
+        Ok(u) => u,
+        Err((status, msg)) => return (status, msg).into_response(),
+    };
+
+    match build_org_context(&state, &user).await {
+        Ok(resp) => Json(resp).into_response(),
+        Err((status, msg)) => (status, msg).into_response(),
+    }
+}
+
+/// `PUT /orgs/context` — switch active workspace.
+pub async fn put_org_context(
+    headers: HeaderMap,
+    state: axum::extract::State<Arc<AuthHttpState>>,
+    Json(body): Json<PutOrgContextRequest>,
+) -> impl IntoResponse {
+    let claims = match verify_bearer(&state, &headers).await {
+        Ok(c) => c,
+        Err((status, msg)) => return (status, msg).into_response(),
+    };
+    let user = match resolve_user_from_access(&state, &claims).await {
+        Ok(u) => u,
+        Err((status, msg)) => return (status, msg).into_response(),
+    };
+
+    let org_id = match body.org_id.as_deref() {
+        None | Some("") => None,
+        Some(id) => match state.meta_db.get_org_member_role(id, &user.id).await {
+            Ok(Some(_)) => Some(id),
+            Ok(None) => return (StatusCode::FORBIDDEN, "not a member").into_response(),
+            Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response(),
+        },
+    };
+
+    if state
+        .meta_db
+        .set_user_org_context(&user.id, org_id, unix_now())
+        .await
+        .is_err()
+    {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+    }
+
+    match build_org_context(&state, &user).await {
+        Ok(resp) => Json(resp).into_response(),
+        Err((status, msg)) => (status, msg).into_response(),
+    }
+}
+
 #[cfg(test)]
 mod integration_tests {
     use super::*;
@@ -422,5 +566,76 @@ mod integration_tests {
             .await
             .unwrap();
         assert_eq!(members["members"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn org_context_switch_round_trip() {
+        let dir = tempdir().unwrap();
+        let meta_db = MetaDb::open(&dir.path().join("orgs-ctx-http.sqlite"))
+            .await
+            .unwrap();
+
+        let email = disk_core::normalize_email("owner@corp.test");
+        let hash_pw = disk_core::hash_password("long-password").unwrap();
+        meta_db
+            .create_user_account("own1", &email, &hash_pw, "corp")
+            .await
+            .unwrap();
+
+        let port = spawn_auth_server(meta_db).await;
+        let client = reqwest::Client::new();
+
+        let login: serde_json::Value = client
+            .post(format!("http://127.0.0.1:{port}/auth/login"))
+            .json(&json!({ "email": email, "password": "long-password" }))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let token = login["access_token"].as_str().unwrap();
+
+        let created: serde_json::Value = client
+            .post(format!("http://127.0.0.1:{port}/orgs"))
+            .bearer_auth(token)
+            .json(&json!({ "name": "Corp Team", "slug": "corp-team" }))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let org_id = created["org_id"].as_str().unwrap();
+
+        let personal: serde_json::Value = client
+            .get(format!("http://127.0.0.1:{port}/orgs/context"))
+            .bearer_auth(token)
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(personal["mode"].as_str(), Some("personal"));
+
+        let switched: serde_json::Value = client
+            .put(format!("http://127.0.0.1:{port}/orgs/context"))
+            .bearer_auth(token)
+            .json(&json!({ "org_id": org_id }))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(switched["mode"].as_str(), Some("organization"));
+        assert_eq!(switched["active_tenant_id"].as_str(), Some("corp-team"));
     }
 }
