@@ -241,7 +241,7 @@ jobs:
           curl -fsSL "https://ziglang.org/download/${ZIG_VER}/zig-linux-x86_64-${ZIG_VER}.tar.xz" \
             | tar -xJ -C "$ZIG_DIR" --strip-components=1
           echo "$ZIG_DIR" >> "$GITHUB_PATH"
-          zig version
+          "$ZIG_DIR/zig" version
           cargo install cargo-zigbuild --locked --quiet
           echo "mode=zigbuild" >> "$GITHUB_OUTPUT"
       - name: Ensure protoc is available
