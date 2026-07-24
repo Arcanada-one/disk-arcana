@@ -242,7 +242,9 @@ jobs:
             | tar -xJ -C "$ZIG_DIR" --strip-components=1
           echo "$ZIG_DIR" >> "$GITHUB_PATH"
           "$ZIG_DIR/zig" version
-          cargo install cargo-zigbuild --locked --quiet
+          if ! command -v cargo-zigbuild >/dev/null 2>&1; then
+            cargo install cargo-zigbuild --locked --quiet
+          fi
           echo "mode=zigbuild" >> "$GITHUB_OUTPUT"
       - name: Ensure protoc is available
         # Self-hosted runner pool is heterogeneous — some machines lack a
