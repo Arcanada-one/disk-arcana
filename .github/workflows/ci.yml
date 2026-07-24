@@ -204,16 +204,22 @@ jobs:
 
   build:
     name: Build (${{ matrix.target }})
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: [lint, test]
     strategy:
       fail-fast: false
       matrix:
         include:
+          # Native build — self-hosted runners after infra-0308 lack docker.sock
+          # for the non-root CI user (run 29930300677: x86_64 cross failed at
+          # "permission denied" on /var/run/docker.sock).
+          # Both targets native (no cross/docker): self-hosted runners lack
+          # docker.sock for non-root CI user (aarch64 still failed on #114).
           - target: x86_64-unknown-linux-gnu
-            use_cross: true
+            use_cross: false
+            linker: ""
           - target: aarch64-unknown-linux-gnu
-            use_cross: true
+            use_cross: false
+            linker: aarch64-linux-gnu-gcc
     runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v7
@@ -221,6 +227,23 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+      - name: Ensure aarch64 linker (no docker)
+        if: matrix.linker != ''
+        run: |
+          set -euo pipefail
+          if command -v "${{ matrix.linker }}" >/dev/null 2>&1; then
+            "${{ matrix.linker }}" --version | head -1
+            exit 0
+          fi
+          # Prefer apt without sudo if already permitted; else fail with clear msg
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq gcc-aarch64-linux-gnu
+          else
+            echo "::error::${{ matrix.linker }} missing and apt-get unavailable"
+            exit 1
+          fi
+          "${{ matrix.linker }}" --version | head -1
       - name: Ensure protoc is available
         # Self-hosted runner pool is heterogeneous — some machines lack a
         # preinstalled protoc, so a bare `protoc --version` check fails with
@@ -243,12 +266,11 @@ jobs:
           chmod +x "$PROTOC_DIR/bin/protoc"
           echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
           "$PROTOC_DIR/bin/protoc" --version
-      - name: Install cross
-        if: matrix.use_cross
-        run: cargo install cross --locked
-      - name: Build (cross)
-        if: matrix.use_cross
-        run: cross build --release --target ${{ matrix.target }} --workspace
       - name: Build (native)
         if: ${{ !matrix.use_cross }}
-        run: cargo build --release --target ${{ matrix.target }} --workspace
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          fi
+          cargo build --release --target ${{ matrix.target }} --workspace
