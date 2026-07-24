@@ -216,8 +216,10 @@ jobs:
           # docker.sock for non-root CI user (aarch64 still failed on #114).
           - target: x86_64-unknown-linux-gnu
             use_cross: false
+            linker: ""
           - target: aarch64-unknown-linux-gnu
             use_cross: false
+            linker: aarch64-linux-gnu-gcc
     runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v7
