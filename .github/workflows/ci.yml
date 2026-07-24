@@ -215,11 +215,9 @@ jobs:
           # Both targets native (no cross/docker): self-hosted runners lack
           # docker.sock for non-root CI user (aarch64 still failed on #114).
           - target: x86_64-unknown-linux-gnu
-            use_cross: false
-            linker: ""
+            build_kind: native
           - target: aarch64-unknown-linux-gnu
-            use_cross: false
-            linker: aarch64-linux-gnu-gcc
+            build_kind: aarch64
     runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v7
@@ -227,23 +225,25 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      - name: Ensure aarch64 linker (no docker)
-        if: matrix.linker != ''
+      - name: Prepare aarch64 toolchain (no docker, no sudo)
+        if: matrix.build_kind == 'aarch64'
+        id: aarch64_toolchain
         run: |
           set -euo pipefail
-          if command -v "${{ matrix.linker }}" >/dev/null 2>&1; then
-            "${{ matrix.linker }}" --version | head -1
+          if command -v aarch64-linux-gnu-gcc >/dev/null 2>&1; then
+            aarch64-linux-gnu-gcc --version | head -1
+            echo "mode=gcc" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Prefer apt without sudo if already permitted; else fail with clear msg
-          if command -v apt-get >/dev/null 2>&1; then
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq gcc-aarch64-linux-gnu
-          else
-            echo "::error::${{ matrix.linker }} missing and apt-get unavailable"
-            exit 1
-          fi
-          "${{ matrix.linker }}" --version | head -1
+          ZIG_VER=0.13.0
+          ZIG_DIR="${RUNNER_TEMP}/zig-${ZIG_VER}"
+          mkdir -p "$ZIG_DIR"
+          curl -fsSL "https://ziglang.org/download/${ZIG_VER}/zig-linux-x86_64-${ZIG_VER}.tar.xz" \
+            | tar -xJ -C "$ZIG_DIR" --strip-components=1
+          echo "$ZIG_DIR" >> "$GITHUB_PATH"
+          "$ZIG_DIR/zig" version
+          cargo install cargo-zigbuild --locked --quiet
+          echo "mode=zigbuild" >> "$GITHUB_OUTPUT"
       - name: Ensure protoc is available
         # Self-hosted runner pool is heterogeneous — some machines lack a
         # preinstalled protoc, so a bare `protoc --version` check fails with
@@ -266,11 +266,11 @@ jobs:
           chmod +x "$PROTOC_DIR/bin/protoc"
           echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
           "$PROTOC_DIR/bin/protoc" --version
-      - name: Build (native)
-        if: ${{ !matrix.use_cross }}
+      - name: Build (release)
         run: |
           set -euo pipefail
-          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          if [ "${{ matrix.build_kind }}" = "aarch64" ] && [ "${{ steps.aarch64_toolchain.outputs.mode }}" = "zigbuild" ]; then
+            cargo zigbuild --release --target aarch64-unknown-linux-gnu --workspace
+          else
+            cargo build --release --target ${{ matrix.target }} --workspace
           fi
-          cargo build --release --target ${{ matrix.target }} --workspace
