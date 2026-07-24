@@ -215,9 +215,9 @@ jobs:
           # Both targets native (no cross/docker): self-hosted runners lack
           # docker.sock for non-root CI user (aarch64 still failed on #114).
           - target: x86_64-unknown-linux-gnu
-            use_cross: false
+            build_kind: native
           - target: aarch64-unknown-linux-gnu
-            use_cross: false
+            build_kind: aarch64
     runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v7
@@ -225,13 +225,14 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      - name: Ensure aarch64 linker (no docker, no sudo)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
+      - name: Prepare aarch64 toolchain (no docker, no sudo)
+        if: matrix.build_kind == 'aarch64'
+        id: aarch64_toolchain
         run: |
           set -euo pipefail
           if command -v aarch64-linux-gnu-gcc >/dev/null 2>&1; then
             aarch64-linux-gnu-gcc --version | head -1
-            echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+            echo "mode=gcc" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           ZIG_VER=0.13.0
@@ -239,11 +240,10 @@ jobs:
           mkdir -p "$ZIG_DIR"
           curl -fsSL "https://ziglang.org/download/${ZIG_VER}/zig-linux-x86_64-${ZIG_VER}.tar.xz" \
             | tar -xJ -C "$ZIG_DIR" --strip-components=1
-          WRAP="$ZIG_DIR/aarch64-linux-gnu-gcc"
-          printf '%s\n' '#!/bin/sh' 'exec "$(dirname "$0")/zig" cc -target aarch64-linux-gnu "$@"' > "$WRAP"
-          chmod +x "$WRAP" "$ZIG_DIR/zig"
           echo "$ZIG_DIR" >> "$GITHUB_PATH"
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=$WRAP" >> "$GITHUB_ENV"
+          zig version
+          cargo install cargo-zigbuild --locked --quiet
+          echo "mode=zigbuild" >> "$GITHUB_OUTPUT"
       - name: Ensure protoc is available
         # Self-hosted runner pool is heterogeneous — some machines lack a
         # preinstalled protoc, so a bare `protoc --version` check fails with
@@ -266,6 +266,11 @@ jobs:
           chmod +x "$PROTOC_DIR/bin/protoc"
           echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
           "$PROTOC_DIR/bin/protoc" --version
-      - name: Build (native)
-        if: ${{ !matrix.use_cross }}
-        run: cargo build --release --target ${{ matrix.target }} --workspace
+      - name: Build (release)
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.build_kind }}" = "aarch64" ] && [ "${{ steps.aarch64_toolchain.outputs.mode }}" = "zigbuild" ]; then
+            cargo zigbuild --release --target aarch64-unknown-linux-gnu --workspace
+          else
+            cargo build --release --target ${{ matrix.target }} --workspace
+          fi
