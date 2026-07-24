@@ -3,21 +3,16 @@
 # Ubuntu/Debian releases whose `protobuf-compiler` package predates proto3.
 # Source: https://github.com/cross-rs/cross/wiki/Configuration
 #
-# Per-target protoc arch: aarch64 images are arm64 — x86_64 protoc fails at
-# pre-build (CI Build aarch64-unknown-linux-gnu, 2026-07-22).
+# HOST-arch protoc (linux-x86_64) for ALL targets: build scripts (build.rs /
+# tonic-build) execute on the cross container's host userspace (x86_64 when
+# cross-compiling aarch64 from an x86_64 runner). Installing target-arch
+# protoc (linux-aarch_64) makes the shell try to interpret the ELF as a script
+# → "Syntax error: \"(\" unexpected" (CI Build aarch64, run 29930300677).
 
-[target.x86_64-unknown-linux-gnu]
+[build]
 pre-build = [
     "apt-get update && apt-get install --assume-yes --no-install-recommends curl unzip ca-certificates",
     "curl -sSLO https://github.com/protocolbuffers/protobuf/releases/download/v25.3/protoc-25.3-linux-x86_64.zip",
     "unzip -o protoc-25.3-linux-x86_64.zip -d /usr/local",
     "rm -f protoc-25.3-linux-x86_64.zip",
-]
-
-[target.aarch64-unknown-linux-gnu]
-pre-build = [
-    "apt-get update && apt-get install --assume-yes --no-install-recommends curl unzip ca-certificates",
-    "curl -sSLO https://github.com/protocolbuffers/protobuf/releases/download/v25.3/protoc-25.3-linux-aarch_64.zip",
-    "unzip -o protoc-25.3-linux-aarch_64.zip -d /usr/local",
-    "rm -f protoc-25.3-linux-aarch_64.zip",
 ]

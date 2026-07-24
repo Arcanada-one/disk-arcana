@@ -210,8 +210,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Native build — self-hosted runners after infra-0308 lack docker.sock
+          # for the non-root CI user (run 29930300677: x86_64 cross failed at
+          # "permission denied" on /var/run/docker.sock).
           - target: x86_64-unknown-linux-gnu
-            use_cross: true
+            use_cross: false
           - target: aarch64-unknown-linux-gnu
             use_cross: true
     runs-on: [self-hosted, Linux, X64]
