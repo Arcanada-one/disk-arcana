@@ -17,6 +17,9 @@ jobs:
         target: [x86_64-pc-windows-msvc]
     steps:
       - uses: actions/checkout@v4
+      # Self-hosted desktop runners do not inherit Developer PowerShell PATH;
+      # without vcvars, crates that need lib.exe fall back to missing dlltool.exe.
+      - uses: ilammy/msvc-dev-cmd@v1
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
