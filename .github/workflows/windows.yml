@@ -8,7 +8,9 @@ on:
 jobs:
   test:
     name: windows-${{ matrix.target }}
-    runs-on: windows-latest
+    # Local Windows desktop in Tailscale mesh (vika-pc / 100.103.19.90).
+    # Do NOT use GitHub-hosted windows-* — Arcanada CI runs on own runners.
+    runs-on: [self-hosted, Windows, X64, vika-pc]
     strategy:
       fail-fast: false
       matrix:
