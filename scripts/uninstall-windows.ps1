@@ -10,7 +10,7 @@
     so operators can re-install without re-enrolling.
 
 .PARAMETER PurgeConfig
-    Also remove C:\ProgramData\disk-arcana\ (destructive — includes meta.db).
+    Also remove C:\ProgramData\disk-arcana\ (destructive - includes meta.db).
 #>
 [CmdletBinding()]
 param(

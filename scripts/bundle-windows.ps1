@@ -42,7 +42,7 @@ Copy-Item -LiteralPath (Join-Path $RepoRoot "scripts\install-windows.ps1") -Dest
 Copy-Item -LiteralPath (Join-Path $RepoRoot "scripts\uninstall-windows.ps1") -Destination (Join-Path $StageDir "uninstall-windows.ps1")
 
 @"
-Disk Arcana — Windows portable bundle
+Disk Arcana - Windows portable bundle
 =====================================
 
 1. Extract this folder anywhere.

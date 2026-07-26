@@ -49,7 +49,7 @@ if (-not (Test-Path -LiteralPath $ConfigFile)) {
         Copy-Item -LiteralPath $Example -Destination $ConfigFile
         Write-Host "    seeded $ConfigFile from disk.toml.example (edit before production use)"
     } else {
-        Write-Warning "disk.toml.example missing — create $ConfigFile before starting the service"
+        Write-Warning "disk.toml.example missing - create $ConfigFile before starting the service"
     }
 }
 
@@ -74,7 +74,7 @@ if ($LASTEXITCODE -ne 0) {
 sc.exe description $ServiceName "Disk Arcana client daemon (gRPC sync + loopback REST :9444)" | Out-Null
 
 if ($SkipStart) {
-    Write-Host "==> SkipStart set — service registered but not started"
+    Write-Host "==> SkipStart set - service registered but not started"
     exit 0
 }
 
@@ -86,7 +86,7 @@ for ($i = 1; $i -le 30; $i++) {
     try {
         $resp = Invoke-WebRequest -Uri "http://127.0.0.1:9444/status" -UseBasicParsing -TimeoutSec 2
         if ($resp.StatusCode -eq 200) {
-            Write-Host "    OK — daemon is up (HTTP $($resp.StatusCode))"
+            Write-Host "    OK - daemon is up (HTTP $($resp.StatusCode))"
             Write-Host ""
             Write-Host "Done. Operator next steps:"
             Write-Host "  1. Edit $ConfigFile and run: Restart-Service $ServiceName"
