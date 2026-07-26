@@ -23,14 +23,14 @@ jobs:
       - name: Ensure dlltool on PATH (raw-dylib / windows-sys)
         shell: powershell
         run: |
-          $llvm = "C:\Program Files\LLVM\bin"
-          if (-not (Test-Path "$llvm\dlltool.exe")) {
-            throw "dlltool.exe missing under $llvm — on the runner run: choco install llvm; Copy-Item '$llvm\llvm-dlltool.exe' '$llvm\dlltool.exe'"
+          $llvm = 'C:\Program Files\LLVM\bin'
+          $dll = Join-Path $llvm 'dlltool.exe'
+          if (-not (Test-Path -LiteralPath $dll)) {
+            throw "dlltool.exe missing under $llvm (install LLVM on the runner)"
           }
-          # GITHUB_PATH only applies to later steps; also inject for this process.
           $env:Path = "$llvm;$env:Path"
-          "$llvm" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          dlltool --version
+          Add-Content -Path $env:GITHUB_PATH -Value $llvm
+          & $dll --version
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
