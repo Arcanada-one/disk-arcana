@@ -303,6 +303,11 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
         // write live loop state back via `update_share`.
         let state_for_task = state.clone();
         let config_snapshot_for_loop = config_snapshot.clone();
+        // Persist AuthService api_key across daemon restarts. Server
+        // `register_node` is NOT idempotent (AlreadyExists) — without a
+        // local key file, every restart after the first registration fails
+        // auth until the server process is recycled (DISK-0001 consilium).
+        let api_key_path = args.state_dir.join(format!("api-key-{node_id_for_loop}"));
 
         let handle = tokio::spawn(async move {
             // Build a DiskClient with bounded connect-retry.
@@ -381,15 +386,55 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
             };
 
             // Authenticate with the server so ExchangeState and other
-            // session-gated RPCs succeed.  register_node is idempotent: the
-            // server returns a fresh API key on each call; authenticate() then
-            // exchanges it for a session token stored in the channel-local cache.
+            // session-gated RPCs succeed.
+            //
+            // Preferred path: reuse a persisted api_key (survives daemon
+            // restart). Fallback: register_node (first enrollment only —
+            // subsequent calls return AlreadyExists on the current server).
             //
             // A failure here is non-fatal: the loop proceeds; individual
             // iterations surface Unauthenticated → TransportUnavailable →
             // backoff → retry, which is the correct degraded behaviour.
             let mut client = client; // make mutable so we can set api_key
-            if let Ok(api_key) = client.register_node(&node_id_for_loop, "disk-daemon").await {
+            let persisted = std::fs::read_to_string(&api_key_path)
+                .ok()
+                .map(|s| s.trim().to_owned())
+                .filter(|s| !s.is_empty());
+            let api_key = if let Some(key) = persisted {
+                Some(key)
+            } else {
+                match client.register_node(&node_id_for_loop, "disk-daemon").await {
+                    Ok(key) => {
+                        if let Err(e) = std::fs::write(&api_key_path, &key) {
+                            tracing::warn!(
+                                share = %share_name,
+                                path = %api_key_path.display(),
+                                error = %e,
+                                "sync-loop: could not persist api_key; restart will re-register"
+                            );
+                        } else {
+                            #[cfg(unix)]
+                            {
+                                use std::os::unix::fs::PermissionsExt;
+                                let _ = std::fs::set_permissions(
+                                    &api_key_path,
+                                    std::fs::Permissions::from_mode(0o600),
+                                );
+                            }
+                        }
+                        Some(key)
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            share = %share_name,
+                            error = %e,
+                            "sync-loop: register_node() failed; ExchangeState will be unauthenticated"
+                        );
+                        None
+                    }
+                }
+            };
+            if let Some(api_key) = api_key {
                 client.api_key = Some(api_key);
                 match client.authenticate().await {
                     Ok(_token) => {
@@ -406,11 +451,6 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
                         );
                     }
                 }
-            } else {
-                tracing::warn!(
-                    share = %share_name,
-                    "sync-loop: register_node() failed; ExchangeState will be unauthenticated"
-                );
             }
 
             let mut loop_sm = SyncLoop::new();
