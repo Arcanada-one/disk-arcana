@@ -32,6 +32,14 @@ jobs:
           Add-Content -Path $env:GITHUB_PATH -Value $llvm
           # llvm-dlltool has no --version; presence check is enough
           Write-Host "dlltool ready: $dll"
+      - name: Assert MSVC rustc host
+        shell: powershell
+        run: |
+          rustc -vV
+          $hostLine = (rustc -vV | Select-String '^host:').ToString()
+          if ($hostLine -notmatch 'x86_64-pc-windows-msvc') {
+            throw "Expected host x86_64-pc-windows-msvc, got: $hostLine"
+          }
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
