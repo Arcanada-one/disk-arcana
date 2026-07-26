@@ -20,6 +20,17 @@ jobs:
       # Self-hosted desktop runners do not inherit Developer PowerShell PATH;
       # without vcvars, crates that need lib.exe fall back to missing dlltool.exe.
       - uses: ilammy/msvc-dev-cmd@v1
+      - name: Ensure dlltool on PATH (raw-dylib / windows-sys)
+        shell: powershell
+        run: |
+          $llvm = "C:\Program Files\LLVM\bin"
+          if (Test-Path $llvm) {
+            echo "$llvm" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+          if (-not (Get-Command dlltool -ErrorAction SilentlyContinue)) {
+            throw "dlltool.exe not found — install LLVM on the runner (choco install llvm) and copy llvm-dlltool.exe to dlltool.exe"
+          }
+          dlltool --version
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
