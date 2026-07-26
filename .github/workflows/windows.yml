@@ -30,7 +30,8 @@ jobs:
           }
           $env:Path = "$llvm;$env:Path"
           Add-Content -Path $env:GITHUB_PATH -Value $llvm
-          & $dll --version
+          # llvm-dlltool has no --version; presence check is enough
+          Write-Host "dlltool ready: $dll"
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
