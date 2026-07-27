@@ -32,6 +32,7 @@ pub async fn read_daemon_listen_port(stderr: ChildStderr) -> u16 {
 
 /// Like [`read_daemon_listen_port`], but also append stderr lines to `log` for
 /// failure diagnostics (ring-buffer capped at 16 KiB).
+#[allow(dead_code)] // used by `it_local_e2e_writeback` only; other IT crates share this module
 pub async fn read_daemon_listen_port_with_log(stderr: ChildStderr, log: Arc<Mutex<String>>) -> u16 {
     let mut reader = BufReader::new(stderr).lines();
     loop {
