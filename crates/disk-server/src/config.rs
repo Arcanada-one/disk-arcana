@@ -40,6 +40,7 @@
 //! | `stub` | `StubCaClient` — returns fixed test cert | Bound (returns stub cert) |
 //! | `offline` | `OfflineCaClient` — returns `EnrollmentDisabled` error | **Not bound** (Approach A-a: enrollment not needed) |
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
@@ -108,6 +109,10 @@ pub struct ServerConfig {
     pub enrollment_bind_addr: SocketAddr,
     pub db_path: PathBuf,
     pub sync_root: PathBuf,
+    /// Optional per-share filesystem roots. Shares absent from this map use
+    /// [`Self::sync_root`] (backward-compatible default for `datarim-kb`).
+    /// Populated from `DISK_SHARE_ROOTS` (`share:/abs/path` comma-separated).
+    pub share_roots: HashMap<String, PathBuf>,
     pub tls_cert_path: PathBuf,
     pub tls_key_path: PathBuf,
     pub tls_ca_path: PathBuf,
@@ -372,6 +377,7 @@ impl ServerConfig {
             enrollment_bind_addr,
             db_path: require_path("DISK_DB_PATH")?,
             sync_root: require_path("DISK_SYNC_ROOT")?,
+            share_roots: parse_share_roots()?,
             tls_cert_path: require_path("DISK_TLS_CERT_PATH")?,
             tls_key_path: require_path("DISK_TLS_KEY_PATH")?,
             tls_ca_path: require_path("DISK_TLS_CA_PATH")?,
@@ -429,6 +435,50 @@ fn opt_path(var: &'static str) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// Parse `DISK_SHARE_ROOTS` — comma-separated `share_name:/absolute/path` pairs.
+///
+/// Example: `hermes-artefacts:/var/lib/disk-arcana/shares/hermes-artefacts`
+fn parse_share_roots() -> Result<HashMap<String, PathBuf>, ConfigError> {
+    let Some(raw) = std::env::var("DISK_SHARE_ROOTS")
+        .ok()
+        .filter(|s| !s.is_empty())
+    else {
+        return Ok(HashMap::new());
+    };
+    let mut out = HashMap::new();
+    for entry in raw.split(',') {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        let (share, path) = entry.split_once(':').ok_or_else(|| {
+            ConfigError::InvalidValue(
+                "DISK_SHARE_ROOTS",
+                format!("expected share:/path, got '{entry}'"),
+            )
+        })?;
+        let share = share.trim();
+        if share.is_empty() {
+            return Err(ConfigError::InvalidValue(
+                "DISK_SHARE_ROOTS",
+                "share name must not be empty".into(),
+            ));
+        }
+        let path = PathBuf::from(path.trim());
+        if !path.is_absolute() {
+            return Err(ConfigError::InvalidValue(
+                "DISK_SHARE_ROOTS",
+                format!(
+                    "path for share '{share}' must be absolute: {}",
+                    path.display()
+                ),
+            ));
+        }
+        out.insert(share.to_string(), path);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -447,6 +497,7 @@ mod tests {
             "DISK_ENROLLMENT_BIND_ADDR",
             "DISK_DB_PATH",
             "DISK_SYNC_ROOT",
+            "DISK_SHARE_ROOTS",
             "DISK_TLS_CERT_PATH",
             "DISK_TLS_KEY_PATH",
             "DISK_TLS_CA_PATH",

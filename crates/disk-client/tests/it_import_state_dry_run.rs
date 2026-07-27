@@ -31,7 +31,7 @@ async fn dry_run_lists_entries_and_writes_zero_rows() {
     fs::create_dir(&nested).unwrap();
     fs::write(nested.join("beta.bin"), b"beta-payload-1234").unwrap(); // 17
 
-    let report = import_state(&share, "node-r8", &db, true)
+    let report = import_state(&share, "default", "node-r8", &db, true)
         .await
         .expect("import_state dry_run");
 
@@ -69,7 +69,7 @@ async fn dry_run_lists_entries_and_writes_zero_rows() {
 
     // Idempotence: a follow-up live run on the same DB must succeed and
     // produce exactly 2 rows — proving the dry-run did not poison state.
-    let live = import_state(&share, "node-r8", &db, false)
+    let live = import_state(&share, "default", "node-r8", &db, false)
         .await
         .expect("live import_state");
     assert_eq!(live.files_imported, 2);

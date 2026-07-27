@@ -47,7 +47,7 @@ async fn import_state_skips_symlink_to_etc_passwd() {
     fs::write(share.join("ok.txt"), b"benign-payload").unwrap();
     symlink(ESCAPE_TARGET, share.join("escape_link")).unwrap();
 
-    let report = import_state(&share, "node-r8", &db, false)
+    let report = import_state(&share, "default", "node-r8", &db, false)
         .await
         .expect("import_state");
 
@@ -88,7 +88,7 @@ async fn import_state_skips_symlink_to_directory_outside_root() {
     // Directory symlink that, if followed, would expose secret.txt.
     symlink(&outside_dir, share.join("escape_dir")).unwrap();
 
-    let report = import_state(&share, "node-r8", &db, false)
+    let report = import_state(&share, "default", "node-r8", &db, false)
         .await
         .expect("import_state");
 

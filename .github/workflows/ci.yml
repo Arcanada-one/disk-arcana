@@ -148,9 +148,9 @@ jobs:
           echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
           "$PROTOC_DIR/bin/protoc" --version
       - name: Ensure C linker (self-hosted runners without gcc)
-        run: bash scripts/ci-ensure-cc.sh
-      - name: Install cargo-llvm-cov
-        run: cargo install cargo-llvm-cov --locked --quiet
+        run: |
+          bash scripts/ci-ensure-cc.sh
+          cargo install cargo-llvm-cov --locked --quiet
       - name: cargo test
         run: cargo test --workspace --all-features
       - name: Scanner load harness (1K + 10K, DISK-0012 G3)
@@ -195,9 +195,9 @@ jobs:
           echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
           "$PROTOC_DIR/bin/protoc" --version
       - name: Ensure C linker (self-hosted runners without gcc)
-        run: bash scripts/ci-ensure-cc.sh
-      - name: Install cargo-fuzz
-        run: cargo +nightly install cargo-fuzz --locked --quiet
+        run: |
+          bash scripts/ci-ensure-cc.sh
+          cargo +nightly install cargo-fuzz --locked --quiet
       - name: cargo fuzz smoke (all targets, DISK-0012)
         working-directory: fuzz
         run: |

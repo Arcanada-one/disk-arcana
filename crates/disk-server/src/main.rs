@@ -259,6 +259,7 @@ async fn main() -> anyhow::Result<()> {
             acl_enforcer.clone(),
             audit_emitter.clone(),
         )
+        .with_share_roots(cfg.share_roots.clone())
         .with_meta_router(meta_router, "server");
         if let Some(enforcer) = quota_enforcer {
             sync_impl = sync_impl.with_quota_enforcer(enforcer);
