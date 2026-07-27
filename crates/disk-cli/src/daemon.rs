@@ -658,7 +658,9 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
         .await
         .with_context(|| "bind REST listener")?;
     tracing::info!(addr = %local, "disk daemon listening on {local}");
-    println!("disk daemon listening on {local}");
+    // stderr (not stdout): IT harnesses parse this line; closing the stdout
+    // pipe early (llvm-cov / piped test children) must not SIGPIPE the daemon.
+    eprintln!("disk daemon listening on {local}");
 
     let _ = signal_task.await;
     watcher.abort();

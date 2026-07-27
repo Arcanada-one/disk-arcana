@@ -1122,6 +1122,7 @@ pub struct PendingTokenArgs {
 
 fn init_tracing() {
     let _ = tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .try_init();
 }

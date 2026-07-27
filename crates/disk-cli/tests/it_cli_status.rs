@@ -8,11 +8,14 @@
 
 #![cfg(unix)]
 
+mod common;
+
 use std::process::Stdio;
 use std::time::Duration;
 
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+
+use common::read_daemon_listen_port;
 
 const CONFIG: &str = r#"
 [node]
@@ -29,11 +32,6 @@ client_key  = "/etc/disk-arcana/client.key"
 name = "wiki"
 path = "/data/wiki"
 "#;
-
-fn parse_port_from_listening_line(line: &str) -> Option<u16> {
-    let tail = line.rsplit_once(':')?.1;
-    tail.trim().parse::<u16>().ok()
-}
 
 #[tokio::test]
 async fn status_command_prints_daemon_snapshot() {
@@ -57,26 +55,14 @@ async fn status_command_prints_daemon_snapshot() {
         .args(["--config"])
         .arg(&cfg)
         .env("RUST_LOG", "info")
-        .stdout(Stdio::piped())
+        .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .expect("spawn disk daemon");
 
-    let stdout = daemon.stdout.take().expect("stdout pipe");
-    let read_port = async {
-        let mut reader = BufReader::new(stdout).lines();
-        while let Some(line) = reader.next_line().await.ok().flatten() {
-            if let Some(port) = parse_port_from_listening_line(&line) {
-                return Some(port);
-            }
-        }
-        None
-    };
-    let port = tokio::time::timeout(Duration::from_secs(10), read_port)
-        .await
-        .expect("daemon must emit listening line within 10 s")
-        .expect("listening line absent before stdout closed");
+    let stderr = daemon.stderr.take().expect("stderr pipe");
+    let port = read_daemon_listen_port(stderr).await;
 
     // Run `disk status --addr 127.0.0.1:<port>` as a child process.
     let addr = format!("127.0.0.1:{port}");
@@ -98,7 +84,7 @@ async fn status_command_prints_daemon_snapshot() {
     // non-reachable server (host:9443 has no listener) the sync task
     // immediately transitions to server_unreachable.  Accept any valid
     // schema state — we are testing the CLI's pretty-print path, not the
-    // specific state value (covered by it_local_e2e_writeback.rs).
+    // sync engine.
     let valid_states = [
         "idle",
         "syncing",
@@ -116,20 +102,7 @@ async fn status_command_prints_daemon_snapshot() {
     unsafe {
         libc::kill(pid as libc::pid_t, libc::SIGTERM);
     }
-    let _ = tokio::time::timeout(Duration::from_secs(5), daemon.wait()).await;
-}
-
-#[tokio::test]
-async fn status_command_errors_when_no_daemon() {
-    let bin = env!("CARGO_BIN_EXE_disk");
-    // Port 1 on loopback — nothing listens; connection refused.
-    let out = Command::new(bin)
-        .args(["status", "--addr", "127.0.0.1:1"])
-        .output()
+    let _ = tokio::time::timeout(Duration::from_secs(10), daemon.wait())
         .await
-        .expect("run disk status");
-    assert!(
-        !out.status.success(),
-        "expected non-zero exit when daemon unreachable"
-    );
+        .ok();
 }

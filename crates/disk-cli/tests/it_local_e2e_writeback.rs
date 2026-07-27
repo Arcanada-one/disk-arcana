@@ -30,11 +30,14 @@
 
 #![cfg(unix)]
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use common::{parse_port_from_listening_line, read_daemon_listen_port_with_log};
 use rcgen::{
     BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair,
     KeyUsagePurpose,
@@ -58,11 +61,6 @@ fn e2e_poll_timeout() -> Duration {
     } else {
         Duration::from_secs(60)
     }
-}
-
-fn parse_port_from_listening_line(line: &str) -> Option<u16> {
-    let tail = line.rsplit_once(':')?.1;
-    tail.trim().parse::<u16>().ok()
 }
 
 /// Find the `disk-arcana-server` binary produced by the current cargo build.
@@ -415,45 +413,16 @@ async fn share_state_transitions_after_poll_tick() {
         .args(["--state-dir"])
         .arg(&state_dir)
         .env("RUST_LOG", "info")
-        .stdout(Stdio::piped())
+        .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .expect("spawn disk daemon");
 
-    let stdout = daemon_child.stdout.take().expect("stdout pipe");
-    let daemon_port = {
-        let read_port = async {
-            let mut reader = BufReader::new(stdout).lines();
-            while let Some(line) = reader.next_line().await.ok().flatten() {
-                if let Some(p) = parse_port_from_listening_line(&line) {
-                    return Some(p);
-                }
-            }
-            None
-        };
-        tokio::time::timeout(Duration::from_secs(30), read_port)
-            .await
-            .expect("daemon must emit 'listening on …' within 30 s")
-            .expect("listening line absent before stdout closed")
-    };
-
-    // Buffer daemon stderr for failure diagnostics (do not discard under llvm-cov).
     let daemon_stderr = daemon_child.stderr.take().expect("daemon stderr");
     let daemon_log = Arc::new(Mutex::new(String::new()));
-    let daemon_log_bg = Arc::clone(&daemon_log);
-    tokio::spawn(async move {
-        let mut r = BufReader::new(daemon_stderr).lines();
-        while let Ok(Some(line)) = r.next_line().await {
-            let mut log = daemon_log_bg.lock().expect("daemon log lock");
-            log.push_str(&line);
-            log.push('\n');
-            if log.len() > 16_384 {
-                let drain = log.len() - 8_192;
-                log.drain(..drain);
-            }
-        }
-    });
+    let daemon_port =
+        read_daemon_listen_port_with_log(daemon_stderr, Arc::clone(&daemon_log)).await;
 
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
@@ -612,28 +581,14 @@ path = "/tmp/disk-e2e-vault"
         .args(["--state-dir"])
         .arg(dir.path().join("state"))
         .env("RUST_LOG", "error")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .expect("spawn disk daemon");
 
-    let stdout = child.stdout.take().expect("stdout pipe");
-    let port = {
-        let read_port = async {
-            let mut reader = BufReader::new(stdout).lines();
-            while let Some(line) = reader.next_line().await.ok().flatten() {
-                if let Some(p) = parse_port_from_listening_line(&line) {
-                    return Some(p);
-                }
-            }
-            None
-        };
-        tokio::time::timeout(Duration::from_secs(30), read_port)
-            .await
-            .expect("listening line within 30 s")
-            .expect("missing listening line")
-    };
+    let stderr = child.stderr.take().expect("stderr pipe");
+    let port = common::read_daemon_listen_port(stderr).await;
 
     let url = format!("http://127.0.0.1:{port}/status");
     let body: StatusBody = reqwest::Client::new()
