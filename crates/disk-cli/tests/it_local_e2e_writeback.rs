@@ -37,7 +37,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use common::{parse_port_from_listening_line, read_daemon_listen_port_with_log};
+use common::read_daemon_listen_port_with_log;
 use rcgen::{
     BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair,
     KeyUsagePurpose,

@@ -191,6 +191,25 @@ jobs:
           chmod +x "$PROTOC_DIR/bin/protoc"
           echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
           "$PROTOC_DIR/bin/protoc" --version
+      - name: Ensure C linker for cargo-fuzz install
+        # Some self-hosted runners lack gcc/cc (run 30280682942: linker `cc` not
+        # found during `cargo install cargo-fuzz`). Use zig as a portable cc when
+        # the host toolchain is absent — same pattern as the aarch64 build job.
+        run: |
+          set -euo pipefail
+          if command -v cc >/dev/null 2>&1; then
+            cc --version | head -1
+            exit 0
+          fi
+          ZIG_VER=0.13.0
+          ZIG_DIR="${RUNNER_TEMP}/zig-${ZIG_VER}"
+          mkdir -p "$ZIG_DIR"
+          curl -fsSL "https://ziglang.org/download/${ZIG_VER}/zig-linux-x86_64-${ZIG_VER}.tar.xz" \
+            | tar -xJ -C "$ZIG_DIR" --strip-components=1
+          echo "$ZIG_DIR" >> "$GITHUB_PATH"
+          echo "CC=${ZIG_DIR}/zig cc" >> "$GITHUB_ENV"
+          echo "CXX=${ZIG_DIR}/zig c++" >> "$GITHUB_ENV"
+          "$ZIG_DIR/zig" version
       - name: Install cargo-fuzz
         run: cargo +nightly install cargo-fuzz --locked --quiet
       - name: cargo fuzz smoke (all targets, DISK-0012)
