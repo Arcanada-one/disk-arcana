@@ -58,6 +58,7 @@ jobs:
         # cargo-installed binaries run natively and honour deny.toml / the ignore
         # list below.
         run: |
+          bash scripts/ci-ensure-cc.sh
           cargo install cargo-audit --locked
           cargo install cargo-deny --locked
       - name: cargo audit
@@ -146,6 +147,8 @@ jobs:
           chmod +x "$PROTOC_DIR/bin/protoc"
           echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
           "$PROTOC_DIR/bin/protoc" --version
+      - name: Ensure C linker (self-hosted runners without gcc)
+        run: bash scripts/ci-ensure-cc.sh
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov --locked --quiet
       - name: cargo test
@@ -191,6 +194,8 @@ jobs:
           chmod +x "$PROTOC_DIR/bin/protoc"
           echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
           "$PROTOC_DIR/bin/protoc" --version
+      - name: Ensure C linker (self-hosted runners without gcc)
+        run: bash scripts/ci-ensure-cc.sh
       - name: Install cargo-fuzz
         run: cargo +nightly install cargo-fuzz --locked --quiet
       - name: cargo fuzz smoke (all targets, DISK-0012)

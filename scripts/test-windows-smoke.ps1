@@ -77,14 +77,16 @@ $daemon = Start-Process -FilePath $Binary -ArgumentList @(
 $port = $null
 for ($i = 0; $i -lt 60; $i++) {
     Start-Sleep -Milliseconds 500
-    if (Test-Path -LiteralPath $StdoutLog) {
-        $lines = Get-Content -LiteralPath $StdoutLog -ErrorAction SilentlyContinue
+    foreach ($logPath in @($StderrLog, $StdoutLog)) {
+        if (-not (Test-Path -LiteralPath $logPath)) { continue }
+        $lines = Get-Content -LiteralPath $logPath -ErrorAction SilentlyContinue
         foreach ($line in $lines) {
             if ($line -match 'listening on 127\.0\.0\.1:(\d+)') {
                 $port = [int]$Matches[1]
                 break
             }
         }
+        if ($null -ne $port) { break }
     }
     if ($null -ne $port) { break }
     if ($daemon.HasExited) { break }

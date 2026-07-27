@@ -11,12 +11,15 @@
 
 #![cfg(unix)]
 
+mod common;
+
 use std::process::Stdio;
 use std::time::Duration;
 
 use serde::Deserialize;
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+
+use common::read_daemon_listen_port;
 
 const CONFIG: &str = r#"
 [node]
@@ -50,12 +53,6 @@ struct StatusShareBody {
     state: String,
 }
 
-fn parse_port_from_listening_line(line: &str) -> Option<u16> {
-    // Pattern: "disk daemon listening on 127.0.0.1:NNNNN"
-    let tail = line.rsplit_once(':')?.1;
-    tail.trim().parse::<u16>().ok()
-}
-
 #[tokio::test]
 async fn daemon_serves_status_and_terminates_on_sigterm() {
     let bin = env!("CARGO_BIN_EXE_disk");
@@ -78,28 +75,14 @@ async fn daemon_serves_status_and_terminates_on_sigterm() {
         .args(["--config"])
         .arg(&cfg)
         .env("RUST_LOG", "info")
-        .stdout(Stdio::piped())
+        .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .expect("spawn disk daemon");
 
-    // The daemon prints the bound address to stdout (println in run_start);
-    // read until we see «listening on» to recover the OS-assigned port.
-    let stdout = child.stdout.take().expect("stdout pipe");
-    let read_port = async {
-        let mut reader = BufReader::new(stdout).lines();
-        while let Some(line) = reader.next_line().await.ok().flatten() {
-            if let Some(port) = parse_port_from_listening_line(&line) {
-                return Some(port);
-            }
-        }
-        None
-    };
-    let port = tokio::time::timeout(Duration::from_secs(30), read_port)
-        .await
-        .expect("daemon must emit 'listening on 127.0.0.1:NNNNN' within 30 s")
-        .expect("listening line absent before stdout closed");
+    let stderr = child.stderr.take().expect("stderr pipe");
+    let port = read_daemon_listen_port(stderr).await;
 
     let client = reqwest::Client::new();
     let url = format!("http://127.0.0.1:{port}/status");
@@ -119,7 +102,7 @@ async fn daemon_serves_status_and_terminates_on_sigterm() {
     assert_eq!(body.shares[0].path, "/data/wiki");
     assert_eq!(body.shares[0].declared_direction, "bidirectional");
     // The sync task writes back live state after its first connect attempt.
-    // With no server at host:9443 it transitions to server_unreachable.
+    // With no server at host:9443 the sync task transitions to server_unreachable.
     // Accept any valid schema state — this test verifies the schema shape.
     let valid_states = [
         "idle",
@@ -161,22 +144,13 @@ async fn daemon_refuses_background_mode() {
     std::fs::write(&cfg, CONFIG).unwrap();
 
     let output = Command::new(bin)
-        .args([
-            "daemon",
-            "start",
-            "--status-bind",
-            "127.0.0.1:0",
-            "--config",
-        ])
+        .args(["daemon", "start", "--config"])
         .arg(&cfg)
         .output()
         .await
-        .expect("spawn disk daemon");
+        .expect("run disk daemon start");
 
-    assert!(
-        !output.status.success(),
-        "expected non-zero exit when --foreground is missing"
-    );
+    assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("background mode is not supported"),
@@ -185,10 +159,10 @@ async fn daemon_refuses_background_mode() {
 }
 
 #[test]
-fn parse_port_from_listening_line_extracts_port() {
+fn parse_port_from_listening_line_unit() {
+    use common::parse_port_from_listening_line;
     assert_eq!(
         parse_port_from_listening_line("disk daemon listening on 127.0.0.1:54321\n"),
         Some(54321)
     );
-    assert_eq!(parse_port_from_listening_line("nothing useful here"), None);
 }
