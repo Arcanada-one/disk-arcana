@@ -144,11 +144,7 @@ async fn daemon_refuses_background_mode() {
     std::fs::write(&cfg, CONFIG).unwrap();
 
     let output = Command::new(bin)
-        .args([
-            "daemon",
-            "start",
-            "--config",
-        ])
+        .args(["daemon", "start", "--config"])
         .arg(&cfg)
         .output()
         .await

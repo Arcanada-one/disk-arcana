@@ -24,9 +24,7 @@ pub async fn read_daemon_listen_port(stderr: ChildStderr) -> u16 {
             .expect("stderr read failed")
             .expect("listening line absent before stderr closed");
         if let Some(port) = parse_port_from_listening_line(&line) {
-            tokio::spawn(async move {
-                while let Ok(Some(_)) = reader.next_line().await {}
-            });
+            tokio::spawn(async move { while let Ok(Some(_)) = reader.next_line().await {} });
             return port;
         }
     }
@@ -34,10 +32,7 @@ pub async fn read_daemon_listen_port(stderr: ChildStderr) -> u16 {
 
 /// Like [`read_daemon_listen_port`], but also append stderr lines to `log` for
 /// failure diagnostics (ring-buffer capped at 16 KiB).
-pub async fn read_daemon_listen_port_with_log(
-    stderr: ChildStderr,
-    log: Arc<Mutex<String>>,
-) -> u16 {
+pub async fn read_daemon_listen_port_with_log(stderr: ChildStderr, log: Arc<Mutex<String>>) -> u16 {
     let mut reader = BufReader::new(stderr).lines();
     loop {
         let line = tokio::time::timeout(Duration::from_secs(30), reader.next_line())
