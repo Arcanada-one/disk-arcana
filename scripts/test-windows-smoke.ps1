@@ -7,7 +7,7 @@
     Exercises CLI validate + foreground daemon REST /status on windows-latest CI
     without registering a Windows Service (no elevation required).
 
-    NOT covered here (documented gap — requires operator Windows VM):
+    NOT covered here (documented gap - requires operator Windows VM):
     - install-windows.ps1 service registration
     - enroll + gRPC sync against a live server
 
@@ -111,7 +111,7 @@ if ($resp.Content -notmatch 'windows-smoke') {
     throw "status JSON missing node id windows-smoke: $($resp.Content)"
 }
 
-Write-Host "    OK — $statusUrl returned node windows-smoke"
+Write-Host "    OK - $statusUrl returned node windows-smoke"
 
 if (-not $daemon.HasExited) {
     Stop-Process -Id $daemon.Id -Force -ErrorAction SilentlyContinue

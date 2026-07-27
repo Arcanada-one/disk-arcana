@@ -8,20 +8,45 @@ on:
 jobs:
   test:
     name: windows-${{ matrix.target }}
-    runs-on: windows-latest
+    # Local Windows desktop in Tailscale mesh (vika-pc / 100.103.19.90).
+    # Do NOT use GitHub-hosted windows-* - Arcanada CI runs on own runners.
+    runs-on: [self-hosted, Windows, X64, vika-pc]
     strategy:
       fail-fast: false
       matrix:
         target: [x86_64-pc-windows-msvc]
     steps:
       - uses: actions/checkout@v4
+      # Self-hosted desktop runners do not inherit Developer PowerShell PATH;
+      # without vcvars, crates that need lib.exe fall back to missing dlltool.exe.
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Ensure dlltool on PATH (raw-dylib / windows-sys)
+        shell: powershell
+        run: |
+          $llvm = 'C:\Program Files\LLVM\bin'
+          $dll = Join-Path $llvm 'dlltool.exe'
+          if (-not (Test-Path -LiteralPath $dll)) {
+            throw "dlltool.exe missing under $llvm (install LLVM on the runner)"
+          }
+          $env:Path = "$llvm;$env:Path"
+          Add-Content -Path $env:GITHUB_PATH -Value $llvm
+          # llvm-dlltool has no --version; presence check is enough
+          Write-Host "dlltool ready: $dll"
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: stable-x86_64-pc-windows-msvc
           target: ${{ matrix.target }}
           components: rustfmt, clippy
+      - name: Assert MSVC rustc host
+        shell: powershell
+        run: |
+          rustc -vV
+          $hostLine = (rustc -vV | Select-String '^host:').ToString()
+          if ($hostLine -notmatch 'x86_64-pc-windows-msvc') {
+            throw "Expected host x86_64-pc-windows-msvc, got: $hostLine"
+          }
       - name: Install protoc
-        shell: pwsh
+        shell: powershell
         run: |
           if (-not (Get-Command protoc -ErrorAction SilentlyContinue)) { choco install protoc -y --no-progress }
       - name: Format
@@ -33,13 +58,13 @@ jobs:
       - name: Build
         run: cargo build --workspace --release --target ${{ matrix.target }}
       - name: Windows smoke (no admin)
-        shell: pwsh
+        shell: powershell
         run: ./scripts/test-windows-smoke.ps1 -Binary target/${{ matrix.target }}/release/disk.exe
       - name: Validate WiX scaffold XML
-        shell: pwsh
+        shell: powershell
         run: ./scripts/validate-wix-scaffold.ps1
       - name: Bundle portable zip
-        shell: pwsh
+        shell: powershell
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           ./scripts/bundle-windows.ps1 -Binary target/${{ matrix.target }}/release/disk.exe -OutDir dist -Version ci

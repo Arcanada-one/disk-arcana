@@ -4,7 +4,7 @@
     Build Disk Arcana client MSI from WiX scaffold (Windows host only).
 
 .DESCRIPTION
-    Scaffold only — requires WiX Toolset (candle.exe + light.exe) on PATH.
+    Scaffold only - requires WiX Toolset (candle.exe + light.exe) on PATH.
     Cannot run on Linux DEVS. Operator executes on a Windows build VM.
 
 .PARAMETER Binary
@@ -40,7 +40,7 @@ if (-not $candle -or -not $light) {
     throw @"
 WiX Toolset not found on PATH (candle.exe, light.exe).
 Install WiX v3.14+ from https://wixtoolset.org/ or use portable zip instead.
-This script is intentionally NOT run in CI — MSI build is operator-gated.
+This script is intentionally NOT run in CI - MSI build is operator-gated.
 "@
 }
 
@@ -61,7 +61,7 @@ New-Item -ItemType Directory -Force -Path $Stage | Out-Null
 Copy-Item -LiteralPath $ProductWxs -Destination (Join-Path $Stage "Product.wxs")
 Copy-Item -LiteralPath $Binary -Destination (Join-Path $Stage "disk.exe")
 
-# Patch version in staged wxs (simple replace — scaffold only)
+# Patch version in staged wxs (simple replace - scaffold only)
 $wxs = Get-Content -LiteralPath (Join-Path $Stage "Product.wxs") -Raw
 $wxs = $wxs -replace 'Version="0\.1\.0\.0"', "Version=""$Version"""
 Set-Content -LiteralPath (Join-Path $Stage "Product.wxs") -Value $wxs -Encoding UTF8
