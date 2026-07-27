@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bootstrap a C linker for `cargo install` on runners that lack gcc/cc.
-# Only used before cargo install steps — main workspace builds rely on rust-cache
-# from runners that already have a native toolchain.
+# MUST run in the same workflow step as `cargo install` — do not export CC to
+# GITHUB_ENV (poisons later cargo test/clippy on cache-cold runners).
 set -euo pipefail
 
 if command -v cc >/dev/null 2>&1; then
@@ -19,7 +19,6 @@ if [[ ! -x "${ZIG_DIR}/zig" ]]; then
     | tar -xJ -C "$ZIG_DIR" --strip-components=1
 fi
 
-# cc-rs passes `--target=x86_64-unknown-linux-gnu`; zig cc wants `-target x86_64-linux-gnu`.
 cat > "${BIN_DIR}/cc" <<'WRAPPER'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -36,10 +35,6 @@ WRAPPER
 sed -i "s|\$ZIG_BIN|${ZIG_DIR}/zig|g" "${BIN_DIR}/cc"
 chmod +x "${BIN_DIR}/cc"
 
-echo "$BIN_DIR" >> "${GITHUB_PATH:-/dev/null}"
-if [[ -n "${GITHUB_ENV:-}" ]]; then
-  echo "CC=${BIN_DIR}/cc" >> "$GITHUB_ENV"
-fi
 export PATH="${BIN_DIR}:${PATH}"
 export CC="${BIN_DIR}/cc"
 "${ZIG_DIR}/zig" version
