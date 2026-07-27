@@ -1660,7 +1660,7 @@ async fn run_import_state(args: ImportStateArgs) -> Result<()> {
         "disk import-state seeding"
     );
 
-    let report = import_state(&from, &node_id, &db, args.dry_run)
+    let report = import_state(&from, &args.as_share, &node_id, &db, args.dry_run)
         .await
         .map_err(|e: ImportError| anyhow!("import-state failed: {e}"))?;
 

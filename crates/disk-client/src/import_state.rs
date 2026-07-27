@@ -124,11 +124,13 @@ pub fn hash_file(path: &Path) -> Result<[u8; 32], ImportError> {
 /// Walk `from`, hash every regular file under the canonical root, and
 /// either print the plan (`dry_run = true`) or write rows into `db`.
 ///
+/// `vault_id` is the share/vault name stored in MetaDb (`files.vault_id`).
 /// `node_id` is recorded as the writer in the resulting [`FileMeta`]
 /// rows so the reconciler can attribute the seeded baseline to this
 /// host on the first sync.
 pub async fn import_state(
     from: &Path,
+    vault_id: &str,
     node_id: &str,
     db: &MetaDb,
     dry_run: bool,
@@ -203,7 +205,7 @@ pub async fn import_state(
                 version_id: None,
                 parent_version_id: None,
             };
-            db.upsert_file(&meta).await?;
+            db.upsert_file_scoped(None, vault_id, &meta).await?;
             report.files_imported += 1;
         }
     }
@@ -279,7 +281,9 @@ mod tests {
         let share = dir.path().join("share");
         fs::create_dir(&share).unwrap();
 
-        let report = import_state(&share, "node-1", &db, false).await.unwrap();
+        let report = import_state(&share, "default", "node-1", &db, false)
+            .await
+            .unwrap();
         assert_eq!(report.files_seen, 0);
         assert_eq!(report.files_imported, 0);
         assert_eq!(report.bytes_total, 0);
@@ -297,7 +301,9 @@ mod tests {
         fs::write(share.join("a.txt"), b"alpha").unwrap();
         fs::write(share.join("b.txt"), b"beta-content").unwrap();
 
-        let report = import_state(&share, "node-1", &db, true).await.unwrap();
+        let report = import_state(&share, "default", "node-1", &db, true)
+            .await
+            .unwrap();
         assert!(report.dry_run);
         assert_eq!(report.files_seen, 2);
         assert_eq!(report.files_imported, 0, "dry_run must not write rows");
@@ -322,7 +328,9 @@ mod tests {
         fs::create_dir(&nested).unwrap();
         fs::write(nested.join("b.txt"), b"beta-content").unwrap();
 
-        let report = import_state(&share, "node-1", &db, false).await.unwrap();
+        let report = import_state(&share, "default", "node-1", &db, false)
+            .await
+            .unwrap();
         assert_eq!(report.files_seen, 2);
         assert_eq!(report.files_imported, 2);
 

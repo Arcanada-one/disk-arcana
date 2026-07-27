@@ -1,0 +1,24 @@
+# Mesh ACL for arcana-agents :9543 (P5-R + R13 hermes-artefacts).
+# Sign per DISK-RB-007 before deploy.
+#
+# Fingerprint = blake3(DER leaf cert). Compute:
+#   openssl x509 -in /etc/disk-arcana/tls/cert.pem -outform DER | b3sum --no-names
+#
+version: 1
+updated_at: "2026-07-27T00:00:00Z"
+signed_by: "disk-mesh-signing-key"
+
+nodes:
+  # arcana-agents / DEVS mesh leaf — datarim-kb + hermes publisher
+  - cert_fingerprint: "${DEV_FP}"
+    node_id_hint: "arcana-agents"
+    shares:
+      datarim-kb: "bidirectional"
+      hermes-artefacts: "publisher"
+
+  # Operator Mac — datarim-kb bidirectional + hermes receive-only (R13)
+  - cert_fingerprint: "${MAC_FP}"
+    node_id_hint: "mac-operator"
+    shares:
+      datarim-kb: "bidirectional"
+      hermes-artefacts: "receive_only"

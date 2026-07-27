@@ -18,6 +18,7 @@
 //! When `acl_enforcer` is `None` the legacy bearer-token path is used
 //! unchanged (dev / test environments that have not yet provisioned ACL).
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio_stream::wrappers::ReceiverStream;
@@ -69,6 +70,8 @@ pub struct SyncServiceImpl {
     pub replay: Arc<ReplayGuard>,
     /// Filesystem root for this node (used by DeltaUpload path guard).
     pub root: std::path::PathBuf,
+    /// Per-share filesystem roots; absent entries fall back to [`Self::root`].
+    pub share_roots: HashMap<String, std::path::PathBuf>,
     /// SQLite metadata index — authoritative server state (DISK-0043).
     /// `None` in legacy/test mode constructed via `new()`; `Some` when
     /// constructed via `with_acl()` or `with_meta_db()`.
@@ -101,6 +104,7 @@ impl SyncServiceImpl {
             store,
             replay: Arc::new(ReplayGuard::new()),
             root,
+            share_roots: HashMap::new(),
             meta_router: None,
             server_node_id: "server".into(),
             acl_enforcer: None,
@@ -125,6 +129,7 @@ impl SyncServiceImpl {
             store,
             replay: Arc::new(ReplayGuard::new()),
             root,
+            share_roots: HashMap::new(),
             meta_router: None,
             server_node_id: "server".into(),
             acl_enforcer: Some(acl_enforcer),
@@ -141,6 +146,17 @@ impl SyncServiceImpl {
     pub fn with_agent_webhooks(mut self, dispatcher: AgentWebhookDispatcher) -> Self {
         self.agent_webhooks = dispatcher;
         self
+    }
+
+    /// Attach per-share filesystem roots (DISK_SHARE_ROOTS).
+    pub fn with_share_roots(mut self, roots: HashMap<String, std::path::PathBuf>) -> Self {
+        self.share_roots = roots;
+        self
+    }
+
+    /// Resolve the on-disk root for a vault/share name.
+    fn root_for(&self, share: &str) -> &std::path::Path {
+        self.share_roots.get(share).unwrap_or(&self.root)
     }
 
     /// Attach a `MetaDb` handle and optional server node id to an existing instance.
@@ -495,7 +511,7 @@ impl SyncService for SyncServiceImpl {
             if last_path.is_none() {
                 Self::require_selective_path(&req.path, &includes)?;
                 let candidate = std::path::Path::new(&req.path);
-                path_guard::validate(candidate, &self.root)
+                path_guard::validate(candidate, self.root_for(&share))
                     .map_err(|e| Status::invalid_argument(format!("path guard: {e}")))?;
                 last_path = Some(req.path.clone());
                 expected_hash = Some(req.content_hash.clone());
@@ -625,9 +641,10 @@ impl SyncService for SyncServiceImpl {
         // check is co-located with the write (defence-in-depth).
         if let Some(file_path) = last_path.as_deref() {
             let candidate = std::path::Path::new(file_path);
+            let share_root = self.root_for(&share);
 
             // Security: path_guard::validate BEFORE any write (V-AC-6 binding).
-            let target = path_guard::validate(candidate, &self.root)
+            let target = path_guard::validate(candidate, share_root)
                 .map_err(|e| Status::invalid_argument(format!("path guard: {e}")))?;
 
             // Archive superseded bytes before overwrite (DISK-0020).
@@ -654,7 +671,7 @@ impl SyncService for SyncServiceImpl {
 
             // 1. Write to a temp file inside sync_root (same device → atomic rename).
             let tmp_name = format!(".tmp-{}", rand::random::<u64>());
-            let tmp_path = self.root.join(&tmp_name);
+            let tmp_path = share_root.join(&tmp_name);
             std::fs::write(&tmp_path, &assembled)
                 .map_err(|e| Status::internal(format!("write temp: {e}")))?;
 
@@ -698,10 +715,9 @@ impl SyncService for SyncServiceImpl {
                 // canonical root so the stored path is always relative even
                 // when the runtime root path contains symlinks (e.g. macOS
                 // /var → /private/var tempdir paths).
-                let canonical_root = self
-                    .root
+                let canonical_root = share_root
                     .canonicalize()
-                    .unwrap_or_else(|_| self.root.clone());
+                    .unwrap_or_else(|_| share_root.to_path_buf());
                 let relative_path = target
                     .strip_prefix(&canonical_root)
                     .unwrap_or(&target)
@@ -783,7 +799,7 @@ impl SyncService for SyncServiceImpl {
 
         // Validate path.
         let candidate = std::path::Path::new(&req.path);
-        let canonical = path_guard::validate(candidate, &self.root)
+        let canonical = path_guard::validate(candidate, self.root_for(&share))
             .map_err(|e| Status::invalid_argument(format!("path guard: {e}")))?;
 
         let data = std::fs::read(&canonical)
