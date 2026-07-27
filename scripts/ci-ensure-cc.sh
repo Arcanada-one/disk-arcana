@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Bootstrap a C linker on heterogeneous self-hosted runners that lack gcc/cc.
-# No-op when `cc` is already on PATH. Uses zig as a portable fallback (no root).
+# Bootstrap a C linker for `cargo install` on runners that lack gcc/cc.
+# Only used before cargo install steps — main workspace builds rely on rust-cache
+# from runners that already have a native toolchain.
 set -euo pipefail
 
 if command -v cc >/dev/null 2>&1; then
@@ -18,26 +19,27 @@ if [[ ! -x "${ZIG_DIR}/zig" ]]; then
     | tar -xJ -C "$ZIG_DIR" --strip-components=1
 fi
 
-cat > "${BIN_DIR}/cc" <<EOF
+# cc-rs passes `--target=x86_64-unknown-linux-gnu`; zig cc wants `-target x86_64-linux-gnu`.
+cat > "${BIN_DIR}/cc" <<'WRAPPER'
 #!/usr/bin/env bash
-exec "${ZIG_DIR}/zig" cc "\$@"
-EOF
-cat > "${BIN_DIR}/c++" <<EOF
-#!/usr/bin/env bash
-exec "${ZIG_DIR}/zig" c++ "\$@"
-EOF
-chmod +x "${BIN_DIR}/cc" "${BIN_DIR}/c++"
+set -euo pipefail
+args=()
+while (($#)); do
+  case "$1" in
+    --target=*) args+=(-target "${1#--target=}"); shift ;;
+    --target) args+=(-target "$2"); shift 2 ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+exec "$ZIG_BIN" cc "${args[@]}"
+WRAPPER
+sed -i "s|\$ZIG_BIN|${ZIG_DIR}/zig|g" "${BIN_DIR}/cc"
+chmod +x "${BIN_DIR}/cc"
 
 echo "$BIN_DIR" >> "${GITHUB_PATH:-/dev/null}"
-echo "$ZIG_DIR" >> "${GITHUB_PATH:-/dev/null}"
 if [[ -n "${GITHUB_ENV:-}" ]]; then
-  {
-    echo "CC=${BIN_DIR}/cc"
-    echo "CXX=${BIN_DIR}/c++"
-  } >> "$GITHUB_ENV"
+  echo "CC=${BIN_DIR}/cc" >> "$GITHUB_ENV"
 fi
-export PATH="${BIN_DIR}:${ZIG_DIR}:${PATH}"
+export PATH="${BIN_DIR}:${PATH}"
 export CC="${BIN_DIR}/cc"
-export CXX="${BIN_DIR}/c++"
 "${ZIG_DIR}/zig" version
-"${BIN_DIR}/cc" --version | head -1

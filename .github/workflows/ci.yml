@@ -45,8 +45,6 @@ jobs:
           chmod +x "$PROTOC_DIR/bin/protoc"
           echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
           "$PROTOC_DIR/bin/protoc" --version
-      - name: Ensure C linker (self-hosted runners without gcc)
-        run: bash scripts/ci-ensure-cc.sh
       - name: cargo fmt
         run: cargo fmt --all -- --check
       - name: cargo clippy
