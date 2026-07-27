@@ -10,16 +10,34 @@ fi
 
 ZIG_VER=0.13.0
 ZIG_DIR="${RUNNER_TEMP:-/tmp}/zig-${ZIG_VER}"
-mkdir -p "$ZIG_DIR"
-curl -fsSL "https://ziglang.org/download/${ZIG_VER}/zig-linux-x86_64-${ZIG_VER}.tar.xz" \
-  | tar -xJ -C "$ZIG_DIR" --strip-components=1
+BIN_DIR="${RUNNER_TEMP:-/tmp}/ci-cc-bin"
+mkdir -p "$ZIG_DIR" "$BIN_DIR"
+
+if [[ ! -x "${ZIG_DIR}/zig" ]]; then
+  curl -fsSL "https://ziglang.org/download/${ZIG_VER}/zig-linux-x86_64-${ZIG_VER}.tar.xz" \
+    | tar -xJ -C "$ZIG_DIR" --strip-components=1
+fi
+
+cat > "${BIN_DIR}/cc" <<EOF
+#!/usr/bin/env bash
+exec "${ZIG_DIR}/zig" cc "\$@"
+EOF
+cat > "${BIN_DIR}/c++" <<EOF
+#!/usr/bin/env bash
+exec "${ZIG_DIR}/zig" c++ "\$@"
+EOF
+chmod +x "${BIN_DIR}/cc" "${BIN_DIR}/c++"
+
+echo "$BIN_DIR" >> "${GITHUB_PATH:-/dev/null}"
 echo "$ZIG_DIR" >> "${GITHUB_PATH:-/dev/null}"
 if [[ -n "${GITHUB_ENV:-}" ]]; then
   {
-    echo "CC=${ZIG_DIR}/zig cc"
-    echo "CXX=${ZIG_DIR}/zig c++"
+    echo "CC=${BIN_DIR}/cc"
+    echo "CXX=${BIN_DIR}/c++"
   } >> "$GITHUB_ENV"
 fi
-export CC="${ZIG_DIR}/zig cc"
-export CXX="${ZIG_DIR}/zig c++"
-"$ZIG_DIR/zig" version
+export PATH="${BIN_DIR}:${ZIG_DIR}:${PATH}"
+export CC="${BIN_DIR}/cc"
+export CXX="${BIN_DIR}/c++"
+"${ZIG_DIR}/zig" version
+"${BIN_DIR}/cc" --version | head -1
