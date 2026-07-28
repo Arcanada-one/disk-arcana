@@ -135,6 +135,34 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("open MetaDb for sync service at {}", cfg.db_path.display()))?;
 
+    // Hydrate AuthStore from persisted nodes. Without this, every server restart
+    // leaves Authenticate failing for already-registered clients (api_key lives
+    // only in the in-memory DashMap after RegisterNode).
+    {
+        let rows = control_meta
+            .list_active_auth_nodes()
+            .await
+            .context("load nodes for AuthStore hydration")?;
+        let mut loaded = 0usize;
+        for row in &rows {
+            if auth_store.hydrate_node(
+                &row.node_id,
+                &row.display_name,
+                &row.platform,
+                row.api_key_hash,
+                row.registered_at,
+                row.tenant_id.as_deref(),
+            ) {
+                loaded += 1;
+            }
+        }
+        tracing::info!(
+            nodes = loaded,
+            skipped_existing = rows.len().saturating_sub(loaded),
+            "AuthStore hydrated from MetaDb nodes"
+        );
+    }
+
     let _share_index = disk_server::spawn_share_index_watcher(
         cfg.share_roots.clone(),
         control_meta.clone(),

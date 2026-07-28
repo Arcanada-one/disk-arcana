@@ -38,6 +38,7 @@ pub use accounts::{NewOAuthUser, UserAccount};
 pub use agents::AgentWebhookDeliveryTarget;
 pub use agents::{AgentWriteRevision, NewAgentWebhook, RevisionBumpOutcome};
 pub use orgs::{OrgMemberRow, OrgRole, OrganizationRow, UserOrganizationRow};
+pub use nodes::AuthNodeRow;
 pub use sharing::{VaultInviteRow, VaultMemberRow, VaultShareRole};
 pub use snapshots::{VaultSnapshotFileRow, VaultSnapshotRow};
 pub use trash::TrashRow;

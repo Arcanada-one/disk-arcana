@@ -5,7 +5,60 @@ use sqlx::Row;
 use super::MetaDb;
 use crate::error::MetaDbError;
 
+/// Active node row needed to hydrate in-memory [`AuthStore`](crate) peers.
+///
+/// Loaded at `disk-arcana-server` boot so `Authenticate` survives process
+/// restarts without forcing every client to re-`RegisterNode`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthNodeRow {
+    pub node_id: String,
+    pub display_name: String,
+    pub platform: String,
+    pub api_key_hash: [u8; 32],
+    pub registered_at: i64,
+    pub tenant_id: Option<String>,
+}
+
 impl MetaDb {
+    /// List non-revoked nodes with auth material for AuthStore hydration.
+    pub async fn list_active_auth_nodes(&self) -> Result<Vec<AuthNodeRow>, MetaDbError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT node_id, display_name, platform, api_key_hash, registered_at, tenant_id
+            FROM nodes
+            WHERE revoked = 0
+            ORDER BY registered_at ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                let hash_bytes: Vec<u8> = row.try_get("api_key_hash")?;
+                let mut api_key_hash = [0u8; 32];
+                if hash_bytes.len() != 32 {
+                    return Err(MetaDbError::Invalid(format!(
+                        "node api_key_hash length {} (want 32)",
+                        hash_bytes.len()
+                    )));
+                }
+                api_key_hash.copy_from_slice(&hash_bytes);
+                let display_name: Option<String> = row.try_get("display_name")?;
+                let platform: Option<String> = row.try_get("platform")?;
+                let tenant_id: Option<String> = row.try_get("tenant_id")?;
+                Ok(AuthNodeRow {
+                    node_id: row.try_get("node_id")?,
+                    display_name: display_name.unwrap_or_default(),
+                    platform: platform.unwrap_or_default(),
+                    api_key_hash,
+                    registered_at: row.try_get("registered_at")?,
+                    tenant_id: tenant_id.filter(|s| !s.is_empty()),
+                })
+            })
+            .collect()
+    }
+
     /// Persist or update `tenant_id` for a registered node.
     pub async fn upsert_node_tenant(
         &self,
@@ -104,5 +157,24 @@ mod tests {
             db.get_node_tenant("n1").await.unwrap().as_deref(),
             Some("acme")
         );
+    }
+
+    #[tokio::test]
+    async fn list_active_auth_nodes_returns_hash() {
+        let dir = tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("nodes.sqlite"))
+            .await
+            .unwrap();
+        let hash = [9u8; 32];
+        db.upsert_node_tenant("mac-operator", None, &hash, "Mac", "darwin")
+            .await
+            .unwrap();
+        let rows = db.list_active_auth_nodes().await.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].node_id, "mac-operator");
+        assert_eq!(rows[0].api_key_hash, hash);
+        assert_eq!(rows[0].display_name, "Mac");
+        assert_eq!(rows[0].platform, "darwin");
+        assert!(rows[0].tenant_id.is_none());
     }
 }
