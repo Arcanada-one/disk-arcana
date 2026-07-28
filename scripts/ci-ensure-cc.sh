@@ -1,12 +1,47 @@
 #!/usr/bin/env bash
-# Bootstrap a C linker for `cargo install` on runners that lack gcc/cc.
-# MUST run in the same workflow step as `cargo install` — do not export CC to
-# GITHUB_ENV (poisons later cargo test/clippy on cache-cold runners).
+# Bootstrap a C linker for `cargo install` / `cargo clippy` on runners that lack `cc`.
+# MUST be sourced in the same workflow step as the cargo command that needs a
+# linker (`source scripts/ci-ensure-cc.sh`, not `bash …`) — subshell exports
+# do not propagate. Do not write CC to GITHUB_ENV (poisons later steps).
 set -euo pipefail
+
+_done() {
+  if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    exit 0
+  fi
+  return 0
+}
 
 if command -v cc >/dev/null 2>&1; then
   cc --version | head -1
-  exit 0
+  export CI_LINKER_BOOTSTRAP=native
+  _done
+fi
+
+if command -v gcc >/dev/null 2>&1; then
+  export CC="$(command -v gcc)"
+  if command -v g++ >/dev/null 2>&1; then
+    export CXX="$(command -v g++)"
+  fi
+  gcc --version | head -1
+  export CI_LINKER_BOOTSTRAP=native
+  _done
+fi
+
+# Self-hosted cc-less pool: prefer real gcc (zig cc breaks zstd .S assembly).
+if command -v apt-get >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+  sudo -n apt-get update -qq
+  sudo -n apt-get install -y -qq gcc build-essential
+fi
+
+if command -v gcc >/dev/null 2>&1; then
+  export CC="$(command -v gcc)"
+  if command -v g++ >/dev/null 2>&1; then
+    export CXX="$(command -v g++)"
+  fi
+  gcc --version | head -1
+  export CI_LINKER_BOOTSTRAP=native
+  _done
 fi
 
 ZIG_VER=0.13.0
@@ -25,8 +60,24 @@ set -euo pipefail
 args=()
 while (($#)); do
   case "$1" in
-    --target=*) args+=(-target "${1#--target=}"); shift ;;
-    --target) args+=(-target "$2"); shift 2 ;;
+    --target=*)
+      t="${1#--target=}"
+      case "$t" in
+        x86_64-unknown-linux-gnu) t=x86_64-linux-gnu ;;
+        aarch64-unknown-linux-gnu) t=aarch64-linux-gnu ;;
+      esac
+      args+=(-target "$t")
+      shift
+      ;;
+    --target)
+      t="$2"
+      case "$t" in
+        x86_64-unknown-linux-gnu) t=x86_64-linux-gnu ;;
+        aarch64-unknown-linux-gnu) t=aarch64-linux-gnu ;;
+      esac
+      args+=(-target "$t")
+      shift 2
+      ;;
     *) args+=("$1"); shift ;;
   esac
 done
@@ -35,6 +86,56 @@ WRAPPER
 sed -i "s|\$ZIG_BIN|${ZIG_DIR}/zig|g" "${BIN_DIR}/cc"
 chmod +x "${BIN_DIR}/cc"
 
+for tool in ar ranlib; do
+  llvm_tool="$(find "${ZIG_DIR}" -type f -name "llvm-${tool}" 2>/dev/null | head -1 || true)"
+  if [[ -n "${llvm_tool}" && -x "${llvm_tool}" ]]; then
+    ln -sf "${llvm_tool}" "${BIN_DIR}/${tool}"
+  else
+    cat > "${BIN_DIR}/${tool}" <<WRAPPER
+#!/usr/bin/env bash
+set -euo pipefail
+exec "${ZIG_DIR}/zig" ${tool} "\$@"
+WRAPPER
+    chmod +x "${BIN_DIR}/${tool}"
+  fi
+done
+
+cat > "${BIN_DIR}/c++" <<'WRAPPER'
+#!/usr/bin/env bash
+set -euo pipefail
+args=()
+while (($#)); do
+  case "$1" in
+    --target=*)
+      t="${1#--target=}"
+      case "$t" in
+        x86_64-unknown-linux-gnu) t=x86_64-linux-gnu ;;
+        aarch64-unknown-linux-gnu) t=aarch64-linux-gnu ;;
+      esac
+      args+=(-target "$t")
+      shift
+      ;;
+    --target)
+      t="$2"
+      case "$t" in
+        x86_64-unknown-linux-gnu) t=x86_64-linux-gnu ;;
+        aarch64-unknown-linux-gnu) t=aarch64-linux-gnu ;;
+      esac
+      args+=(-target "$t")
+      shift 2
+      ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+exec "$ZIG_BIN" c++ "${args[@]}"
+WRAPPER
+sed -i "s|\$ZIG_BIN|${ZIG_DIR}/zig|g" "${BIN_DIR}/c++"
+chmod +x "${BIN_DIR}/c++"
+
 export PATH="${BIN_DIR}:${PATH}"
 export CC="${BIN_DIR}/cc"
+export CXX="${BIN_DIR}/c++"
+export AR="${BIN_DIR}/ar"
+export RANLIB="${BIN_DIR}/ranlib"
+export CI_LINKER_BOOTSTRAP=zig
 "${ZIG_DIR}/zig" version
