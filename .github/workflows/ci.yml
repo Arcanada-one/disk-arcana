@@ -45,6 +45,8 @@ jobs:
           chmod +x "$PROTOC_DIR/bin/protoc"
           echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
           "$PROTOC_DIR/bin/protoc" --version
+      - name: Ensure C linker (self-hosted runners without gcc)
+        run: bash scripts/ci-ensure-cc.sh
       - name: cargo fmt
         run: cargo fmt --all -- --check
       - name: cargo clippy
@@ -148,6 +150,8 @@ jobs:
           echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
           "$PROTOC_DIR/bin/protoc" --version
       - name: Ensure C linker (self-hosted runners without gcc)
+        run: bash scripts/ci-ensure-cc.sh
+      - name: Install cargo-llvm-cov
         run: |
           bash scripts/ci-ensure-cc.sh
           cargo install cargo-llvm-cov --locked --quiet
@@ -195,6 +199,8 @@ jobs:
           echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
           "$PROTOC_DIR/bin/protoc" --version
       - name: Ensure C linker (self-hosted runners without gcc)
+        run: bash scripts/ci-ensure-cc.sh
+      - name: Install cargo-fuzz
         run: |
           bash scripts/ci-ensure-cc.sh
           cargo +nightly install cargo-fuzz --locked --quiet
@@ -271,6 +277,8 @@ jobs:
           chmod +x "$PROTOC_DIR/bin/protoc"
           echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
           "$PROTOC_DIR/bin/protoc" --version
+      - name: Ensure C linker (self-hosted runners without gcc)
+        run: bash scripts/ci-ensure-cc.sh
       - name: Build (release)
         run: |
           set -euo pipefail

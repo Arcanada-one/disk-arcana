@@ -135,6 +135,18 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("open MetaDb for sync service at {}", cfg.db_path.display()))?;
 
+    let _share_index = disk_server::spawn_share_index_watcher(
+        cfg.share_roots.clone(),
+        control_meta.clone(),
+        "server",
+    );
+    if _share_index.is_some() {
+        tracing::info!(
+            shares = cfg.share_roots.len(),
+            "share_index watcher spawned for DISK_SHARE_ROOTS"
+        );
+    }
+
     let meta_router = match &cfg.tenant_db_dir {
         Some(dir) => disk_core::TenantMetaRouter::split(control_meta.clone(), dir.clone()),
         None => disk_core::TenantMetaRouter::single(control_meta.clone()),

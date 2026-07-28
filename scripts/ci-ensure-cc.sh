@@ -37,4 +37,9 @@ chmod +x "${BIN_DIR}/cc"
 
 export PATH="${BIN_DIR}:${PATH}"
 export CC="${BIN_DIR}/cc"
+# Persist the wrapper on PATH for later workflow steps. Do NOT set CC via
+# GITHUB_ENV — that poisons cargo test/clippy on cache-cold runners.
+if [[ -n "${GITHUB_PATH:-}" ]]; then
+  echo "$BIN_DIR" >> "$GITHUB_PATH"
+fi
 "${ZIG_DIR}/zig" version
