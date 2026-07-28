@@ -19,6 +19,9 @@ fi
 
 if command -v gcc >/dev/null 2>&1; then
   export CC="$(command -v gcc)"
+  if command -v g++ >/dev/null 2>&1; then
+    export CXX="$(command -v g++)"
+  fi
   gcc --version | head -1
   _done
 fi
@@ -31,6 +34,9 @@ fi
 
 if command -v gcc >/dev/null 2>&1; then
   export CC="$(command -v gcc)"
+  if command -v g++ >/dev/null 2>&1; then
+    export CXX="$(command -v g++)"
+  fi
   gcc --version | head -1
   _done
 fi
@@ -91,8 +97,41 @@ WRAPPER
   fi
 done
 
+cat > "${BIN_DIR}/c++" <<'WRAPPER'
+#!/usr/bin/env bash
+set -euo pipefail
+args=()
+while (($#)); do
+  case "$1" in
+    --target=*)
+      t="${1#--target=}"
+      case "$t" in
+        x86_64-unknown-linux-gnu) t=x86_64-linux-gnu ;;
+        aarch64-unknown-linux-gnu) t=aarch64-linux-gnu ;;
+      esac
+      args+=(-target "$t")
+      shift
+      ;;
+    --target)
+      t="$2"
+      case "$t" in
+        x86_64-unknown-linux-gnu) t=x86_64-linux-gnu ;;
+        aarch64-unknown-linux-gnu) t=aarch64-linux-gnu ;;
+      esac
+      args+=(-target "$t")
+      shift 2
+      ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+exec "$ZIG_BIN" c++ "${args[@]}"
+WRAPPER
+sed -i "s|\$ZIG_BIN|${ZIG_DIR}/zig|g" "${BIN_DIR}/c++"
+chmod +x "${BIN_DIR}/c++"
+
 export PATH="${BIN_DIR}:${PATH}"
 export CC="${BIN_DIR}/cc"
+export CXX="${BIN_DIR}/c++"
 export AR="${BIN_DIR}/ar"
 export RANLIB="${BIN_DIR}/ranlib"
 "${ZIG_DIR}/zig" version
