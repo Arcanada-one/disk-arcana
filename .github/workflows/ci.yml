@@ -247,6 +247,7 @@ jobs:
         id: aarch64_toolchain
         run: |
           set -euo pipefail
+          source scripts/ci-ensure-cc.sh
           if command -v aarch64-linux-gnu-gcc >/dev/null 2>&1; then
             aarch64-linux-gnu-gcc --version | head -1
             echo "mode=gcc" >> "$GITHUB_OUTPUT"
@@ -283,10 +284,11 @@ jobs:
           chmod +x "$PROTOC_DIR/bin/protoc"
           echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
           "$PROTOC_DIR/bin/protoc" --version
+      - name: Bootstrap C toolchain
+        run: source scripts/ci-ensure-cc.sh
       - name: Build (release)
         run: |
           set -euo pipefail
-          source scripts/ci-ensure-cc.sh
           if [ "${{ matrix.build_kind }}" = "aarch64" ] && [ "${{ steps.aarch64_toolchain.outputs.mode }}" = "zigbuild" ]; then
             cargo zigbuild --release --target aarch64-unknown-linux-gnu --workspace
           else
