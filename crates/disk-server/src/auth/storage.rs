@@ -163,6 +163,37 @@ impl AuthStore {
         self.inner.nodes.contains_key(node_id)
     }
 
+    /// Insert a previously-persisted node into the in-memory store.
+    ///
+    /// Used at server boot to hydrate from SQLite so `Authenticate` works
+    /// after restart without forcing clients to call `RegisterNode` again.
+    /// Returns `false` when `node_id` was already present (left unchanged).
+    pub fn hydrate_node(
+        &self,
+        node_id: &str,
+        display_name: &str,
+        platform: &str,
+        api_key_hash: [u8; 32],
+        registered_at: i64,
+        tenant_id: Option<&str>,
+    ) -> bool {
+        use dashmap::mapref::entry::Entry;
+        match self.inner.nodes.entry(node_id.to_owned()) {
+            Entry::Occupied(_) => false,
+            Entry::Vacant(slot) => {
+                slot.insert(NodeEntry {
+                    node_id: node_id.to_owned(),
+                    api_key_hash,
+                    display_name: display_name.to_owned(),
+                    platform: platform.to_owned(),
+                    registered_at,
+                    tenant_id: tenant_id.map(str::to_owned),
+                });
+                true
+            }
+        }
+    }
+
     /// Tenant bound at registration (DISK-0017). `None` = legacy single-tenant.
     pub fn node_tenant(&self, node_id: &str) -> Option<String> {
         self.inner
@@ -218,6 +249,30 @@ pub enum AuthError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hydrate_node_allows_authenticate_after_restart_sim() {
+        let store = AuthStore::new();
+        let key = store
+            .register_node("mac-operator", "Mac", "darwin", None)
+            .expect("register");
+        let hash = key.hash();
+        // Simulate process restart: empty store + hydrate from persisted hash.
+        let restarted = AuthStore::new();
+        assert!(restarted.hydrate_node("mac-operator", "Mac", "darwin", hash, 1_700_000_000, None,));
+        restarted
+            .authenticate("mac-operator", key.as_str())
+            .expect("authenticate after hydrate");
+        // Second hydrate is a no-op.
+        assert!(!restarted.hydrate_node(
+            "mac-operator",
+            "Mac",
+            "darwin",
+            hash,
+            1_700_000_000,
+            None,
+        ));
+    }
 
     #[test]
     fn register_and_authenticate_ok() {

@@ -6,6 +6,9 @@
 set -euo pipefail
 
 _done() {
+  if [[ -n "${GITHUB_ENV:-}" && -n "${CI_LINKER_BOOTSTRAP:-}" ]]; then
+    echo "CI_LINKER_BOOTSTRAP=${CI_LINKER_BOOTSTRAP}" >>"$GITHUB_ENV"
+  fi
   if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     exit 0
   fi
@@ -25,6 +28,16 @@ if command -v gcc >/dev/null 2>&1; then
   fi
   gcc --version | head -1
   export CI_LINKER_BOOTSTRAP=native
+  # Expose gcc as cc for steps that only look up `cc` on PATH.
+  if [[ -n "${GITHUB_PATH:-}" ]] && ! command -v cc >/dev/null 2>&1; then
+    _cc_bin="${RUNNER_TEMP:-/tmp}/ci-cc-bin"
+    mkdir -p "$_cc_bin"
+    ln -sf "$(command -v gcc)" "${_cc_bin}/cc"
+    if command -v g++ >/dev/null 2>&1; then
+      ln -sf "$(command -v g++)" "${_cc_bin}/c++"
+    fi
+    echo "${_cc_bin}" >>"$GITHUB_PATH"
+  fi
   _done
 fi
 
@@ -138,4 +151,10 @@ export CXX="${BIN_DIR}/c++"
 export AR="${BIN_DIR}/ar"
 export RANLIB="${BIN_DIR}/ranlib"
 export CI_LINKER_BOOTSTRAP=zig
+if [[ -n "${GITHUB_PATH:-}" ]]; then
+  echo "${BIN_DIR}" >>"$GITHUB_PATH"
+fi
+if [[ -n "${GITHUB_ENV:-}" ]]; then
+  echo "CI_LINKER_BOOTSTRAP=zig" >>"$GITHUB_ENV"
+fi
 "${ZIG_DIR}/zig" version

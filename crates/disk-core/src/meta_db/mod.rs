@@ -37,6 +37,7 @@ use crate::error::MetaDbError;
 pub use accounts::{NewOAuthUser, UserAccount};
 pub use agents::AgentWebhookDeliveryTarget;
 pub use agents::{AgentWriteRevision, NewAgentWebhook, RevisionBumpOutcome};
+pub use nodes::AuthNodeRow;
 pub use orgs::{OrgMemberRow, OrgRole, OrganizationRow, UserOrganizationRow};
 pub use sharing::{VaultInviteRow, VaultMemberRow, VaultShareRole};
 pub use snapshots::{VaultSnapshotFileRow, VaultSnapshotRow};
