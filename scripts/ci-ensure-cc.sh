@@ -77,6 +77,22 @@ WRAPPER
 sed -i "s|\$ZIG_BIN|${ZIG_DIR}/zig|g" "${BIN_DIR}/cc"
 chmod +x "${BIN_DIR}/cc"
 
+for tool in ar ranlib; do
+  llvm_tool="$(find "${ZIG_DIR}" -type f -name "llvm-${tool}" 2>/dev/null | head -1 || true)"
+  if [[ -n "${llvm_tool}" && -x "${llvm_tool}" ]]; then
+    ln -sf "${llvm_tool}" "${BIN_DIR}/${tool}"
+  else
+    cat > "${BIN_DIR}/${tool}" <<WRAPPER
+#!/usr/bin/env bash
+set -euo pipefail
+exec "${ZIG_DIR}/zig" ${tool} "\$@"
+WRAPPER
+    chmod +x "${BIN_DIR}/${tool}"
+  fi
+done
+
 export PATH="${BIN_DIR}:${PATH}"
 export CC="${BIN_DIR}/cc"
+export AR="${BIN_DIR}/ar"
+export RANLIB="${BIN_DIR}/ranlib"
 "${ZIG_DIR}/zig" version
