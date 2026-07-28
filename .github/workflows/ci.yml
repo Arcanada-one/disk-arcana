@@ -49,7 +49,7 @@ jobs:
         run: cargo fmt --all -- --check
       - name: cargo clippy
         run: |
-          bash scripts/ci-ensure-cc.sh
+          source scripts/ci-ensure-cc.sh
           cargo clippy --all-targets --all-features -- -D warnings
       - name: Install cargo-audit + cargo-deny
         # Non-Docker install form. The previous EmbarkStudios/cargo-deny-action@v2
@@ -60,7 +60,7 @@ jobs:
         # cargo-installed binaries run natively and honour deny.toml / the ignore
         # list below.
         run: |
-          bash scripts/ci-ensure-cc.sh
+          source scripts/ci-ensure-cc.sh
           cargo install cargo-audit --locked
           cargo install cargo-deny --locked
       - name: cargo audit
@@ -151,17 +151,17 @@ jobs:
           "$PROTOC_DIR/bin/protoc" --version
       - name: Install cargo-llvm-cov
         run: |
-          bash scripts/ci-ensure-cc.sh
+          source scripts/ci-ensure-cc.sh
           cargo install cargo-llvm-cov --locked --quiet
       - name: cargo test
         run: |
-          bash scripts/ci-ensure-cc.sh
+          source scripts/ci-ensure-cc.sh
           cargo test --workspace --all-features
       - name: Scanner load harness (1K + 10K, DISK-0012 G3)
         run: bash scripts/load-test-harness.sh all
       - name: Coverage gate (≥80 % lines, DISK-0032)
         run: |
-          bash scripts/ci-ensure-cc.sh
+          source scripts/ci-ensure-cc.sh
           cargo llvm-cov --workspace --all-features --fail-under-lines 80
       - uses: actions/setup-node@v4
         with:
@@ -202,13 +202,13 @@ jobs:
           "$PROTOC_DIR/bin/protoc" --version
       - name: Install cargo-fuzz
         run: |
-          bash scripts/ci-ensure-cc.sh
+          source scripts/ci-ensure-cc.sh
           cargo +nightly install cargo-fuzz --locked --quiet
       - name: cargo fuzz smoke (all targets, DISK-0012)
         working-directory: fuzz
         run: |
           set -euo pipefail
-          bash ../scripts/ci-ensure-cc.sh
+          source ../scripts/ci-ensure-cc.sh
           for target in apply_plan path_validate proto_decode reconcile; do
             echo "==> fuzz $target (20s)"
             cargo +nightly fuzz run "$target" -- -max_total_time=20
@@ -281,7 +281,7 @@ jobs:
       - name: Build (release)
         run: |
           set -euo pipefail
-          bash scripts/ci-ensure-cc.sh
+          source scripts/ci-ensure-cc.sh
           if [ "${{ matrix.build_kind }}" = "aarch64" ] && [ "${{ steps.aarch64_toolchain.outputs.mode }}" = "zigbuild" ]; then
             cargo zigbuild --release --target aarch64-unknown-linux-gnu --workspace
           else

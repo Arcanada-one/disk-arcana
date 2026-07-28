@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Bootstrap a C linker for `cargo install` / `cargo clippy` on runners that lack `cc`.
-# MUST run in the same workflow step as the cargo command that needs a linker —
-# do not export CC to GITHUB_ENV (poisons later cargo test/clippy on cache-cold runners).
+# MUST be sourced in the same workflow step as the cargo command that needs a
+# linker (`source scripts/ci-ensure-cc.sh`, not `bash …`) — subshell exports
+# do not propagate. Do not write CC to GITHUB_ENV (poisons later steps).
 set -euo pipefail
 
 if command -v cc >/dev/null 2>&1; then
