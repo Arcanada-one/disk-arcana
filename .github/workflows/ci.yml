@@ -158,7 +158,9 @@ jobs:
           source scripts/ci-ensure-cc.sh
           cargo test --workspace --all-features
       - name: Scanner load harness (1K + 10K, DISK-0012 G3)
-        run: bash scripts/load-test-harness.sh all
+        run: |
+          source scripts/ci-ensure-cc.sh
+          bash scripts/load-test-harness.sh all
       - name: Coverage gate (≥80 % lines, DISK-0032)
         run: |
           source scripts/ci-ensure-cc.sh

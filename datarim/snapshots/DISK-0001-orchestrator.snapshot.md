@@ -1,39 +1,38 @@
 # DISK-0001 orchestrator snapshot
 
-**Date:** 2026-07-24  
-**Repo:** `Arcanada-one/disk-arcana` @ `main` (`5b5107d`)  
-**State:** **ACTIVE** — code queue drained; CI green after #117 merge
+**Date:** 2026-07-28  
+**Repo:** `Arcanada-one/disk-arcana` @ `main` (`4ed3e8d` + PR #125 pending)  
+**State:** **ACTIVE** — POST-R13 mesh green; hydrate fix landing
 
-## Execution summary (2026-07-24 DEVS)
+## Execution summary (2026-07-28)
 
 | Item | Result | Evidence |
 |------|--------|----------|
-| CI build matrix | **GREEN** | #117 merged `5b5107d`: `cargo install cargo-zigbuild --force` idempotent on runners |
-| Prior CI fix | **GREEN** | #114 `fe6b8fb`: native x86_64 + aarch64 (`gcc-aarch64-linux-gnu`) |
-| `cargo test --workspace` | **GREEN** | PR #117 CI + `scripts/live-smoke-devs.sh` re-run 2026-07-24 |
-| DISK-0053 / DISK-0059 | **verified** | lint step in CI |
-| DISK-0018 Stripe billing | **verified** | `billing::stripe` + `billing::webhook` via live-smoke |
-| DISK-0015 slice 6 escrow | **shipped** | `e2ee/escrow.rs`, `disk vault escrow {create,recover,status}` |
-| DISK-0055 GUI refactor | **shipped** | `disk-gui/src/gui.rs` — `render_*` helpers |
-| DISK-0014 mobile scaffold | **shipped** | `clients/mobile/{ios,android}/README.md` |
-| Live: two-node sync | **PASS** | `two_node_round_trip` IT (3/3) |
-| Live: enrollment ITs | **PASS** | `enrollment_*`, `it_enrollment_*` |
-| Live: agent webhooks | **PASS** | `agents::dispatch` IT (2/2) |
-| Live: E2EE escrow | **PASS** | `e2ee::escrow` tests (3/3) |
-| Live: prod `:9445` | **WARN** | TLS timeout from DEVS — operator gate RB-011 (firewall) |
+| R13 Mac consumer cutover | **DONE** | hermes receive_only `last_ok`; do not redo |
+| PR #124 share_index + CI | **MERGED** | `4ed3e8d`: `DISK_SHARE_ROOTS` watcher, `ci-ensure-cc.sh` in CI |
+| Linux share_index server | **LIVE** | arcana-agents mesh `:9543`; watcher armed for hermes-artefacts |
+| AuthStore hydrate fix | **LIVE on agents** | boot log `hydrated nodes=1`; PR #125 `fix/authstore-hydrate-on-boot` |
+| RB-012 RegisterNodeMode | **CLOSED** | `DISK_REGISTER_NODE_MODE=enrolled`; Mac api_key survives restart |
+| Mesh sync | **GREEN** | `datarim-kb` + `hermes-artefacts` `last_ok` |
+| Dual-port plan | **DOCUMENTED** | `docs/design/DISK-0001-dual-port-retirement.md` — plan-only, no stop |
+| CI runner gcc | **IN PROGRESS** | `scripts/ci-ensure-cc.sh` in CI; `scripts/bootstrap-runner-gcc.sh` for host bootstrap |
 
 ## Skip / do-not-rebuild (honoured)
 
-DISK-0016–0030 / DISK-0019 / DISK-0021 — **not rebuilt** (already on main).
+- Mesh cutover — **do not redo**
+- DISK-0016–0030 / DISK-0019 / DISK-0021 — not rebuilt
+- `:9543` stop / dual-port collapse — **blocked** until consilium + operator safe window
 
 ## Operator gates (document only — human action required)
 
 | Gate | Status | Notes |
 |------|--------|-------|
-| DISK-0006 **R13** | **pending** | Mac hermes cutover — `DISK-RB-003` |
-| DISK-0044 **RB-011** | **pending** | Prod `:9445` firewall / `DISK_CA_MODE=offline` sign-off |
-| DISK-0057 **P5-R** | **pending** | Live mesh KB sync rollout |
+| DISK-0006 **R13** | **DONE** | Mac consumer cutover complete |
+| DISK-0044 **RB-011** | **HARD-GATED** | Prod WAN `:9445` firewall / `DISK_CA_MODE=offline` sign-off |
+| DISK-0057 **P5-R** | **DONE** | Live mesh KB sync (`datarim-kb` + hermes green) |
 
 ## Next
 
-Orchestrator code queue drained. Remaining work is operator-gated cutovers above (docs/runbooks only from agent side).
+1. Merge PR #125 (AuthStore hydrate) when CI green.
+2. Run `scripts/bootstrap-runner-gcc.sh` on cc-less self-hosted runners (permanent native gcc).
+3. RB-011 remains operator-only — no autonomous WAN `:9445` changes.
