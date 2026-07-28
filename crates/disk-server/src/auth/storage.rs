@@ -259,14 +259,7 @@ mod tests {
         let hash = key.hash();
         // Simulate process restart: empty store + hydrate from persisted hash.
         let restarted = AuthStore::new();
-        assert!(restarted.hydrate_node(
-            "mac-operator",
-            "Mac",
-            "darwin",
-            hash,
-            1_700_000_000,
-            None,
-        ));
+        assert!(restarted.hydrate_node("mac-operator", "Mac", "darwin", hash, 1_700_000_000, None,));
         restarted
             .authenticate("mac-operator", key.as_str())
             .expect("authenticate after hydrate");
