@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
-# Bootstrap a C linker for `cargo install` on runners that lack gcc/cc.
-# MUST run in the same workflow step as `cargo install` — do not export CC to
-# GITHUB_ENV (poisons later cargo test/clippy on cache-cold runners).
+# Bootstrap a C linker for `cargo install` / `cargo clippy` on runners that lack `cc`.
+# MUST run in the same workflow step as the cargo command that needs a linker —
+# do not export CC to GITHUB_ENV (poisons later cargo test/clippy on cache-cold runners).
 set -euo pipefail
 
 if command -v cc >/dev/null 2>&1; then
   cc --version | head -1
+  exit 0
+fi
+
+if command -v gcc >/dev/null 2>&1; then
+  export CC="$(command -v gcc)"
+  gcc --version | head -1
   exit 0
 fi
 
@@ -37,9 +43,4 @@ chmod +x "${BIN_DIR}/cc"
 
 export PATH="${BIN_DIR}:${PATH}"
 export CC="${BIN_DIR}/cc"
-# Persist the wrapper on PATH for later workflow steps. Do NOT set CC via
-# GITHUB_ENV — that poisons cargo test/clippy on cache-cold runners.
-if [[ -n "${GITHUB_PATH:-}" ]]; then
-  echo "$BIN_DIR" >> "$GITHUB_PATH"
-fi
 "${ZIG_DIR}/zig" version
