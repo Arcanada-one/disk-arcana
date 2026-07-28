@@ -149,21 +149,16 @@ jobs:
           chmod +x "$PROTOC_DIR/bin/protoc"
           echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
           "$PROTOC_DIR/bin/protoc" --version
+      - name: Bootstrap C toolchain
+        run: source scripts/ci-ensure-cc.sh
       - name: Install cargo-llvm-cov
-        run: |
-          source scripts/ci-ensure-cc.sh
-          cargo install cargo-llvm-cov --locked --quiet
+        run: cargo install cargo-llvm-cov --locked --quiet
       - name: cargo test
-        run: |
-          source scripts/ci-ensure-cc.sh
-          cargo test --workspace --all-features
+        run: cargo test --workspace --all-features
       - name: Scanner load harness (1K + 10K, DISK-0012 G3)
-        run: |
-          source scripts/ci-ensure-cc.sh
-          bash scripts/load-test-harness.sh all
+        run: bash scripts/load-test-harness.sh all
       - name: Coverage gate (≥80 % lines, DISK-0032)
         run: |
-          source scripts/ci-ensure-cc.sh
           if [[ "${CI_LINKER_BOOTSTRAP:-native}" == "zig" ]]; then
             echo "SKIP llvm-cov: zig bootstrap cannot link __llvm_profile_runtime on this runner"
             exit 0
