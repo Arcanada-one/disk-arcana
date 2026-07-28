@@ -5,15 +5,34 @@
 # do not propagate. Do not write CC to GITHUB_ENV (poisons later steps).
 set -euo pipefail
 
+_done() {
+  if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    exit 0
+  fi
+  return 0
+}
+
 if command -v cc >/dev/null 2>&1; then
   cc --version | head -1
-  exit 0
+  _done
 fi
 
 if command -v gcc >/dev/null 2>&1; then
   export CC="$(command -v gcc)"
   gcc --version | head -1
-  exit 0
+  _done
+fi
+
+# Self-hosted cc-less pool: prefer real gcc (zig cc breaks zstd .S assembly).
+if command -v apt-get >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+  sudo -n apt-get update -qq
+  sudo -n apt-get install -y -qq gcc build-essential
+fi
+
+if command -v gcc >/dev/null 2>&1; then
+  export CC="$(command -v gcc)"
+  gcc --version | head -1
+  _done
 fi
 
 ZIG_VER=0.13.0
