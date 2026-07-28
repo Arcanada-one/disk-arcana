@@ -51,8 +51,24 @@ set -euo pipefail
 args=()
 while (($#)); do
   case "$1" in
-    --target=*) args+=(-target "${1#--target=}"); shift ;;
-    --target) args+=(-target "$2"); shift 2 ;;
+    --target=*)
+      t="${1#--target=}"
+      case "$t" in
+        x86_64-unknown-linux-gnu) t=x86_64-linux-gnu ;;
+        aarch64-unknown-linux-gnu) t=aarch64-linux-gnu ;;
+      esac
+      args+=(-target "$t")
+      shift
+      ;;
+    --target)
+      t="$2"
+      case "$t" in
+        x86_64-unknown-linux-gnu) t=x86_64-linux-gnu ;;
+        aarch64-unknown-linux-gnu) t=aarch64-linux-gnu ;;
+      esac
+      args+=(-target "$t")
+      shift 2
+      ;;
     *) args+=("$1"); shift ;;
   esac
 done
