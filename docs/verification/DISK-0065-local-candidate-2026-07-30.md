@@ -292,19 +292,35 @@ They are not introduced by the watcher candidate. ARCA-0194 round 6 registers
 their mandatory closure separately as collision-clear `DISK-0066` / `R6-17`;
 they must not be suppressed or lost when this branch is integrated.
 
+## Round-5 authoritative Windows CI finding
+
+Pull request 126 reached the self-hosted
+`windows-x86_64-pc-windows-msvc` test job. The watcher rename tests passed,
+including `From`, `To`, and `Both`. The job then exposed a Windows-only test
+harness defect: `poll_watcher_detects_same_size_mtime_content_rewrite` opened
+the fixture file read-only before `File::set_modified`, and Windows returned
+`ERROR_ACCESS_DENIED` because setting file time requires a write-capable
+handle.
+
+The minimal correction uses `OpenOptions::write(true)` for that fixture handle.
+This does not change product watcher behavior. The failed run remains preserved
+as negative evidence; a new Windows run is required before merge.
+
 ## Non-claims
 
-This local checkpoint does not recover the unavailable primary Windows failure
-log and does not claim that the inherited watcher exhaustion was that Windows
-failure's cause. It does not establish Windows success, protected integration,
-deployment applicability or epic completion. Those gates remain explicit in
-the canonical `DISK-0065` task and ARCA-0194 `R6-14`.
+This local checkpoint does not recover the earlier unavailable Windows failure
+log and does not claim that the inherited watcher exhaustion caused that
+earlier failure. The current PR failure is separately preserved and diagnosed
+above. This checkpoint does not establish Windows success, protected
+integration, deployment applicability or epic completion. Those gates remain
+explicit in the canonical `DISK-0065` task and ARCA-0194 `R6-14`.
 
-**Windows causality remains UNKNOWN.** The primary Windows CI failure log
-is unavailable; the hypothesis that an inherited watcher-notify exhaustion
-caused the Windows CI failure is not proven. The five numbered proof-area
-blockers are closed, including the six lettered A–F rereview corrections,
-with no false leak/deadlock claim.
+**Earlier Windows causality remains UNKNOWN.** The historical primary failure
+log is unavailable; the hypothesis that an inherited watcher-notify exhaustion
+caused it is not proven. The five numbered proof-area blockers are closed,
+including the six lettered A–F rereview corrections, with no false
+leak/deadlock claim. Pull request 126's distinct read-only-handle failure is
+known and must pass after the focused harness correction.
 
 ## Deployment gates (conditional)
 

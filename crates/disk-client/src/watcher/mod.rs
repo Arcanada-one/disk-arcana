@@ -577,7 +577,11 @@ mod tests {
         std::fs::write(&target, b"BBBB").unwrap();
 
         // Restore the original mtime — now size AND mtime are identical.
-        std::fs::File::open(&target)
+        // Windows requires a write-capable handle for `SetFileTime`; a
+        // read-only `File::open` fails with `ERROR_ACCESS_DENIED`.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&target)
             .unwrap()
             .set_modified(initial_mtime)
             .unwrap();
