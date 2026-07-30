@@ -306,6 +306,19 @@ The minimal correction uses `OpenOptions::write(true)` for that fixture handle.
 This does not change product watcher behavior. The failed run remains preserved
 as negative evidence; a new Windows run is required before merge.
 
+The next exact-head run, `30584969669`, proved that the client-side fixture
+correction worked, then exposed the same read-only-handle defect in two
+server-side fixtures. Its third failure was a multi-root Windows indexing miss.
+A candidate diagnosis is inconsistent path identity:
+`spawn_share_index_watcher` armed native watchers with the caller's path while
+the index loop used its canonical spelling. On Windows those spellings can
+differ by the verbatim-path prefix, which can make translated events fail the
+root-prefix filter. The correction opens both server fixtures with a
+write-capable handle and arms each backend with the same canonical root owned by
+the index loop. This is a cross-platform path-identity invariant, not a timing
+increase or Windows-only skip; only a fresh Windows run can prove that it closes
+the observed indexing miss.
+
 ## Non-claims
 
 This local checkpoint does not recover the earlier unavailable Windows failure

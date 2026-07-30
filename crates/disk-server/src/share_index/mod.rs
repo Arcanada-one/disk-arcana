@@ -108,7 +108,11 @@ pub fn spawn_share_index_watcher(
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     let mut watcher_threads = Vec::with_capacity(share_roots.len());
 
-    for (vault_id, root) in &share_roots {
+    // Arm every backend with the canonical root used by the index loop.
+    // Windows canonicalization may add a verbatim-path prefix; registering
+    // and filtering against different path spellings can discard otherwise
+    // valid notify events before they reach the index.
+    for (vault_id, root) in &canonical_roots {
         watcher_threads.push(spawn_notify_thread(
             vault_id.clone(),
             root.clone(),
@@ -1108,7 +1112,11 @@ mod tests {
         std::fs::write(&target, b"BBBB").unwrap();
 
         // Restore the original mtime — now size AND mtime are identical.
-        std::fs::File::open(&target)
+        // Windows requires a write-capable handle for `SetFileTime`; a
+        // read-only `File::open` fails with `ERROR_ACCESS_DENIED`.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&target)
             .unwrap()
             .set_modified(initial_mtime)
             .unwrap();
@@ -2134,7 +2142,11 @@ mod tests {
         // Rewrite with same length (4 bytes) — size unchanged.
         std::fs::write(&target, b"BBBB").unwrap();
         // Restore original mtime so metadata is identical.
-        std::fs::File::open(&target)
+        // Windows requires a write-capable handle for `SetFileTime`; a
+        // read-only `File::open` fails with `ERROR_ACCESS_DENIED`.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&target)
             .unwrap()
             .set_modified(initial_mtime)
             .unwrap();
