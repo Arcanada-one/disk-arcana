@@ -130,6 +130,37 @@ async fn missing_required_env_var_aborts_startup() {
 }
 
 #[tokio::test]
+async fn configured_unavailable_share_root_aborts_binary_startup() {
+    let fixture = ServerFixture::build();
+    let missing_root = fixture._tmpdir.path().join("missing-share");
+    let mut cmd = fixture.spawn_server("127.0.0.1:0");
+    cmd.env(
+        "DISK_SHARE_ROOTS",
+        format!("missing-share:{}", missing_root.display()),
+    );
+
+    let output = timeout(STARTUP_TIMEOUT, cmd.output())
+        .await
+        .expect("server did not fail within startup timeout")
+        .expect("spawn binary");
+
+    assert!(
+        !output.status.success(),
+        "binary must fail when a configured share root is unavailable"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("start share-index watchers for DISK_SHARE_ROOTS")
+            && stderr.contains("configured share roots are unavailable"),
+        "typed share-index startup error missing from stderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("disk-arcana-server listening"),
+        "binary reached listening state after share-index startup failure: {stderr}"
+    );
+}
+
+#[tokio::test]
 async fn boot_wiring_emits_f1_markers_and_shuts_down_clean() {
     let fixture = ServerFixture::build();
     let mut cmd = fixture.spawn_server("127.0.0.1:0");

@@ -167,7 +167,8 @@ async fn main() -> anyhow::Result<()> {
         cfg.share_roots.clone(),
         control_meta.clone(),
         "server",
-    );
+    )
+    .context("start share-index watchers for DISK_SHARE_ROOTS")?;
     if _share_index.is_some() {
         tracing::info!(
             shares = cfg.share_roots.len(),
