@@ -81,4 +81,25 @@ a regression would fail CI rather than pass silently:
   advisory itself recommends. `ttf-parser` is no longer in the tree.
 - **Yanked `spin` 0.9.8** (reached via `flume` → `sqlx-sqlite` and `mdns-sd`).
   Fixed by pinning the unyanked `spin` 0.9.9, which satisfies flume's `^0.9.8`
-  requirement — no sqlx upgrade needed. `deny.toml` keeps `yanked = "warn"`.
+  requirement — no sqlx upgrade needed. `deny.toml` now sets `yanked = "deny"`:
+  under the previous `"warn"` neither tool actually gated on yanked crates
+  (cargo-deny exits 0 on warnings, cargo audit only reports them), which is how
+  `spin` 0.9.8 accumulated unnoticed.
+
+### Dependency surface
+
+The `eframe` 0.29 → 0.34 upgrade is a major GUI-stack bump: it removes 8
+transitive crates and adds 22, all confined to the macOS-only `disk-gui` binary
+and absent from the server, client and CLI. The additions include a new CPU
+rasterization stack (`vello_cpu`, `fearless_simd`, `kurbo`, `peniko`), the
+`skrifa`/`read-fonts` font parsers replacing `ttf-parser`, and image decoders
+(`tiff`, `zune-jpeg`, `weezl`) reached only when decoding the bundled
+application icon. None carries an advisory. Recorded here because a bump that
+adds image decoders is a fact a future reviewer should not have to rediscover.
+
+Note also that `crates/disk-gui` is compiled by no CI job — the GUI is
+`#[cfg(target_os = "macos")]`-gated and the build matrix is Linux-only, so
+`cargo clippy --all-targets` and `cargo test --workspace` never reach it.
+Changes to it must be typechecked out of band, e.g.
+`cargo-zigbuild check -p disk-gui --all-targets --target aarch64-apple-darwin`
+(a full link needs a macOS SDK for `libobjc`; `check` does not).

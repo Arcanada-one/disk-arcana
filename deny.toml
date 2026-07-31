@@ -52,18 +52,22 @@ multiple-versions = "warn"
 wildcards = "warn"
 
 [advisories]
-# Yanked crates stay a warning (the pre-DISK-0066 setting). DISK-0066 (R6-17)
-# briefly relaxed this to "allow" to silence yanked `spin` 0.9.8; that was a
-# policy relaxation, not a remediation, and has been reverted. `spin` is now
-# pinned to the unyanked 0.9.9 in Cargo.lock, so the tree is yanked-free and
-# this rule fires on nothing.
-yanked = "warn"
+# Yanked crates are a hard failure. This was "warn" before DISK-0066 and was
+# briefly relaxed to "allow" during it, to silence yanked `spin` 0.9.8 — a
+# relaxation rather than a remediation. `spin` is now pinned to the unyanked
+# 0.9.9, so the tree is yanked-free and the rule can be a real gate.
+#
+# "warn" would not have been enough: cargo-deny exits 0 on warnings and
+# cargo audit only reports yanked crates without failing, so under the previous
+# setting *neither* tool gated on this and a yanked dependency could reappear
+# with CI still green — which is how `spin` 0.9.8 accumulated in the first place.
+yanked = "deny"
 
 # Empty by design. Every advisory that previously appeared here was closed by
 # an actual dependency upgrade rather than a suppression — see
 # `.cargo/audit.toml` for the full remediation record:
 #   RUSTSEC-2026-0194/0195 (quick-xml DoS)   → wayland-scanner 0.31.11 / quick-xml 0.41
-#   RUSTSEC-2026-0192      (ttf-parser)      → eframe 0.35 (epaint dropped ab_glyph for skrifa)
+#   RUSTSEC-2026-0192      (ttf-parser)      → eframe 0.34 (epaint dropped ab_glyph for skrifa)
 #   RUSTSEC-2023-0071      (rsa Marvin)      → not in cargo-deny's feature graph at all
 #                                              (sqlx-mysql is never enabled); suppressing it
 #                                              here made cargo-deny emit `advisory-not-detected`.

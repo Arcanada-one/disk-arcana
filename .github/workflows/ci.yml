@@ -77,8 +77,10 @@ jobs:
         # Full check (advisories + bans + licenses + sources), not licenses-only.
         # Advisory coverage here is not redundant with cargo audit: cargo-deny
         # walks the resolved feature graph while cargo-audit scans every crate in
-        # Cargo.lock, so each sees advisories the other cannot. It also enforces
-        # the yanked-crate rule, which cargo audit reports but does not gate on.
+        # Cargo.lock, so each sees advisories the other cannot. Two rules are
+        # enforced only here — `unmaintained`, which cargo audit reports as a
+        # warning and still exits 0 on, and `yanked`, which deny.toml sets to
+        # "deny" so a yanked dependency fails the build rather than accumulating.
         run: cargo deny check
       - name: ACL direction-spoofing lint (P4a Step 10)
         run: bash crates/disk-server/lints/no_branch_on_client_config.sh .
