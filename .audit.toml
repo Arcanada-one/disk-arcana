@@ -24,6 +24,11 @@ ignore = [
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
 
+    # ttf-parser 0.25.1 unmaintained (RUSTSEC-2026-0192) — pulled via egui 0.29
+    # epaint → ab_glyph for embedded default-font metrics only. No user-supplied
+    # font parsing at runtime. Cannot bump without egui stack upgrade (DISK-0066).
+    "RUSTSEC-2026-0192",
+
     # RUSTSEC-2026-0204 (crossbeam-epoch invalid-pointer deref) is NOT suppressed
     # — it was fixed for real by bumping crossbeam-epoch to 0.9.20 in Cargo.lock.
 
