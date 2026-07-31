@@ -113,11 +113,19 @@ show_diff() {
 
 health_ok() {
   local body status
+  parse_health_status() {
+    local payload="$1"
+    if command -v jq >/dev/null 2>&1; then
+      jq -r '.status // empty' <<<"$payload" 2>/dev/null || true
+      return
+    fi
+    python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))' <<<"$payload" 2>/dev/null || true
+  }
   if [[ "$HEALTH_URL" == file://* ]]; then
     local path="${HEALTH_URL#file://}"
     for _ in $(seq 1 "${DISK_ARCANA_HEALTH_RETRIES:-12}"); do
       if [[ -r "$path" ]] && body="$(<"$path")"; then
-        status="$(jq -r '.status // empty' <<<"$body" 2>/dev/null || true)"
+        status="$(parse_health_status "$body")"
         if [[ "$status" == "ok" ]]; then
           printf '%s\n' "$body"
           return 0
@@ -129,7 +137,7 @@ health_ok() {
   fi
   for _ in $(seq 1 "${DISK_ARCANA_HEALTH_RETRIES:-12}"); do
     if body="$(curl -sf --max-time 10 "$HEALTH_URL" 2>/dev/null)"; then
-      status="$(jq -r '.status // empty' <<<"$body" 2>/dev/null || true)"
+      status="$(parse_health_status "$body")"
       if [[ "$status" == "ok" ]]; then
         printf '%s\n' "$body"
         return 0
