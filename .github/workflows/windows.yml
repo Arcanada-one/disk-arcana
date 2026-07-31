@@ -37,6 +37,9 @@ jobs:
           toolchain: stable-x86_64-pc-windows-msvc
           target: ${{ matrix.target }}
           components: rustfmt, clippy
+          # vika-pc self-hosted: rust-cache post-step hangs after all substantive
+          # steps pass (DISK-0066 / INFRA-0370). Runner has warm target/ already.
+          cache: false
       - name: Assert MSVC rustc host
         shell: powershell
         run: |
