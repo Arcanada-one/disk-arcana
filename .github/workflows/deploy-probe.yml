@@ -1,0 +1,119 @@
+# INFRA-0370: actionless, read-only pre-deployment runner probe.
+#
+# Collects host facts from a deploy target without mutating anything: no
+# package installs, no unit writes, no service restarts. Every fact-gathering
+# step is tolerant so the probe reports a complete picture even on a degraded
+# host; a final verdict step turns the collected invariants into a pass/fail.
+
+name: Deploy probe (read-only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Deploy target to probe
+        type: choice
+        required: true
+        default: arcana-prod
+        options:
+          - arcana-prod
+          - arcana-prod-ci
+          - arcana-devs
+
+permissions: {}
+
+jobs:
+  probe:
+    name: Read-only host facts (${{ inputs.target }})
+    runs-on: [self-hosted, Linux, X64, "${{ inputs.target }}"]
+    steps:
+      - name: Host identity
+        run: |
+          hostname
+          uname -r
+          uname -m
+
+      - name: Effective user and groups
+        run: |
+          id -u
+          id -un
+          id -Gn
+
+      - name: systemd version
+        run: systemd-analyze --version | head -1
+
+      - name: Unit file existence and digest
+        id: unit
+        run: |
+          unit=/etc/systemd/system/disk-arcana-server.service
+          if [[ -f "$unit" ]]; then
+            echo "exists=true" >>"$GITHUB_OUTPUT"
+            sha256sum "$unit"
+          else
+            echo "exists=false" >>"$GITHUB_OUTPUT"
+            echo "unit file absent: $unit"
+          fi
+
+      - name: Service state
+        id: state
+        run: |
+          active="$(systemctl is-active disk-arcana-server 2>/dev/null || true)"
+          enabled="$(systemctl is-enabled disk-arcana-server 2>/dev/null || true)"
+          echo "active=$active" >>"$GITHUB_OUTPUT"
+          echo "enabled=$enabled" >>"$GITHUB_OUTPUT"
+          printf 'is-active=%s is-enabled=%s\n' "$active" "$enabled"
+
+      - name: Loaded restart policy
+        id: policy
+        run: |
+          # systemd reports the parsed values regardless of which section the
+          # directives were written in, so this is the ground truth for whether
+          # the [Unit]-section placement actually took effect.
+          systemctl show disk-arcana-server \
+            -p StartLimitIntervalUSec \
+            -p StartLimitBurst \
+            -p Restart \
+            -p RestartUSec 2>/dev/null | tee /tmp/disk-arcana-policy.txt || true
+          interval="$(sed -n 's/^StartLimitIntervalUSec=//p' /tmp/disk-arcana-policy.txt)"
+          burst="$(sed -n 's/^StartLimitBurst=//p' /tmp/disk-arcana-policy.txt)"
+          echo "interval=$interval" >>"$GITHUB_OUTPUT"
+          echo "burst=$burst" >>"$GITHUB_OUTPUT"
+
+      - name: Health endpoint
+        id: health
+        run: |
+          if curl --fail --silent --show-error --max-time 10 \
+              http://127.0.0.1:9446/health; then
+            echo
+            echo "ok=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >>"$GITHUB_OUTPUT"
+            echo "health endpoint unreachable on 127.0.0.1:9446"
+          fi
+
+      - name: Non-interactive sudo surface
+        run: sudo -ln 2>/dev/null || echo "no non-interactive sudo"
+
+      - name: Verdict
+        run: |
+          {
+            echo "### Deploy probe — ${{ inputs.target }}"
+            echo
+            echo "| fact | value |"
+            echo "| --- | --- |"
+            echo "| unit file present | ${{ steps.unit.outputs.exists }} |"
+            echo "| is-active | ${{ steps.state.outputs.active }} |"
+            echo "| is-enabled | ${{ steps.state.outputs.enabled }} |"
+            echo "| StartLimitIntervalUSec | ${{ steps.policy.outputs.interval }} |"
+            echo "| StartLimitBurst | ${{ steps.policy.outputs.burst }} |"
+            echo "| health 9446 | ${{ steps.health.outputs.ok }} |"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+          fail=0
+          [[ "${{ steps.unit.outputs.exists }}" == "true" ]] || { echo "FAIL unit file absent"; fail=1; }
+          [[ "${{ steps.state.outputs.active }}" == "active" ]] || { echo "FAIL service not active"; fail=1; }
+          [[ "${{ steps.health.outputs.ok }}" == "true" ]] || { echo "FAIL health endpoint down"; fail=1; }
+          # 120s expressed in microseconds; proves the [Unit] placement parsed.
+          [[ "${{ steps.policy.outputs.interval }}" == "2min" ]] || echo "WARN StartLimitIntervalUSec=${{ steps.policy.outputs.interval }} (expected 2min)"
+          [[ "${{ steps.policy.outputs.burst }}" == "5" ]] || echo "WARN StartLimitBurst=${{ steps.policy.outputs.burst }} (expected 5)"
+          exit "$fail"

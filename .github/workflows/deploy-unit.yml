@@ -1,0 +1,69 @@
+# INFRA-0370: deliver the systemd unit file to a deploy host.
+#
+# The release pipeline installs the server *binary* only, so a change to
+# deploy/linux/disk-arcana-server.service never reached any host on its own.
+# This workflow is that missing delivery step, kept separate from
+# release-deploy.yml so a unit change does not require shipping a new binary.
+#
+# Default mode is dry-run: it prints the diff between the repo unit and the
+# installed one and changes nothing. Installing is an explicit opt-in.
+
+name: Deploy systemd unit
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Deploy target
+        type: choice
+        required: true
+        default: arcana-prod
+        options:
+          - arcana-prod
+          - arcana-prod-ci
+          - arcana-devs
+      mode:
+        description: dry-run diffs only; install writes the unit and restarts
+        type: choice
+        required: true
+        default: dry-run
+        options:
+          - dry-run
+          - install
+
+permissions:
+  contents: read
+
+jobs:
+  deliver:
+    name: ${{ inputs.mode }} unit on ${{ inputs.target }}
+    runs-on: [self-hosted, Linux, X64, "${{ inputs.target }}"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Unit contract (must hold before touching the host)
+        run: bash deploy/linux/tests/test-unit-contract.sh
+
+      - name: Diff repo unit against installed unit
+        run: bash scripts/install-systemd-unit.sh --dry-run
+
+      - name: Install unit, restart, health-check, roll back on failure
+        if: inputs.mode == 'install'
+        run: bash scripts/install-systemd-unit.sh --install
+
+      - name: Verify loaded restart policy
+        if: inputs.mode == 'install'
+        run: bash scripts/install-systemd-unit.sh --verify
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Unit delivery — ${{ inputs.target }} (${{ inputs.mode }})"
+            echo
+            echo '```'
+            systemctl show disk-arcana-server \
+              -p StartLimitIntervalUSec -p StartLimitBurst \
+              -p Restart -p RestartUSec -p NRestarts 2>/dev/null || true
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"

@@ -15,6 +15,8 @@ Description=Disk Arcana production gRPC server
 Documentation=https://github.com/Arcanada-one/disk-arcana
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=120s
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -31,8 +33,6 @@ Group=disk-arcana
 # Restart policy.
 Restart=on-failure
 RestartSec=10s
-StartLimitIntervalSec=120s
-StartLimitBurst=5
 
 # Working directory.
 WorkingDirectory=/var/lib/disk-arcana
