@@ -4,7 +4,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::time::Duration;
 
-use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
+use mdns_sd::{ResolvedService, ScopedIp, ServiceDaemon, ServiceEvent, ServiceInfo};
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
@@ -79,7 +79,7 @@ async fn run_lan_discovery(
     tokio::task::spawn_blocking(move || {
         while let Ok(event) = receiver.recv_timeout(Duration::from_secs(1)) {
             if let ServiceEvent::ServiceResolved(info) = event {
-                if let Some(peer) = peer_from_service(&info) {
+                if let Some(peer) = peer_from_resolved(&info) {
                     let _ = peer_tx.blocking_send(peer);
                 }
             }
@@ -107,6 +107,31 @@ async fn run_lan_discovery(
         }
     }
     Ok(())
+}
+
+fn peer_from_resolved(info: &ResolvedService) -> Option<LanPeer> {
+    let props = info.get_properties();
+    let node_id = props.get("node_id")?.val_str().to_string();
+    let host = info
+        .addresses
+        .iter()
+        .find_map(|scoped| match scoped {
+            ScopedIp::V4(v4) if !v4.addr().is_loopback() => Some(v4.addr().to_string()),
+            _ => None,
+        })
+        .or_else(|| info.host.strip_suffix('.').map(str::to_string))?;
+    let port = info.port;
+    let tenant_id = props
+        .get("tenant_id")
+        .map(|p| p.val_str().to_string())
+        .filter(|s| !s.is_empty());
+    Some(LanPeer {
+        node_id,
+        host,
+        port,
+        tenant_id,
+        last_seen_unix: unix_now(),
+    })
 }
 
 fn peer_from_service(info: &ServiceInfo) -> Option<LanPeer> {

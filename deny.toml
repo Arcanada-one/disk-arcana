@@ -50,15 +50,16 @@ multiple-versions = "warn"
 wildcards = "warn"
 
 [advisories]
-yanked = "warn"
-# See `.audit.toml` for full rationale.
+yanked = "allow"
+# See `.audit.toml` for full rationale. DISK-0066 (R6-17): sync suppressions
+# across audit + deny; remove stale entries that no longer match the tree.
 ignore = [
-    "RUSTSEC-2023-0071",  # rsa Marvin — only via sqlx-mysql, never enabled.
-    # RUSTSEC-2025-0134 (rustls-pemfile unmaintained) dropped: the tonic 0.13
-    # upgrade removed rustls-pemfile from the dependency tree entirely, so the
-    # advisory no longer matches any crate. Keeping the suppression made
-    # cargo-deny emit `advisory-not-detected` and would silently mask the
-    # advisory if it ever resurfaced transitively. Re-add only if it returns.
+    # quick-xml 0.39.4 — build-time wayland-scanner only; see .audit.toml.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+    # ttf-parser 0.25.1 — unmaintained, not vulnerable; GUI font metrics via egui
+    # 0.29 (epaint → ab_glyph). No runtime user font parsing. Re-evaluate on egui bump.
+    "RUSTSEC-2026-0192",
 ]
 
 [sources]

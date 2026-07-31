@@ -44,7 +44,7 @@ publish a support matrix in this file.
 
 ## Known suppressed advisories
 
-`cargo audit` ignores two advisories at the workspace level (rationale in
+`cargo audit` ignores advisories at the workspace level (rationale in
 [`.audit.toml`](.audit.toml) and [`deny.toml`](deny.toml)):
 
 - **RUSTSEC-2023-0071** (`rsa` — Marvin Attack timing side-channel). Pulled
@@ -52,5 +52,11 @@ publish a support matrix in this file.
   records every optional sqlx feature. Disk Arcana ships `sqlite`-only, so
   the MySQL driver — and therefore the vulnerable code path — is never
   instantiated. Tracked: <https://github.com/launchbadge/sqlx/issues/2876>.
-- ~~**RUSTSEC-2025-0134**~~ (`rustls-pemfile` — unmaintained). Was transitive
-  through `tonic` 0.12. Resolved: upgraded to `tonic` 0.13 in DISK-0004.
+- **RUSTSEC-2026-0194 / RUSTSEC-2026-0195** (`quick-xml` DoS). Build-time
+  `wayland-scanner` only (egui 0.29 GUI stack); trusted fixed XML, not
+  runtime input. Bump blocked until egui upgrade (DISK-0066).
+- **RUSTSEC-2026-0192** (`ttf-parser` unmaintained). GUI embedded-font metrics
+  via egui/epaint only; no user font parsing. Bump blocked until egui upgrade.
+- **Yanked `spin` 0.9.8** (DISK-0066): transitive via `sqlx-sqlite` →
+  `flume` 0.11. Remediated for `mdns-sd` path (upgraded to 0.20 / flume 0.12).
+  sqlx 0.8 pins flume 0.11; `deny.toml` sets `yanked = "allow"` until sqlx bump.
