@@ -50,15 +50,19 @@ contradicted this on both counts.
    the header and status bars user-draggable down to 20px. Both now pass
    `.resizable(false)` explicitly.
 3. **spin** — 0.9.9 is unyanked and satisfies flume's `^0.9.8`. Pin it; no sqlx
-   upgrade required. Restore `yanked = "warn"`.
+   upgrade required. Then set `yanked = "deny"` — not merely back to the
+   pre-task `"warn"`, which would have been a no-op: cargo-deny exits 0 on
+   warnings and cargo audit only reports yanked crates, so under `"warn"`
+   *neither* tool gated on this, which is how `spin` 0.9.8 accumulated in the
+   first place. With the tree yanked-free the rule can finally be a real gate.
 4. **rsa** — the one item with no upstream fix. Keep the suppression, but in
    `.cargo/audit.toml` only, with an exploitability argument and a retirement
    condition (sqlx 0.9, Dependabot #34).
 
 ## Policy corrections (all tightenings)
 
-- `deny.toml`: advisory `ignore` list emptied; `yanked` restored from `"allow"`
-  to `"warn"`.
+- `deny.toml`: advisory `ignore` list emptied; `yanked` set to `"deny"` (it was
+  `"warn"` before this task and was transiently relaxed to `"allow"` during it).
 - Root `.audit.toml` **deleted**. cargo-audit reads only `.cargo/audit.toml`
   (verified empirically against 0.22.2 — an ignore in a root `.audit.toml` has
   no effect). Because CI duplicated the entries as `--ignore` flags, the dead

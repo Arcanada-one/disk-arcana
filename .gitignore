@@ -30,3 +30,8 @@ disk.toml
 *.profraw
 tarpaulin-report.html
 cobertura.xml
+
+# Byproduct of `cargo-zigbuild`, used for the out-of-band macOS typecheck of
+# crates/disk-gui (see SECURITY.md). Created in the working directory on every
+# run; never an input to the build.
+.intentionally-empty-file.o

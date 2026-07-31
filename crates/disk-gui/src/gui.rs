@@ -543,9 +543,10 @@ impl DiskGuiApp {
 impl eframe::App for DiskGuiApp {
     // eframe 0.34 replaced `App::update(&Context, ..)` with `App::ui(&mut Ui, ..)`:
     // the frame now hands the app a `Ui` to build into, and panels attach to that
-    // `Ui` via `show_inside` rather than to the context via `show`. `update` still
-    // exists but is deprecated with a no-op default, so implementing it alone would
-    // compile and then render nothing — the migration is mandatory, not cosmetic.
+    // `Ui` via `show_inside` rather than to the context via `show`. `ui` is a
+    // required trait item with no default body, so implementing only the (now
+    // deprecated, no-op) `update` fails to compile — the migration is mandatory,
+    // not cosmetic.
     //
     // The sequence of per-frame work below is the same as under 0.29, but the panel
     // API is not a drop-in: 0.34 flipped the `resizable` default to true, so the top
