@@ -1,0 +1,26 @@
+# Immutable negative-control fixture for INFRA-0370 unit-contract test.
+#
+# This file intentionally places StartLimitIntervalSec and StartLimitBurst
+# under [Service], which systemd 255 ignores (the interval defaults to 10s).
+# The test-unit-contract.sh checker MUST reject this fixture while accepting
+# the corrected unit that has both keys under [Unit].
+#
+# DO NOT "fix" this file — it is the durable proof that the checker
+# distinguishes valid from invalid placement.
+#
+# See: deploy/linux/disk-arcana-server.service (corrected unit)
+#      deploy/linux/tests/test-unit-contract.sh (caller)
+
+[Unit]
+Description=Disk Arcana invalid fixture (negative control)
+
+[Service]
+Type=simple
+ExecStart=/bin/true
+Restart=on-failure
+RestartSec=10s
+StartLimitIntervalSec=120s
+StartLimitBurst=5
+
+[Install]
+WantedBy=multi-user.target

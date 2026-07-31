@@ -18,11 +18,11 @@ jobs:
     name: Lint (fmt + clippy + audit + deny)
     runs-on: [self-hosted, Linux, X64]
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4  # stable 2026-07-30
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
       - name: Ensure protoc is available
         # Self-hosted runner pool is heterogeneous — some machines lack a
         # preinstalled protoc, so a bare `protoc --version` check fails with
@@ -94,7 +94,7 @@ jobs:
         run: bash scripts/validate-owasp-evidence.sh
       - name: load-test-harness.sh syntax (DISK-0012 G3)
         run: sh -n scripts/load-test-harness.sh
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: "20"
           cache: npm
@@ -119,14 +119,18 @@ jobs:
             mv "${RUNNER_TEMP:-/tmp}/gitleaks" "$GITLEAKS_BIN"
           fi
           "$GITLEAKS_BIN" detect --source . --no-banner --redact --verbose --config .gitleaks.toml
+      - name: Immutable action-reference guard (INFRA-0370)
+        run: bash scripts/check-actions-pinned.sh
+      - name: actionlint (INFRA-0370)
+        run: bash scripts/ci-ensure-actionlint.sh --run
 
   test:
     name: Test (linux)
     runs-on: [self-hosted, Linux, X64]
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4  # stable 2026-07-30
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
       - name: Ensure protoc is available
         # Self-hosted runner pool is heterogeneous — some machines lack a
         # preinstalled protoc, so a bare `protoc --version` check fails with
@@ -164,7 +168,7 @@ jobs:
             exit 0
           fi
           cargo llvm-cov --workspace --all-features --fail-under-lines 80
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
         with:
           node-version: "20"
       - name: Obsidian plugin integration (DISK-0008)
@@ -174,9 +178,9 @@ jobs:
     name: Fuzz smoke (DISK-0012, 80s)
     runs-on: [self-hosted, Linux, X64]
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+      - uses: dtolnay/rust-toolchain@4fd1da8b0805d2d2e936788875a7d65dbd677dc2  # nightly 2026-07-30
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
         with:
           workspaces: fuzz
       - name: Ensure protoc is available
@@ -237,11 +241,11 @@ jobs:
             build_kind: aarch64
     runs-on: [self-hosted, Linux, X64]
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4  # stable 2026-07-30
         with:
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
       - name: Prepare aarch64 toolchain (no docker, no sudo)
         if: matrix.build_kind == 'aarch64'
         id: aarch64_toolchain

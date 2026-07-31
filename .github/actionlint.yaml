@@ -6,3 +6,4 @@ self-hosted-runner:
     - X64
     - arcana-dev
     - arcana-prod
+    - vika-pc

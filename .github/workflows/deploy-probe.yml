@@ -1,0 +1,57 @@
+# INFRA-0370: actionless, read-only pre-deployment runner probe.
+
+name: Deploy probe (read-only)
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  probe:
+    name: Read-only host facts
+    runs-on: [self-hosted, Linux, X64]
+    steps:
+      - name: Host identity
+        run: |
+          hostname
+          uname -r
+          uname -m
+
+      - name: Effective user and groups
+        run: |
+          id -u
+          id -un
+          id -Gn
+
+      - name: systemd version
+        run: systemd-analyze --version | head -1
+
+      - name: Unit file existence and digest
+        run: |
+          unit=/etc/systemd/system/disk-arcana-server.service
+          if [[ -f "$unit" ]]; then
+            printf 'unit_exists=true\n'
+            sha256sum "$unit"
+          else
+            printf 'unit_exists=false\n'
+          fi
+
+      - name: Service state
+        run: |
+          systemctl is-active disk-arcana-server || true
+          systemctl is-enabled disk-arcana-server || true
+
+      - name: Loaded restart policy
+        run: |
+          systemctl show disk-arcana-server \
+            -p StartLimitIntervalUSec \
+            -p StartLimitBurst \
+            -p Restart \
+            -p RestartUSec || true
+
+      - name: Health endpoint
+        run: curl --fail --silent --show-error http://127.0.0.1:9446/health
+
+      - name: Non-interactive sudo surface
+        run: sudo -ln 2>/dev/null || true
