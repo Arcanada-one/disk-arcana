@@ -1,0 +1,3 @@
+# INFRA-0370 — ci-runner may invoke the disk-arcana unit broker and nothing else.
+# Bootstrap: deploy/linux/install-disk-arcana-install-unit-broker.sh (root, once).
+ci-runner ALL=(root) NOPASSWD: /usr/local/sbin/disk-arcana-install-unit
