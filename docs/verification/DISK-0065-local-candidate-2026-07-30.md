@@ -409,6 +409,13 @@ only difference is that its base now contains `cffed52`. An unrelated branch
 recovering purely by rebasing onto the fix is third-party evidence that the fix
 closed the regression, independent of this lane's own test suite.
 
+*Note on `9defa1ab`:* dependabot force-pushes on rebase, so that commit is no
+longer reachable from the branch and `git cat-file -t 9defa1ab` fails in a local
+clone. It is not fabricated — it resolves via the GitHub API
+(`repos/Arcanada-one/disk-arcana/commits/9defa1ab…`) and is recorded as the
+authoritative `head_sha` of run `30294421701`. The branch head is now
+`b2087758`. Cite the run ID rather than the SHA when reproducing this table.
+
 ### Deployment gate closure
 
 | # | Gate | Evidence | Result |
@@ -516,10 +523,11 @@ difference is commits `2529c08` and `ac0e05d`, which landed after round 4.
 - **The dependency security gate remains open and is not this lane's to close.**
   `RUSTSEC-2026-0194` / `RUSTSEC-2026-0195` (`quick-xml` 0.39.4), unmaintained
   `ttf-parser` 0.25.1 (`RUSTSEC-2026-0192`) and yanked `spin` 0.9.8 all still
-  reproduce on the unchanged base and are owned by `DISK-0066` / `R6-17`. At the
-  time of writing `DISK-0066` is open as pull request 128 with a failing
-  `Lint (fmt + clippy + audit + deny)` gate. Merging DISK-0065 neither fixed nor
-  suppressed these findings.
+  reproduce on the unchanged base and are owned by `DISK-0066` / `R6-17`, which
+  is in flight as pull request 128 (open and iterating as of 2026-07-31; its
+  check state is deliberately not pinned here, since it moves). Merging
+  DISK-0065 neither fixed nor suppressed these findings, and closing them is
+  DISK-0066's exit criterion, not this report's.
 - **CI's dependency gate is narrower than a full local audit, which is why
   `Lint` is green on `cffed52` while § Security-gate finding above says the
   dependency gate is not green.** Both statements are correct; they measure
