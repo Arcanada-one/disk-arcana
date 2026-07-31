@@ -47,6 +47,14 @@ jobs:
       - name: Diff repo unit against installed unit
         run: bash scripts/install-systemd-unit.sh --dry-run
 
+      - name: Report unit-delivery broker status
+        run: |
+          if [[ -x /usr/local/sbin/disk-arcana-install-unit ]]; then
+            echo "broker=present"
+          else
+            echo "broker=absent (root bootstrap: deploy/linux/install-disk-arcana-install-unit-broker.sh)"
+          fi
+
       - name: Install unit, restart, health-check, roll back on failure
         if: inputs.mode == 'install'
         run: bash scripts/install-systemd-unit.sh --install
