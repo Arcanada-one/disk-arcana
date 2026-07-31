@@ -42,21 +42,43 @@ publish a support matrix in this file.
 | V-13 | Decompression bomb             | `BombGuard`: 4 MiB compressed / 16 MiB decompressed / 256 MiB stream caps   |
 | V-14 | Secret leak in logs            | `ApiKey`/`SessionToken` masked in `Display`/`Debug`                          |
 
-## Known suppressed advisories
+## Dependency advisory policy
 
-`cargo audit` ignores advisories at the workspace level (rationale in
-[`.audit.toml`](.audit.toml) and [`deny.toml`](deny.toml)):
+Both `cargo audit` and `cargo deny check` run on every CI build and must pass
+with no `--ignore` flags on the command line. A suppression is a last resort: an
+advisory is closed by upgrading, replacing or feature-gating the crate, and only
+when none of those is possible does it get an entry — with a dated rationale, an
+exploitability argument, and a retirement condition — in
+[`.cargo/audit.toml`](.cargo/audit.toml) or [`deny.toml`](deny.toml).
 
-- **RUSTSEC-2023-0071** (`rsa` — Marvin Attack timing side-channel). Pulled
-  in via `sqlx-mysql`, which is locked into `Cargo.lock` because cargo
-  records every optional sqlx feature. Disk Arcana ships `sqlite`-only, so
-  the MySQL driver — and therefore the vulnerable code path — is never
-  instantiated. Tracked: <https://github.com/launchbadge/sqlx/issues/2876>.
-- **RUSTSEC-2026-0194 / RUSTSEC-2026-0195** (`quick-xml` DoS). Build-time
-  `wayland-scanner` only (egui 0.29 GUI stack); trusted fixed XML, not
-  runtime input. Bump blocked until egui upgrade (DISK-0066).
-- **RUSTSEC-2026-0192** (`ttf-parser` unmaintained). GUI embedded-font metrics
-  via egui/epaint only; no user font parsing. Bump blocked until egui upgrade.
-- **Yanked `spin` 0.9.8** (DISK-0066): transitive via `sqlx-sqlite` →
-  `flume` 0.11. Remediated for `mdns-sd` path (upgraded to 0.20 / flume 0.12).
-  sqlx 0.8 pins flume 0.11; `deny.toml` sets `yanked = "allow"` until sqlx bump.
+Note that cargo-audit reads only `.cargo/audit.toml`; a root `.audit.toml` is
+silently ignored. The repo carried such a file until DISK-0066, and because CI
+duplicated its entries as command-line flags, its rationale went stale without
+anyone noticing.
+
+### Currently suppressed
+
+- **RUSTSEC-2023-0071** (`rsa` — Marvin Attack timing side-channel). Pulled in
+  via `sqlx-mysql`, which is recorded in `Cargo.lock` because cargo records every
+  optional sqlx feature. Disk Arcana ships `sqlite`-only, so the MySQL driver —
+  and therefore the vulnerable code path — is never compiled into a shipped
+  binary. Visible to cargo-audit (lockfile scan) but not cargo-deny (feature
+  graph), so it is suppressed only in `.cargo/audit.toml`. Retire on the sqlx 0.9
+  upgrade. Tracked: <https://github.com/launchbadge/sqlx/issues/2876>.
+
+### Closed by remediation in DISK-0066 (ARCA-0194 R6-17)
+
+None of the following is suppressed — each was fixed in the dependency graph, so
+a regression would fail CI rather than pass silently:
+
+- **RUSTSEC-2026-0194 / RUSTSEC-2026-0195** (`quick-xml` 0.39.4, two high-severity
+  DoS vectors). Fixed by `wayland-scanner` 0.31.11, which requires
+  `quick-xml ^0.41` — a semver-compatible lockfile bump. The previous note here
+  claimed the bump was blocked behind an egui-stack upgrade; that was wrong.
+- **RUSTSEC-2026-0192** (`ttf-parser` unmaintained, no fixed release). Fixed by
+  upgrading `eframe` 0.29 → 0.34: epaint 0.34 replaced `ab_glyph`
+  (→ `owned_ttf_parser` → `ttf-parser`) with `skrifa`, the maintained crate the
+  advisory itself recommends. `ttf-parser` is no longer in the tree.
+- **Yanked `spin` 0.9.8** (reached via `flume` → `sqlx-sqlite` and `mdns-sd`).
+  Fixed by pinning the unyanked `spin` 0.9.9, which satisfies flume's `^0.9.8`
+  requirement — no sqlx upgrade needed. `deny.toml` keeps `yanked = "warn"`.

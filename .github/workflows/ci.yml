@@ -64,23 +64,22 @@ jobs:
           cargo install cargo-audit --locked
           cargo install cargo-deny --locked
       - name: cargo audit
-        # Advisory suppressions (rationale for each also documented in .audit.toml):
-        #   RUSTSEC-2023-0071  rsa Marvin — only via never-enabled sqlx-mysql.
-        #   RUSTSEC-2026-0194  quick-xml quadratic dup-attr scan (DoS).
-        #   RUSTSEC-2026-0195  quick-xml unbounded namespace-decl alloc (DoS).
-        # quick-xml is a *build-time* dep of wayland-scanner (egui/eframe GUI
-        # stack) that parses the trusted, fixed Wayland protocol XML shipped in
-        # the crate — never runtime/user input — and cannot be bumped to >=0.41
-        # without upgrading the whole egui 0.29 stack. crossbeam-epoch was bumped
-        # to 0.9.20 in Cargo.lock (RUSTSEC-2026-0204, real fix, not suppressed).
-        run: >
-          cargo audit
-          --ignore RUSTSEC-2023-0071
-          --ignore RUSTSEC-2026-0194
-          --ignore RUSTSEC-2026-0195
-          --ignore RUSTSEC-2026-0192
-      - name: cargo deny check licenses
-        run: cargo deny check licenses
+        # No --ignore flags by design (DISK-0066). Suppressions live in
+        # .cargo/audit.toml, which cargo-audit reads automatically from the
+        # workspace root and which carries the rationale for each entry.
+        # Repeating them here as flags is what let the workflow and the config
+        # file drift apart: the checked-in rationale claimed quick-xml could not
+        # be bumped, while a semver-compatible wayland-scanner bump fixed it.
+        # Keep this step flag-free — if an advisory needs suppressing, it needs a
+        # documented entry in .cargo/audit.toml, reviewed like any other change.
+        run: cargo audit
+      - name: cargo deny check
+        # Full check (advisories + bans + licenses + sources), not licenses-only.
+        # Advisory coverage here is not redundant with cargo audit: cargo-deny
+        # walks the resolved feature graph while cargo-audit scans every crate in
+        # Cargo.lock, so each sees advisories the other cannot. It also enforces
+        # the yanked-crate rule, which cargo audit reports but does not gate on.
+        run: cargo deny check
       - name: ACL direction-spoofing lint (P4a Step 10)
         run: bash crates/disk-server/lints/no_branch_on_client_config.sh .
       - name: REST loopback-bind lint (R14)

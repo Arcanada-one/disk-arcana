@@ -29,7 +29,7 @@ tokio       = { workspace = true }
 dirs        = "5"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }
+eframe = { version = "0.34", default-features = false, features = ["default_fonts", "glow"] }
 
 [package.metadata.bundle]
 name       = "Disk Arcana"
