@@ -16,10 +16,10 @@ jobs:
       matrix:
         target: [x86_64-pc-windows-msvc]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       # Self-hosted desktop runners do not inherit Developer PowerShell PATH;
       # without vcvars, crates that need lib.exe fall back to missing dlltool.exe.
-      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756  # v1.13.0
       - name: Ensure dlltool on PATH (raw-dylib / windows-sys)
         shell: powershell
         run: |
@@ -32,7 +32,7 @@ jobs:
           Add-Content -Path $env:GITHUB_PATH -Value $llvm
           # llvm-dlltool has no --version; presence check is enough
           Write-Host "dlltool ready: $dll"
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
         with:
           toolchain: stable-x86_64-pc-windows-msvc
           target: ${{ matrix.target }}
@@ -69,7 +69,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           ./scripts/bundle-windows.ps1 -Binary target/${{ matrix.target }}/release/disk.exe -OutDir dist -Version ci
       - name: Upload portable bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: disk-windows-portable-${{ matrix.target }}
           path: dist/disk-arcana-windows-x86_64.zip
