@@ -1,10 +1,60 @@
-# cargo audit configuration — DISK-0005
-# Ignored advisories are pre-existing and documented in deny.toml.
+# cargo-audit configuration — the single source of truth for advisory
+# suppressions in this workspace.
+#
+# WHY THIS FILE AND NOT `.audit.toml`: cargo-audit only reads `.cargo/audit.toml`
+# (verified against cargo-audit 0.22.2 — an ignore placed in a root `.audit.toml`
+# has no effect). The repo previously carried a root `.audit.toml` whose
+# rationale comments were never honoured; CI compensated by repeating the same
+# suppressions as `--ignore` flags in the workflow, so the two drifted apart.
+# DISK-0066 deleted that file and consolidated here. Do not reintroduce it.
+#
+# cargo-deny keeps its own list in `deny.toml`. The two are deliberately NOT
+# identical: cargo-audit scans every crate recorded in Cargo.lock, while
+# cargo-deny walks the resolved feature graph, so a crate reachable only through
+# a disabled feature is visible to cargo-audit alone. RUSTSEC-2023-0071 below is
+# exactly that case — listing it in `deny.toml` makes cargo-deny emit
+# `advisory-not-detected`.
+#
+# House rule (DISK-0066 / ARCA-0194 R6-17): an entry here is a last resort.
+# Close an advisory by upgrading, replacing or feature-gating the crate; add a
+# suppression only when none of those exist, and only with a dated rationale, an
+# exploitability argument, and a tracking item that can retire it.
 
 [advisories]
 ignore = [
-    # rsa 0.9.10 Marvin timing attack — pulled only by sqlx-mysql which is
-    # never enabled in this workspace (sqlx features: sqlite only, no mysql).
-    # See deny.toml for full rationale.
+    # RUSTSEC-2023-0071 — rsa 0.9.10, Marvin attack (timing side channel).
+    # Severity 5.9 medium. No fixed upstream release exists (the advisory's own
+    # "Solution: No fixed upgrade is available!").
+    #
+    # Not exploitable here: `rsa` is reachable only through `sqlx-mysql`, and
+    # this workspace builds sqlx with `default-features = false` and the feature
+    # set ["runtime-tokio", "sqlite", "macros", "migrate"] — the MySQL driver is
+    # never compiled into any shipped binary. It appears in Cargo.lock because
+    # Cargo records optional dependencies regardless of feature selection, which
+    # is why cargo-audit reports it and cargo-deny (feature-graph based) does not.
+    #
+    # Retire this entry when sqlx drops the transitive `rsa` dependency or when
+    # the workspace moves to sqlx 0.9 (Dependabot PR #34) — re-run
+    # `cargo audit` after either and delete this block if the advisory no longer
+    # matches. Upstream tracking: https://github.com/launchbadge/sqlx/issues/2876
     "RUSTSEC-2023-0071",
 ]
+
+# Deliberately NOT suppressed — each was closed by a real dependency change in
+# DISK-0066, and re-adding a suppression would mask a regression:
+#
+#   RUSTSEC-2026-0194 / RUSTSEC-2026-0195 (quick-xml 0.39.4, high, DoS)
+#     Fixed by `cargo update -p wayland-scanner` → wayland-scanner 0.31.11,
+#     which requires quick-xml ^0.41. This is a semver-compatible lockfile bump;
+#     the earlier claim that it needed a full egui-stack upgrade was incorrect.
+#
+#   RUSTSEC-2026-0192 (ttf-parser 0.25.1, unmaintained)
+#     Fixed by upgrading eframe 0.29 → 0.35. epaint 0.34 replaced ab_glyph (and
+#     therefore owned_ttf_parser → ttf-parser) with `skrifa`, which is the
+#     maintained alternative the advisory itself recommends.
+#
+#   RUSTSEC-2026-0204 (crossbeam-epoch, invalid pointer deref)
+#     Fixed earlier by pinning crossbeam-epoch 0.9.20 in Cargo.lock.
+#
+#   RUSTSEC-2025-0134 (rustls-pemfile, unmaintained)
+#     Removed from the dependency tree entirely by the tonic 0.13 upgrade.

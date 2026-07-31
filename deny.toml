@@ -38,11 +38,13 @@ allow = [
 confidence-threshold = 0.8
 
 # epaint_default_fonts declares `(MIT OR Apache-2.0) AND OFL-1.1 AND
-# LicenseRef-UFL-1.0`. UFL-1.0 (Ubuntu Font Licence) is a permissive font
-# license but is not an SPDX identifier, so it cannot go in `allow`; grant it
-# as a crate-scoped exception. Source: eframe's default font set.
+# Ubuntu-font-1.0` — the Ubuntu Font Licence covering eframe's default font set.
+# Same permissive font license as before the eframe 0.34 upgrade; only the
+# identifier changed, from the non-SPDX `LicenseRef-UFL-1.0` to the now-standard
+# SPDX id `Ubuntu-font-1.0`. Kept as a crate-scoped exception rather than a
+# blanket `allow` entry so it cannot silently apply to any other dependency.
 exceptions = [
-    { allow = ["LicenseRef-UFL-1.0"], crate = "epaint_default_fonts" },
+    { allow = ["Ubuntu-font-1.0"], crate = "epaint_default_fonts" },
 ]
 
 [bans]
@@ -50,17 +52,25 @@ multiple-versions = "warn"
 wildcards = "warn"
 
 [advisories]
-yanked = "allow"
-# See `.audit.toml` for full rationale. DISK-0066 (R6-17): sync suppressions
-# across audit + deny; remove stale entries that no longer match the tree.
-ignore = [
-    # quick-xml 0.39.4 — build-time wayland-scanner only; see .audit.toml.
-    "RUSTSEC-2026-0194",
-    "RUSTSEC-2026-0195",
-    # ttf-parser 0.25.1 — unmaintained, not vulnerable; GUI font metrics via egui
-    # 0.29 (epaint → ab_glyph). No runtime user font parsing. Re-evaluate on egui bump.
-    "RUSTSEC-2026-0192",
-]
+# Yanked crates stay a warning (the pre-DISK-0066 setting). DISK-0066 (R6-17)
+# briefly relaxed this to "allow" to silence yanked `spin` 0.9.8; that was a
+# policy relaxation, not a remediation, and has been reverted. `spin` is now
+# pinned to the unyanked 0.9.9 in Cargo.lock, so the tree is yanked-free and
+# this rule fires on nothing.
+yanked = "warn"
+
+# Empty by design. Every advisory that previously appeared here was closed by
+# an actual dependency upgrade rather than a suppression — see
+# `.cargo/audit.toml` for the full remediation record:
+#   RUSTSEC-2026-0194/0195 (quick-xml DoS)   → wayland-scanner 0.31.11 / quick-xml 0.41
+#   RUSTSEC-2026-0192      (ttf-parser)      → eframe 0.35 (epaint dropped ab_glyph for skrifa)
+#   RUSTSEC-2023-0071      (rsa Marvin)      → not in cargo-deny's feature graph at all
+#                                              (sqlx-mysql is never enabled); suppressing it
+#                                              here made cargo-deny emit `advisory-not-detected`.
+#   RUSTSEC-2025-0134      (rustls-pemfile)  → removed from the tree by the tonic 0.13 upgrade.
+# Add an entry only when no upgrade, replacement or feature-gate exists, and
+# always with a dated rationale plus a tracking backlog item.
+ignore = []
 
 [sources]
 unknown-registry = "warn"

@@ -266,8 +266,9 @@ impl DiskGuiApp {
     }
 
     /// Top menu bar — heading, Settings, Conflicts buttons.
-    fn render_top_bar(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
+    fn render_top_bar(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        egui::Panel::top("top_bar").show_inside(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("Disk Arcana");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -285,7 +286,7 @@ impl DiskGuiApp {
                     if ui.button(conflicts_label).clicked() {
                         self.conflicts_open = !self.conflicts_open;
                         if self.conflicts_open {
-                            self.refresh_conflicts(ctx);
+                            self.refresh_conflicts(&ctx);
                         }
                     }
                 });
@@ -294,8 +295,8 @@ impl DiskGuiApp {
     }
 
     /// Bottom status bar — daemon connection indicator.
-    fn render_status_bar(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
+    fn render_status_bar(&mut self, ui: &mut egui::Ui) {
+        egui::Panel::bottom("status_bar").show_inside(ui, |ui| {
             ui.horizontal(|ui| {
                 match &self.last_error {
                     Some(e) => {
@@ -529,16 +530,23 @@ impl DiskGuiApp {
 }
 
 impl eframe::App for DiskGuiApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    // eframe 0.34 replaced `App::update(&Context, ..)` with `App::ui(&mut Ui, ..)`:
+    // the frame now hands the app a `Ui` to build into, and panels attach to that
+    // `Ui` via `show_inside` rather than to the context via `show`. The per-frame
+    // logic below is unchanged — only the plumbing differs. Windows (the settings
+    // and conflicts modals) are areas, not panels, so they still take the context.
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+
         self.drain_pending();
-        self.maybe_poll(ctx);
+        self.maybe_poll(&ctx);
         self.drain_conflicts();
-        self.drain_resolve(ctx);
+        self.drain_resolve(&ctx);
 
-        self.render_top_bar(ctx);
-        self.render_status_bar(ctx);
+        self.render_top_bar(ui);
+        self.render_status_bar(ui);
 
-        let (do_save, do_cancel) = self.render_settings_modal(ctx);
+        let (do_save, do_cancel) = self.render_settings_modal(&ctx);
         if do_save {
             self.apply_settings_save();
         }
@@ -546,11 +554,11 @@ impl eframe::App for DiskGuiApp {
             self.apply_settings_cancel();
         }
 
-        if let Some((vault_id, path, action)) = self.render_conflicts_modal(ctx) {
-            self.start_resolve_conflict(ctx, vault_id, path, action);
+        if let Some((vault_id, path, action)) = self.render_conflicts_modal(&ctx) {
+            self.start_resolve_conflict(&ctx, vault_id, path, action);
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             self.render_central_panel(ui);
         });
     }
