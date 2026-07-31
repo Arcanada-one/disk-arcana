@@ -30,6 +30,7 @@ on:
         options:
           - dry-run
           - install
+          - bootstrap-broker
 
 permissions:
   contents: read
@@ -54,6 +55,22 @@ jobs:
           else
             echo "broker=absent (root bootstrap: deploy/linux/install-disk-arcana-install-unit-broker.sh)"
           fi
+
+      - name: Bootstrap unit-delivery broker (root, once per host)
+        if: inputs.mode == 'bootstrap-broker'
+        run: |
+          set -euo pipefail
+          broker_sha="$(sha256sum deploy/linux/disk-arcana-install-unit-broker.sh | awk '{print $1}')"
+          if [[ "$(id -u)" -eq 0 ]]; then
+            bash deploy/linux/install-disk-arcana-install-unit-broker.sh "$broker_sha"
+            exit 0
+          fi
+          if sudo -n true 2>/dev/null; then
+            sudo -n bash deploy/linux/install-disk-arcana-install-unit-broker.sh "$broker_sha"
+            exit 0
+          fi
+          printf 'bootstrap requires root on the host (see deploy/linux/install-disk-arcana-install-unit-broker.sh)\n' >&2
+          exit 1
 
       - name: Install unit, restart, health-check, roll back on failure
         if: inputs.mode == 'install'
