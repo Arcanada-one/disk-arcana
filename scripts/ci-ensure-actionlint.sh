@@ -23,7 +23,6 @@ bootstrap() {
 
   mkdir -p "$INSTALL_DIR"
   archive="$INSTALL_DIR/actionlint.tar.gz"
-  trap 'rm -f "$archive"' RETURN
 
   curl --fail --silent --show-error --location \
     --retry 3 --retry-all-errors \
@@ -32,11 +31,18 @@ bootstrap() {
 
   actual_hash="$(sha256sum "$archive" | awk '{print $1}')"
   if [[ "$actual_hash" != "$ACTIONLINT_SHA256" ]]; then
+    rm -f "$archive"
     printf 'actionlint archive checksum mismatch\n' >&2
     exit 1
   fi
 
+  # Note: deliberately NOT a `trap ... RETURN`. A RETURN trap set inside a
+  # function is not scoped to it — it survives and fires again when the *next*
+  # function returns, at which point `archive` is out of scope and `set -u`
+  # aborts. That only reproduces on a cold cache, so it passes locally whenever
+  # a previous run already populated INSTALL_DIR.
   tar -xzf "$archive" -C "$INSTALL_DIR" actionlint
+  rm -f "$archive"
   chmod 0755 "$ACTIONLINT_BIN"
   "$ACTIONLINT_BIN" -version
 
