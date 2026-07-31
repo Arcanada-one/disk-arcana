@@ -37,6 +37,11 @@ ignore = [
     # the workspace moves to sqlx 0.9 (Dependabot PR #34) — re-run
     # `cargo audit` after either and delete this block if the advisory no longer
     # matches. Upstream tracking: https://github.com/launchbadge/sqlx/issues/2876
+    #
+    # REVIEW BY 2026-11-30. Neither cargo-audit nor cargo-deny supports an expiry
+    # field, so this date is the tripwire: if the entry is still here then, either
+    # land the sqlx upgrade or re-argue the exception with a fresh date. An
+    # exception with no review date is how a suppression becomes permanent.
     "RUSTSEC-2023-0071",
 ]
 
@@ -49,7 +54,7 @@ ignore = [
 #     the earlier claim that it needed a full egui-stack upgrade was incorrect.
 #
 #   RUSTSEC-2026-0192 (ttf-parser 0.25.1, unmaintained)
-#     Fixed by upgrading eframe 0.29 → 0.35. epaint 0.34 replaced ab_glyph (and
+#     Fixed by upgrading eframe 0.29 → 0.34. epaint 0.34 replaced ab_glyph (and
 #     therefore owned_ttf_parser → ttf-parser) with `skrifa`, which is the
 #     maintained alternative the advisory itself recommends.
 #

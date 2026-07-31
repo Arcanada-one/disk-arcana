@@ -35,10 +35,20 @@ contradicted this on both counts.
    0.31.10 → 0.31.11 is semver-compatible. Lockfile-only, no manifest change.
 2. **ttf-parser** — `epaint` 0.34 dropped `ab_glyph` (and with it
    `owned_ttf_parser` → `ttf-parser`) in favour of **skrifa**, precisely the
-   maintained crate RUSTSEC-2026-0192 recommends. Bump `eframe` 0.29 → 0.34.
-   Not 0.35: 0.34 is the earliest release carrying the skrifa switch, while
-   0.35's `App`/`Panel` redesign is a much larger migration for no extra
-   security benefit.
+   maintained crate RUSTSEC-2026-0192 recommends. Bump `eframe` 0.29 → 0.34,
+   the earliest release carrying the skrifa switch.
+
+   This is a breaking GUI migration and cannot be avoided: 0.34 already replaces
+   `App::update` with the required `App::ui`, and already ships the `Panel`
+   redesign (`TopBottomPanel` is a deprecated alias, `show` → `show_inside`).
+   0.35 was evaluated and rejected — it goes further still, removing
+   `TopBottomPanel` outright, for no additional security benefit.
+
+   Because the migration is unavoidable, its behavioural deltas must be reviewed
+   rather than assumed. QA caught one: 0.34's `Panel::new` defaults `resizable`
+   to `true` where 0.29's `TopBottomPanel::new` defaulted to `false`, which made
+   the header and status bars user-draggable down to 20px. Both now pass
+   `.resizable(false)` explicitly.
 3. **spin** — 0.9.9 is unyanked and satisfies flume's `^0.9.8`. Pin it; no sqlx
    upgrade required. Restore `yanked = "warn"`.
 4. **rsa** — the one item with no upstream fix. Keep the suppression, but in
@@ -77,10 +87,21 @@ a macOS SDK — `libobjc` is unavailable — but `cargo check` covers the migrat
 
 ## Out of scope / follow-ups
 
-- **sqlx 0.9** (Dependabot #34) — retires the last suppression (`rsa`) and the
-  duplicate `flume` 0.11/0.12 entries.
-- **eframe 0.35** — deferred; `App::ui` and the `Panel` redesign warrant their
-  own task with visual QA on macOS hardware.
+- **sqlx 0.9** (Dependabot #34) — retires the last suppression (`rsa`, review
+  date 2026-11-30) and the duplicate `flume` 0.11/0.12 entries.
+- **eframe 0.35** — deferred, and genuinely optional: 0.34 already carries the
+  skrifa switch this task needed. 0.35 removes `TopBottomPanel` entirely and
+  reworks `App`/`Panel` further, so it warrants its own task.
+- **Visual QA of the GUI on macOS hardware.** The eframe 0.34 migration was
+  typechecked but never run — no macOS machine was available. The panel-resize
+  regression was caught by code review, not by execution; a second pass on real
+  hardware is warranted before the next release that ships the GUI.
+- **Compile `disk-gui` in CI.** Nothing builds it today, which is why a GUI
+  regression could reach a green pipeline at all. Adding
+  `cargo-zigbuild check -p disk-gui --all-targets --target aarch64-apple-darwin`
+  to the lint job closes this, but needs zig plus the `aarch64-apple-darwin`
+  target on the self-hosted runner — a CI-infrastructure change, deliberately
+  not bundled into a dependency-remediation PR.
 - **`cargo deny` duplicate-version warnings** (axum 0.7/0.8, windows-sys, …)
   remain warnings under `multiple-versions = "warn"`; now visible in CI since
   the full check runs.

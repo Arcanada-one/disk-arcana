@@ -268,61 +268,72 @@ impl DiskGuiApp {
     /// Top menu bar — heading, Settings, Conflicts buttons.
     fn render_top_bar(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
-        egui::Panel::top("top_bar").show_inside(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("Disk Arcana");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Settings").clicked() {
-                        self.settings_open = !self.settings_open;
-                        if self.settings_open {
-                            self.settings_edit = Some(SettingsEdit::from_settings(&self.settings));
+        // `.resizable(false)` is load-bearing: egui 0.29's `TopBottomPanel::new`
+        // defaulted `resizable` to false, while 0.34's `Panel::new` defaults it to
+        // true. Without this the header would gain a drag handle and could be
+        // dragged down to `size_range.min` (20px), clipping these buttons — and
+        // egui persists the dragged height across frames.
+        egui::Panel::top("top_bar")
+            .resizable(false)
+            .show_inside(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("Disk Arcana");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Settings").clicked() {
+                            self.settings_open = !self.settings_open;
+                            if self.settings_open {
+                                self.settings_edit =
+                                    Some(SettingsEdit::from_settings(&self.settings));
+                            }
                         }
-                    }
-                    let conflicts_label = if self.conflicts.is_empty() {
-                        "Conflicts".to_string()
-                    } else {
-                        format!("Conflicts ({})", self.conflicts.len())
-                    };
-                    if ui.button(conflicts_label).clicked() {
-                        self.conflicts_open = !self.conflicts_open;
-                        if self.conflicts_open {
-                            self.refresh_conflicts(&ctx);
+                        let conflicts_label = if self.conflicts.is_empty() {
+                            "Conflicts".to_string()
+                        } else {
+                            format!("Conflicts ({})", self.conflicts.len())
+                        };
+                        if ui.button(conflicts_label).clicked() {
+                            self.conflicts_open = !self.conflicts_open;
+                            if self.conflicts_open {
+                                self.refresh_conflicts(&ctx);
+                            }
                         }
-                    }
+                    });
                 });
             });
-        });
     }
 
     /// Bottom status bar — daemon connection indicator.
     fn render_status_bar(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::bottom("status_bar").show_inside(ui, |ui| {
-            ui.horizontal(|ui| {
-                match &self.last_error {
-                    Some(e) => {
-                        ui.colored_label(egui::Color32::RED, "●");
-                        ui.label(format!(
-                            "daemon not reachable at {}:{} — {e}",
-                            self.settings.daemon_host, self.settings.daemon_port
-                        ));
-                    }
-                    None => {
-                        if self.last_status.is_some() {
-                            ui.colored_label(egui::Color32::GREEN, "●");
-                            ui.label("daemon connected");
-                        } else {
-                            ui.colored_label(egui::Color32::GRAY, "●");
-                            ui.label("connecting…");
+        // Non-resizable for the same reason as the top bar — see `render_top_bar`.
+        egui::Panel::bottom("status_bar")
+            .resizable(false)
+            .show_inside(ui, |ui| {
+                ui.horizontal(|ui| {
+                    match &self.last_error {
+                        Some(e) => {
+                            ui.colored_label(egui::Color32::RED, "●");
+                            ui.label(format!(
+                                "daemon not reachable at {}:{} — {e}",
+                                self.settings.daemon_host, self.settings.daemon_port
+                            ));
+                        }
+                        None => {
+                            if self.last_status.is_some() {
+                                ui.colored_label(egui::Color32::GREEN, "●");
+                                ui.label("daemon connected");
+                            } else {
+                                ui.colored_label(egui::Color32::GRAY, "●");
+                                ui.label("connecting…");
+                            }
                         }
                     }
-                }
-                if self.pending_rx.is_some() {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label("polling…");
-                    });
-                }
+                    if self.pending_rx.is_some() {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label("polling…");
+                        });
+                    }
+                });
             });
-        });
     }
 
     /// Settings modal — returns `(save_clicked, cancel_clicked)`.
@@ -532,9 +543,15 @@ impl DiskGuiApp {
 impl eframe::App for DiskGuiApp {
     // eframe 0.34 replaced `App::update(&Context, ..)` with `App::ui(&mut Ui, ..)`:
     // the frame now hands the app a `Ui` to build into, and panels attach to that
-    // `Ui` via `show_inside` rather than to the context via `show`. The per-frame
-    // logic below is unchanged — only the plumbing differs. Windows (the settings
-    // and conflicts modals) are areas, not panels, so they still take the context.
+    // `Ui` via `show_inside` rather than to the context via `show`. `update` still
+    // exists but is deprecated with a no-op default, so implementing it alone would
+    // compile and then render nothing — the migration is mandatory, not cosmetic.
+    //
+    // The sequence of per-frame work below is the same as under 0.29, but the panel
+    // API is not a drop-in: 0.34 flipped the `resizable` default to true, so the top
+    // and status bars pass `.resizable(false)` explicitly to keep their 0.29
+    // behaviour. Windows (the settings and conflicts modals) are areas, not panels,
+    // so they still take the context. `CentralPanel` stays last, as egui requires.
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 
