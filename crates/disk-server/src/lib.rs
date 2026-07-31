@@ -34,7 +34,7 @@ pub mod versions;
 
 pub use acl::reload::{ReloadHandle, SessionInvalidate};
 pub use config::{CaMode, ConfigError, RegisterNodeMode, ServerConfig};
-pub use share_index::{spawn_share_index_watcher, ShareIndexHandle};
+pub use share_index::{spawn_share_index_watcher, ShareIndexError, ShareIndexHandle};
 
 pub use accounts::{
     oauth_callback, oauth_start, refresh_token, resend_verification, routes::AuthHttpState,
