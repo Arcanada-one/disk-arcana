@@ -30,18 +30,56 @@ HEALTH_URL="${DISK_ARCANA_HEALTH_URL:-http://127.0.0.1:9446/health}"
 EXPECT_INTERVAL="2min"
 EXPECT_BURST="5"
 
+BROKER="/usr/local/sbin/disk-arcana-install-unit"
 SUDO=""
 if [[ -n "${DISK_ARCANA_UNIT_DIR:-}" ]]; then
   # Test mode: writing into a throwaway directory we already own.
   :
-elif [[ "$(id -u)" -ne 0 ]]; then
-  if sudo -n true 2>/dev/null; then
-    SUDO="sudo -n"
-  else
-    printf 'ERROR: not root and no non-interactive sudo available\n' >&2
-    exit 1
-  fi
+elif [[ "$(id -u)" -eq 0 ]]; then
+  :
+elif sudo -n true 2>/dev/null; then
+  SUDO="sudo -n"
 fi
+
+# ci-runner on arcana-prod has command-scoped sudo (not blanket `sudo -n true`).
+# Read-only paths and systemctl queries work without sudo; writes go through the
+# fixed-path broker when it has been bootstrapped on the host.
+as_root() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    "$@"
+  elif [[ -n "$SUDO" ]]; then
+    $SUDO "$@"
+  else
+    printf 'ERROR: need root for: %s\n' "$*" >&2
+  fi
+}
+
+read_target() {
+  if [[ -r "$TARGET_UNIT" ]]; then
+    cat "$TARGET_UNIT"
+  else
+    as_root cat "$TARGET_UNIT"
+  fi
+}
+
+sha256_target() {
+  if [[ -r "$TARGET_UNIT" ]]; then
+    sha256sum "$TARGET_UNIT" | awk '{print $1}'
+  else
+    as_root sha256sum "$TARGET_UNIT" | awk '{print $1}'
+  fi
+}
+
+broker_install() {
+  local expected_sha
+  expected_sha="$(sha256sum "$SOURCE_UNIT" | awk '{print $1}')"
+  if [[ ! -x "$BROKER" ]]; then
+    printf 'ERROR: %s missing — bootstrap with deploy/linux/install-disk-arcana-install-unit-broker.sh (root)\n' \
+      "$BROKER" >&2
+    return 1
+  fi
+  sudo -n "$BROKER" --install "$expected_sha" "$REPO_ROOT"
+}
 
 if [[ ! -f "$SOURCE_UNIT" ]]; then
   printf 'ERROR: source unit missing: %s\n' "$SOURCE_UNIT" >&2
@@ -56,7 +94,7 @@ show_diff() {
 
   local src_sum tgt_sum
   src_sum="$(sha256sum "$SOURCE_UNIT" | awk '{print $1}')"
-  tgt_sum="$($SUDO sha256sum "$TARGET_UNIT" | awk '{print $1}')"
+  tgt_sum="$(sha256_target)"
   printf 'repo      sha256=%s\n' "$src_sum"
   printf 'installed sha256=%s\n' "$tgt_sum"
 
@@ -68,7 +106,7 @@ show_diff() {
   printf '\n--- installed %s\n+++ repo %s\n' "$TARGET_UNIT" "$SOURCE_UNIT"
   # The unit carries no secrets (those live in the EnvironmentFile), so the
   # full diff is safe to print into a job log.
-  $SUDO cat "$TARGET_UNIT" >/tmp/disk-arcana-installed-unit.$$
+  read_target >/tmp/disk-arcana-installed-unit.$$
   diff -u /tmp/disk-arcana-installed-unit.$$ "$SOURCE_UNIT" || true
   rm -f /tmp/disk-arcana-installed-unit.$$
 }
@@ -114,37 +152,71 @@ verify_loaded() {
 }
 
 # systemctl wrapper — a no-op in test mode, where there is no live unit.
+# On arcana-prod the runner may restart disk-arcana-server without sudo; reload
+# still requires root (broker or scoped sudo).
 sd() {
   if [[ -n "${DISK_ARCANA_UNIT_DIR:-}" ]]; then
     printf '(test mode) skipping: systemctl %s\n' "$*"
     return 0
   fi
-  $SUDO systemctl "$@"
+  if systemctl "$@" 2>/dev/null; then
+    return 0
+  fi
+  as_root systemctl "$@"
 }
 
 install_unit_file() {
   if [[ -n "${DISK_ARCANA_UNIT_DIR:-}" ]]; then
     install -m 0644 "$SOURCE_UNIT" "$TARGET_UNIT"
   else
-    $SUDO install -o root -g root -m 0644 "$SOURCE_UNIT" "$TARGET_UNIT"
+    as_root install -o root -g root -m 0644 "$SOURCE_UNIT" "$TARGET_UNIT"
   fi
 }
 
 do_install() {
-  local backup=""
-
   show_diff
 
+  if [[ -n "${DISK_ARCANA_UNIT_DIR:-}" ]]; then
+    local backup=""
+    if [[ -f "$TARGET_UNIT" ]]; then
+      backup="${TARGET_UNIT}.bak-$(date -u +%Y%m%dT%H%M%SZ)"
+      cp -a "$TARGET_UNIT" "$backup"
+      printf 'backup: %s\n' "$backup"
+    fi
+    install_unit_file
+    sd daemon-reload
+    printf 'installed %s and reloaded systemd\n' "$TARGET_UNIT"
+    sd restart "$UNIT_NAME"
+    if health_ok; then
+      printf 'health OK after restart\n'
+    else
+      printf 'health check FAILED after restart — rolling back\n' >&2
+      if [[ -n "$backup" ]]; then
+        cp -a "$backup" "$TARGET_UNIT"
+        sd daemon-reload
+        sd restart "$UNIT_NAME"
+      fi
+      exit 1
+    fi
+    verify_loaded
+    return
+  fi
+
+  if [[ "$(id -u)" -ne 0 && -z "$SUDO" ]]; then
+    broker_install
+    return
+  fi
+
+  local backup=""
   if [[ -f "$TARGET_UNIT" ]]; then
     backup="${TARGET_UNIT}.bak-$(date -u +%Y%m%dT%H%M%SZ)"
-    $SUDO cp -a "$TARGET_UNIT" "$backup"
+    as_root cp -a "$TARGET_UNIT" "$backup"
     printf 'backup: %s\n' "$backup"
   fi
 
   install_unit_file
   sd daemon-reload
   printf 'installed %s and reloaded systemd\n' "$TARGET_UNIT"
-
   sd restart "$UNIT_NAME"
 
   if health_ok; then
@@ -152,7 +224,7 @@ do_install() {
   else
     printf 'health check FAILED after restart — rolling back\n' >&2
     if [[ -n "$backup" ]]; then
-      $SUDO cp -a "$backup" "$TARGET_UNIT"
+      as_root cp -a "$backup" "$TARGET_UNIT"
       sd daemon-reload
       sd restart "$UNIT_NAME"
       if health_ok; then
