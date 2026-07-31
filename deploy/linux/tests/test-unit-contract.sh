@@ -81,17 +81,27 @@ if [[ "$failures" -eq 0 ]]; then
   if command -v systemd-analyze >/dev/null 2>&1; then
     canonical_output="$(systemd-analyze verify "$UNIT_FILE" 2>&1 || true)"
     fixture_output="$(systemd-analyze verify "$FIXTURE_FILE" 2>&1 || true)"
+    systemd_major="$(
+      systemd-analyze --version 2>/dev/null |
+        sed -n 's/^systemd \([0-9][0-9]*\).*/\1/p' |
+        head -1
+    )"
 
-    if grep -Fqi 'Unknown key' <<<"$canonical_output"; then
-      fail "systemd-analyze reports an unknown key in the canonical unit"
-    else
-      pass "systemd-analyze reports no unknown key in the canonical unit"
-    fi
+    if [[ -n "$systemd_major" && "$systemd_major" -ge 230 ]]; then
+      if grep -Fqi 'Unknown key' <<<"$canonical_output"; then
+        fail "systemd-analyze reports an unknown key in the canonical unit"
+      else
+        pass "systemd-analyze reports no unknown key in the canonical unit"
+      fi
 
-    if grep -Fqi 'Unknown key' <<<"$fixture_output"; then
-      pass "systemd-analyze rejects the invalid-placement fixture"
+      if grep -Fqi 'Unknown key' <<<"$fixture_output"; then
+        pass "systemd-analyze rejects the invalid-placement fixture"
+      else
+        fail "systemd-analyze did not distinguish the invalid-placement fixture"
+      fi
     else
-      fail "systemd-analyze did not distinguish the invalid-placement fixture"
+      printf 'WARN  systemd %s < 230: skip analyzer placement checks; structural checks remain enforced\n' \
+        "${systemd_major:-unknown}"
     fi
   else
     printf 'WARN  systemd-analyze unavailable; structural checks remain enforced\n'
