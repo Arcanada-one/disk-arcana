@@ -4,7 +4,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 use std::time::Duration;
 
-use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
+use mdns_sd::{ResolvedService, ScopedIp, ServiceDaemon, ServiceEvent, ServiceInfo};
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
@@ -79,7 +79,7 @@ async fn run_lan_discovery(
     tokio::task::spawn_blocking(move || {
         while let Ok(event) = receiver.recv_timeout(Duration::from_secs(1)) {
             if let ServiceEvent::ServiceResolved(info) = event {
-                if let Some(peer) = peer_from_service(&info) {
+                if let Some(peer) = peer_from_resolved(&info) {
                     let _ = peer_tx.blocking_send(peer);
                 }
             }
@@ -109,18 +109,18 @@ async fn run_lan_discovery(
     Ok(())
 }
 
-fn peer_from_service(info: &ServiceInfo) -> Option<LanPeer> {
+fn peer_from_resolved(info: &ResolvedService) -> Option<LanPeer> {
     let props = info.get_properties();
     let node_id = props.get("node_id")?.val_str().to_string();
     let host = info
-        .get_addresses()
+        .addresses
         .iter()
-        .find_map(|ip| match ip {
-            IpAddr::V4(v4) if !v4.is_loopback() => Some(v4.to_string()),
+        .find_map(|scoped| match scoped {
+            ScopedIp::V4(v4) if !v4.addr().is_loopback() => Some(v4.addr().to_string()),
             _ => None,
         })
-        .or_else(|| info.get_hostname().strip_suffix('.').map(str::to_string))?;
-    let port = info.get_port();
+        .or_else(|| info.host.strip_suffix('.').map(str::to_string))?;
+    let port = info.port;
     let tenant_id = props
         .get("tenant_id")
         .map(|p| p.val_str().to_string())
@@ -158,8 +158,13 @@ pub fn parse_server_port(address: &str) -> u16 {
 mod tests {
     use super::*;
 
+    /// Covers the live discovery path. mdns-sd 0.20 delivers
+    /// `ServiceEvent::ServiceResolved(ResolvedService)` rather than the 0.13-era
+    /// `ServiceInfo`, so this asserts against `peer_from_resolved` — the function
+    /// `run_lan_discovery` actually calls. `as_resolved_service` performs the same
+    /// conversion the daemon does, keeping the fixture honest.
     #[test]
-    fn peer_from_service_reads_txt() {
+    fn peer_from_resolved_reads_txt() {
         let props = [
             ("node_id", "laptop-1"),
             ("grpc_port", "9443"),
@@ -174,9 +179,10 @@ mod tests {
             &props[..],
         )
         .unwrap();
-        let peer = peer_from_service(&info).unwrap();
+        let peer = peer_from_resolved(&info.as_resolved_service()).unwrap();
         assert_eq!(peer.node_id, "laptop-1");
         assert_eq!(peer.host, "192.168.1.10");
+        assert_eq!(peer.port, 9447);
         assert_eq!(peer.tenant_id.as_deref(), Some("corp"));
     }
 
