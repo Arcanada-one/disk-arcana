@@ -130,6 +130,8 @@ jobs:
         run: bash scripts/ci-ensure-actionlint.sh --run
       - name: systemd unit contract (INFRA-0370)
         run: bash deploy/linux/tests/test-unit-contract.sh
+      - name: systemd unit installer (INFRA-0370)
+        run: bash deploy/linux/tests/test-install-unit.sh
 
   test:
     name: Test (linux)

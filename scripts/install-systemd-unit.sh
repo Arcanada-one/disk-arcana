@@ -19,8 +19,11 @@ REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 
 UNIT_NAME="disk-arcana-server.service"
 SOURCE_UNIT="$REPO_ROOT/deploy/linux/$UNIT_NAME"
-TARGET_UNIT="/etc/systemd/system/$UNIT_NAME"
-HEALTH_URL="http://127.0.0.1:9446/health"
+# Overridable so the diff/backup/rollback logic can be exercised against a
+# throwaway directory in tests. Production runs leave these unset.
+TARGET_DIR="${DISK_ARCANA_UNIT_DIR:-/etc/systemd/system}"
+TARGET_UNIT="$TARGET_DIR/$UNIT_NAME"
+HEALTH_URL="${DISK_ARCANA_HEALTH_URL:-http://127.0.0.1:9446/health}"
 
 # Expected loaded values. systemd normalises StartLimitIntervalSec=120s to
 # "2min" in `systemctl show` output.
@@ -28,7 +31,10 @@ EXPECT_INTERVAL="2min"
 EXPECT_BURST="5"
 
 SUDO=""
-if [[ "$(id -u)" -ne 0 ]]; then
+if [[ -n "${DISK_ARCANA_UNIT_DIR:-}" ]]; then
+  # Test mode: writing into a throwaway directory we already own.
+  :
+elif [[ "$(id -u)" -ne 0 ]]; then
   if sudo -n true 2>/dev/null; then
     SUDO="sudo -n"
   else
@@ -69,7 +75,7 @@ show_diff() {
 
 health_ok() {
   local body status
-  for _ in $(seq 1 12); do
+  for _ in $(seq 1 "${DISK_ARCANA_HEALTH_RETRIES:-12}"); do
     if body="$(curl -sf --max-time 10 "$HEALTH_URL" 2>/dev/null)"; then
       status="$(jq -r '.status // empty' <<<"$body" 2>/dev/null || true)"
       if [[ "$status" == "ok" ]]; then
@@ -84,6 +90,10 @@ health_ok() {
 
 verify_loaded() {
   local interval burst restart
+  if [[ -n "${DISK_ARCANA_UNIT_DIR:-}" ]]; then
+    printf '(test mode) skipping loaded-policy verification\n'
+    return 0
+  fi
   interval="$(systemctl show "$UNIT_NAME" -p StartLimitIntervalUSec --value)"
   burst="$(systemctl show "$UNIT_NAME" -p StartLimitBurst --value)"
   restart="$(systemctl show "$UNIT_NAME" -p Restart --value)"
@@ -103,6 +113,23 @@ verify_loaded() {
   return "$bad"
 }
 
+# systemctl wrapper — a no-op in test mode, where there is no live unit.
+sd() {
+  if [[ -n "${DISK_ARCANA_UNIT_DIR:-}" ]]; then
+    printf '(test mode) skipping: systemctl %s\n' "$*"
+    return 0
+  fi
+  $SUDO systemctl "$@"
+}
+
+install_unit_file() {
+  if [[ -n "${DISK_ARCANA_UNIT_DIR:-}" ]]; then
+    install -m 0644 "$SOURCE_UNIT" "$TARGET_UNIT"
+  else
+    $SUDO install -o root -g root -m 0644 "$SOURCE_UNIT" "$TARGET_UNIT"
+  fi
+}
+
 do_install() {
   local backup=""
 
@@ -114,11 +141,11 @@ do_install() {
     printf 'backup: %s\n' "$backup"
   fi
 
-  $SUDO install -o root -g root -m 0644 "$SOURCE_UNIT" "$TARGET_UNIT"
-  $SUDO systemctl daemon-reload
+  install_unit_file
+  sd daemon-reload
   printf 'installed %s and reloaded systemd\n' "$TARGET_UNIT"
 
-  $SUDO systemctl restart "$UNIT_NAME"
+  sd restart "$UNIT_NAME"
 
   if health_ok; then
     printf 'health OK after restart\n'
@@ -126,8 +153,8 @@ do_install() {
     printf 'health check FAILED after restart — rolling back\n' >&2
     if [[ -n "$backup" ]]; then
       $SUDO cp -a "$backup" "$TARGET_UNIT"
-      $SUDO systemctl daemon-reload
-      $SUDO systemctl restart "$UNIT_NAME"
+      sd daemon-reload
+      sd restart "$UNIT_NAME"
       if health_ok; then
         printf 'rolled back to %s; service healthy again\n' "$backup" >&2
       else
