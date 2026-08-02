@@ -14,6 +14,16 @@ _done() {
   fi
 }
 
+# A prior workflow step may have selected the Zig fallback and persisted its
+# capability marker. Its `cc` wrapper is intentionally on PATH, so do not
+# mistake that wrapper for a native linker when this file is sourced again.
+if [[ "${CI_LINKER_BOOTSTRAP:-}" == "zig" ]]; then
+  if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    exit 0
+  fi
+  return 0
+fi
+
 if command -v cc >/dev/null 2>&1; then
   cc --version | head -1
   export CI_LINKER_BOOTSTRAP=native

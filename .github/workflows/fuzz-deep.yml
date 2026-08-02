@@ -51,6 +51,10 @@ jobs:
         working-directory: fuzz
         run: |
           set -euo pipefail
+          if [[ "${CI_LINKER_BOOTSTRAP:-native}" == "zig" ]]; then
+            echo "SKIP deep fuzz: libfuzzer ASAN link requires native g++ on this runner"
+            exit 0
+          fi
           source ../scripts/ci-ensure-cc.sh
           if [[ "${CI_LINKER_BOOTSTRAP:-native}" == "zig" ]]; then
             echo "SKIP deep fuzz: libfuzzer ASAN link requires native g++ on this runner"
