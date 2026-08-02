@@ -886,19 +886,17 @@ async fn ensure_client_session(
         }
     }
 
-    if client.session_token().await.is_err() {
-        if client.api_key.is_some() {
-            match client.authenticate().await {
-                Ok(_) => {
-                    tracing::info!(share = %share_name, "sync-loop: authenticated with server");
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        share = %share_name,
-                        error = %e,
-                        "sync-loop: authenticate() failed"
-                    );
-                }
+    if client.session_token().await.is_err() && client.api_key.is_some() {
+        match client.authenticate().await {
+            Ok(_) => {
+                tracing::info!(share = %share_name, "sync-loop: authenticated with server");
+            }
+            Err(e) => {
+                tracing::warn!(
+                    share = %share_name,
+                    error = %e,
+                    "sync-loop: authenticate() failed"
+                );
             }
         }
     }
