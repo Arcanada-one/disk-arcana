@@ -12,13 +12,13 @@ _done() {
   if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     exit 0
   fi
-  return 0
 }
 
 if command -v cc >/dev/null 2>&1; then
   cc --version | head -1
   export CI_LINKER_BOOTSTRAP=native
   _done
+  return 0
 fi
 
 if command -v gcc >/dev/null 2>&1; then
@@ -39,6 +39,7 @@ if command -v gcc >/dev/null 2>&1; then
     echo "${_cc_bin}" >>"$GITHUB_PATH"
   fi
   _done
+  return 0
 fi
 
 # Self-hosted cc-less pool: prefer real gcc (zig cc breaks zstd .S assembly).
@@ -55,6 +56,7 @@ if command -v gcc >/dev/null 2>&1; then
   gcc --version | head -1
   export CI_LINKER_BOOTSTRAP=native
   _done
+  return 0
 fi
 
 ZIG_VER=0.13.0
