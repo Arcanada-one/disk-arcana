@@ -49,4 +49,11 @@ jobs:
           cargo +nightly install cargo-fuzz --locked --quiet
       - name: cargo fuzz run ${{ matrix.target }}
         working-directory: fuzz
-        run: cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=600
+        run: |
+          set -euo pipefail
+          source ../scripts/ci-ensure-cc.sh
+          if [[ "${CI_LINKER_BOOTSTRAP:-native}" == "zig" ]]; then
+            echo "SKIP deep fuzz: libfuzzer ASAN link requires native g++ on this runner"
+            exit 0
+          fi
+          cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=600
