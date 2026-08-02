@@ -313,10 +313,11 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
             // Build a DiskClient with bounded connect-retry.
             //
             // A transient connect failure (e.g. server starts after the client
-            // task is spawned) must not abort the sync task — the task retries
-            // with backoff up to MAX_CONNECT_ATTEMPTS before marking the share
-            // server_unreachable.
-            const MAX_CONNECT_ATTEMPTS: u32 = 8;
+            // task is spawned, or a supervised server restart during a mesh
+            // window) must not abort the sync task — retry indefinitely with
+            // capped exponential backoff (DISK-0067: permanent exit caused Mac
+            // mesh death after agents user-unit restart).
+            const CONNECT_WARN_EVERY: u32 = 8;
             let mut connect_delay = Duration::from_secs(1);
             const CONNECT_DELAY_CAP: Duration = Duration::from_secs(30);
 
@@ -337,34 +338,22 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
                         Ok(c) => break c,
                         Err(e) => {
                             attempt += 1;
-                            if attempt >= MAX_CONNECT_ATTEMPTS {
+                            if attempt == 1 || attempt % CONNECT_WARN_EVERY == 0 {
                                 tracing::warn!(
                                     share = %share_name,
                                     error = %e,
                                     attempts = attempt,
-                                    "sync-loop: could not connect after {MAX_CONNECT_ATTEMPTS} \
-                                     attempts; share will not sync"
+                                    "sync-loop: connect failed; retrying with backoff"
                                 );
-                                let unreachable_snap = build_live_snapshot(
-                                    &share_name,
-                                    share_path.clone(),
-                                    declared_direction,
-                                    LoopState::ServerUnreachable,
-                                    None,
-                                    Some(e.to_string()),
+                            } else {
+                                tracing::debug!(
+                                    share = %share_name,
+                                    attempt,
+                                    delay_ms = connect_delay.as_millis(),
+                                    error = %e,
+                                    "sync-loop: connect failed; retrying"
                                 );
-                                state_for_task
-                                    .update_share(&share_name, unreachable_snap)
-                                    .await;
-                                return;
                             }
-                            tracing::debug!(
-                                share = %share_name,
-                                attempt,
-                                delay_ms = connect_delay.as_millis(),
-                                error = %e,
-                                "sync-loop: connect failed; retrying"
-                            );
                             // Write server_unreachable during the retry window so
                             // /status does not stay frozen at idle.
                             let retrying_snap = build_live_snapshot(
@@ -385,73 +374,8 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
                 }
             };
 
-            // Authenticate with the server so ExchangeState and other
-            // session-gated RPCs succeed.
-            //
-            // Preferred path: reuse a persisted api_key (survives daemon
-            // restart). Fallback: register_node (first enrollment only —
-            // subsequent calls return AlreadyExists on the current server).
-            //
-            // A failure here is non-fatal: the loop proceeds; individual
-            // iterations surface Unauthenticated → TransportUnavailable →
-            // backoff → retry, which is the correct degraded behaviour.
-            let mut client = client; // make mutable so we can set api_key
-            let persisted = std::fs::read_to_string(&api_key_path)
-                .ok()
-                .map(|s| s.trim().to_owned())
-                .filter(|s| !s.is_empty());
-            let api_key = if let Some(key) = persisted {
-                Some(key)
-            } else {
-                match client.register_node(&node_id_for_loop, "disk-daemon").await {
-                    Ok(key) => {
-                        if let Err(e) = std::fs::write(&api_key_path, &key) {
-                            tracing::warn!(
-                                share = %share_name,
-                                path = %api_key_path.display(),
-                                error = %e,
-                                "sync-loop: could not persist api_key; restart will re-register"
-                            );
-                        } else {
-                            #[cfg(unix)]
-                            {
-                                use std::os::unix::fs::PermissionsExt;
-                                let _ = std::fs::set_permissions(
-                                    &api_key_path,
-                                    std::fs::Permissions::from_mode(0o600),
-                                );
-                            }
-                        }
-                        Some(key)
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            share = %share_name,
-                            error = %e,
-                            "sync-loop: register_node() failed; ExchangeState will be unauthenticated"
-                        );
-                        None
-                    }
-                }
-            };
-            if let Some(api_key) = api_key {
-                client.api_key = Some(api_key);
-                match client.authenticate().await {
-                    Ok(_token) => {
-                        tracing::info!(
-                            share = %share_name,
-                            "sync-loop: authenticated with server"
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            share = %share_name,
-                            error = %e,
-                            "sync-loop: authenticate() failed; iterations will retry"
-                        );
-                    }
-                }
-            }
+            let mut client = client;
+            ensure_client_session(&mut client, &api_key_path, &share_name).await;
 
             let mut loop_sm = SyncLoop::new();
             let mut rng = StdRng::from_os_rng();
@@ -473,6 +397,11 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
                     LoopTrigger::Manual => "manual",
                     LoopTrigger::FsEventBatch => "fs_event",
                 };
+
+                // Re-load api_key / session each iteration so sibling share
+                // tasks (same node_id, shared api_key file) recover after a
+                // mesh restart without requiring a daemon kickstart (DISK-0067).
+                ensure_client_session(&mut client, &api_key_path, &share_name).await;
 
                 // Write a syncing snapshot before run_iteration so a fast
                 // iteration still surfaces "syncing" to GET /status callers.
@@ -906,6 +835,78 @@ async fn wait_for_terminate_signal(tx: tokio::sync::oneshot::Sender<()>) {
 /// When both `client_cert_pem` and `client_key_pem` are `Some`, the channel
 /// presents the client certificate during the mTLS handshake.  A partial pair
 /// degrades to one-way TLS (see `ClientConfig` docs).
+/// Ensure the per-share client has a persisted api_key and live session token.
+///
+/// Share tasks for the same node_id run concurrently and share one api_key file.
+/// A sibling may persist the key after this task's one-shot startup auth failed;
+/// re-attempt each sync iteration (DISK-0067 hermes-only `server_unreachable`).
+async fn ensure_client_session(
+    client: &mut disk_client::connection::DiskClient,
+    api_key_path: &std::path::Path,
+    share_name: &str,
+) {
+    if client.api_key.is_none() {
+        if let Ok(raw) = std::fs::read_to_string(api_key_path) {
+            let key = raw.trim().to_owned();
+            if !key.is_empty() {
+                client.api_key = Some(key);
+            }
+        }
+    }
+
+    if client.api_key.is_none() {
+        match client
+            .register_node(&client.node_id, "disk-daemon")
+            .await
+        {
+            Ok(key) => {
+                if let Err(e) = std::fs::write(api_key_path, &key) {
+                    tracing::warn!(
+                        share = %share_name,
+                        path = %api_key_path.display(),
+                        error = %e,
+                        "sync-loop: could not persist api_key"
+                    );
+                } else {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let _ = std::fs::set_permissions(
+                            api_key_path,
+                            std::fs::Permissions::from_mode(0o600),
+                        );
+                    }
+                }
+                client.api_key = Some(key);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    share = %share_name,
+                    error = %e,
+                    "sync-loop: register_node() failed"
+                );
+            }
+        }
+    }
+
+    if client.session_token().await.is_err() {
+        if client.api_key.is_some() {
+            match client.authenticate().await {
+                Ok(_) => {
+                    tracing::info!(share = %share_name, "sync-loop: authenticated with server");
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        share = %share_name,
+                        error = %e,
+                        "sync-loop: authenticate() failed"
+                    );
+                }
+            }
+        }
+    }
+}
+
 async fn build_disk_client(
     endpoint: String,
     ca_pem: Option<Vec<u8>>,
