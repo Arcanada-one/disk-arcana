@@ -855,10 +855,7 @@ async fn ensure_client_session(
     }
 
     if client.api_key.is_none() {
-        match client
-            .register_node(&client.node_id, "disk-daemon")
-            .await
-        {
+        match client.register_node(&client.node_id, "disk-daemon").await {
             Ok(key) => {
                 if let Err(e) = std::fs::write(api_key_path, &key) {
                     tracing::warn!(
