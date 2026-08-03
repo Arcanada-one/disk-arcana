@@ -134,6 +134,8 @@ jobs:
         run: bash deploy/linux/tests/test-unit-contract.sh
       - name: systemd unit installer (INFRA-0370)
         run: bash deploy/linux/tests/test-install-unit.sh
+      - name: manifest-bound bundle preflight (INFRA-0370)
+        run: bash deploy/linux/tests/test-bundle-manifest.sh
 
   test:
     name: Test (linux)
