@@ -1,14 +1,13 @@
 self-hosted-runner:
   # Custom labels for the org-level self-hosted runners used by deploy jobs.
   # Declared here so actionlint does not flag them as unknown runner labels.
-  # Kept in sync with the registered runners of the Arcanada-one org
-  # (`gh api orgs/Arcanada-one/actions/runners`). `arcana-dev` is retained only
-  # because release-deploy.yml still targets it — no runner carries that label
-  # today (the dev pool is `arcana-devs`/`dev`), so that job cannot be picked up.
+  # Keep this list in sync with the registered runners of the Arcanada-one org
+  # (`gh api orgs/Arcanada-one/actions/runners`). The dev pool is
+  # `arcana-devs`/`dev`; retaining a dead label here would let actionlint accept
+  # a workflow that GitHub Actions can never schedule.
   labels:
     - Linux
     - X64
-    - arcana-dev
     - arcana-devs
     - arcana-prod
     - arcana-prod-ci
