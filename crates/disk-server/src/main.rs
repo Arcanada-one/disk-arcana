@@ -176,6 +176,21 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    // DISK-0070: SyncService serves any share absent from `share_roots` out of
+    // `sync_root`, but the watcher above only covers declared roots. Such a
+    // share reads fine and is never indexed, so clients pull nothing while both
+    // ends report success. Make that gap loud instead of silent — it is the
+    // configuration that unserved `datarim-kb` on arcana-agents.
+    if disk_server::sync_root_is_unwatched(&cfg.share_roots, &cfg.sync_root) {
+        tracing::warn!(
+            sync_root = %cfg.sync_root.display(),
+            declared_shares = cfg.share_roots.len(),
+            "DISK_SYNC_ROOT is not covered by DISK_SHARE_ROOTS — shares falling \
+             back to it are served for reads but NOT watched; add them to \
+             DISK_SHARE_ROOTS or their changes will never reach clients"
+        );
+    }
+
     let meta_router = match &cfg.tenant_db_dir {
         Some(dir) => disk_core::TenantMetaRouter::split(control_meta.clone(), dir.clone()),
         None => disk_core::TenantMetaRouter::single(control_meta.clone()),
