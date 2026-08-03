@@ -67,7 +67,11 @@ if grep -q '^DISK_SHARE_ROOTS=' "$ENV_FILE" 2>/dev/null; then
     if grep -q "hermes-artefacts" "$ENV_FILE"; then
       log "DISK_SHARE_ROOTS already mentions hermes-artefacts — leaving env unchanged"
     else
-      sed -i "s|^DISK_SHARE_ROOTS=.*|DISK_SHARE_ROOTS=${SHARE_ROOTS_LINE}|" "$ENV_FILE"
+      # Append to the comma-separated list; a bare replace would drop every
+      # share already declared there (DISK-0070: this silently unserved
+      # `datarim-kb`, whose watcher then never armed while both the server
+      # health endpoint and the client status kept reporting success).
+      sed -i "s|^DISK_SHARE_ROOTS=\(.*\)|DISK_SHARE_ROOTS=\1,${SHARE_ROOTS_LINE}|" "$ENV_FILE"
     fi
   fi
 else
