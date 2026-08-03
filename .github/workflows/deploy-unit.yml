@@ -22,6 +22,10 @@ on:
           - arcana-prod
           - arcana-prod-ci
           - arcana-devs
+          # DISK-0070: the canon Datarim KB host. Its server runs as a *user*
+          # unit and its share config lived only in a hand-made drop-in, so it
+          # was unreachable by any delivery path — see the share-drop-in steps.
+          - arcana-agents
       mode:
         description: dry-run diffs only; install writes the unit and restarts
         type: choice
@@ -45,7 +49,11 @@ jobs:
       - name: Unit contract (must hold before touching the host)
         run: bash deploy/linux/tests/test-unit-contract.sh
 
+      # DISK-0070: arcana-agents runs the server as a *user* unit, so the
+      # system-unit installer below does not apply there. Its delivery is the
+      # share drop-in steps at the end of this job.
       - name: Diff repo unit against installed unit
+        if: inputs.target != 'arcana-agents'
         run: bash scripts/install-systemd-unit.sh --dry-run
 
       - name: Report unit-delivery broker status
@@ -73,12 +81,32 @@ jobs:
           exit 1
 
       - name: Install unit, restart, health-check, roll back on failure
-        if: inputs.mode == 'install'
+        if: inputs.mode == 'install' && inputs.target != 'arcana-agents'
         run: bash scripts/install-systemd-unit.sh --install
 
       - name: Verify loaded restart policy
-        if: inputs.mode == 'install'
+        if: inputs.mode == 'install' && inputs.target != 'arcana-agents'
         run: bash scripts/install-systemd-unit.sh --verify
+
+      # DISK-0070: share drop-in delivery for the user-scope server on
+      # arcana-agents. The contract inside the installer refuses any drop-in
+      # that leaves DISK_SYNC_ROOT unwatched, so a repeat of the silent
+      # non-replication cannot be shipped from here.
+      - name: Share drop-in contract
+        if: inputs.target == 'arcana-agents'
+        run: bash deploy/linux/tests/test-user-share-dropin.sh
+
+      - name: Diff share drop-in against installed copy
+        if: inputs.target == 'arcana-agents'
+        run: bash deploy/linux/install-user-share-dropin.sh
+
+      - name: Install share drop-in and restart the user unit
+        if: inputs.target == 'arcana-agents' && inputs.mode == 'install'
+        run: bash deploy/linux/install-user-share-dropin.sh --install
+
+      - name: Verify loaded share roots
+        if: inputs.target == 'arcana-agents' && inputs.mode == 'install'
+        run: bash deploy/linux/install-user-share-dropin.sh --verify
 
       - name: Summary
         if: always()
