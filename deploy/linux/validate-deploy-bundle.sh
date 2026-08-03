@@ -110,6 +110,13 @@ done
 
 [[ -n "$ROOT" ]] || die "--root is required"
 
+# Prefix relative roots so a directory whose name begins with '-' cannot be
+# parsed as a find expression. Keep the caller's path semantics while making
+# the traversal argument unambiguously a path.
+if [[ "$ROOT" != /* ]]; then
+  ROOT="$PWD/$ROOT"
+fi
+
 if [[ "$MODE" == create ]]; then
   [[ -n "$COMMIT" ]] || die "create requires --commit"
   [[ -z "$EXPECTED_COMMIT" ]] || die "create does not accept --expected-commit"
@@ -150,12 +157,31 @@ validate_regular_member() {
 }
 
 validate_inventory() {
-  local path member
+  local path member inventory_status inventory_marker inventory_count i
+  local -a inventory=()
 
   # Only the fixed top-level members plus the generated manifest are allowed.
   # find does not follow symlinks here; a symlink with an allowed name is
   # rejected by validate_regular_member below.
-  while IFS= read -r -d '' path; do
+  # Keep the traversal result out of the bundle itself. The marker is emitted
+  # only after find exits successfully, so process-substitution status cannot
+  # turn an enumeration failure into an accepted partial inventory.
+  inventory_marker="__disk_arcana_inventory_success__"
+  inventory_status=0
+  mapfile -d '' -t inventory < <(
+    find "$ROOT" -mindepth 1 -maxdepth 1 -print0 || inventory_status=$?
+    if (( inventory_status == 0 )); then
+      printf '%s\0' "$inventory_marker"
+    fi
+  )
+  inventory_count=${#inventory[@]}
+  if (( inventory_count == 0 )) ||
+    [[ "${inventory[$((inventory_count - 1))]}" != "$inventory_marker" ]]; then
+    die "could not enumerate bundle inventory"
+  fi
+
+  for ((i = 0; i < inventory_count - 1; i++)); do
+    path="${inventory[i]}"
     member="${path##*/}"
     if [[ "$member" == "$MANIFEST_NAME" ]]; then
       continue
@@ -163,7 +189,7 @@ validate_inventory() {
     if ! is_required_member "$member"; then
       die "extra top-level bundle member: $member"
     fi
-  done < <(find "$ROOT" -mindepth 1 -maxdepth 1 -print0)
+  done
 
   for member in "${REQUIRED_MEMBERS[@]}"; do
     if [[ ! -e "$ROOT/$member" && ! -L "$ROOT/$member" ]]; then
