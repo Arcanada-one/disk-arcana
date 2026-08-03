@@ -80,6 +80,19 @@ impl Drop for ShareIndexHandle {
     }
 }
 
+/// Whether `sync_root` is left without a `share_index` watcher.
+///
+/// DISK-0070: `SyncService::root_for` serves any share missing from
+/// `share_roots` out of `sync_root`, but the watcher only covers declared
+/// roots. Such a share reads correctly and is never indexed, so clients pull
+/// nothing while the server health endpoint and the client status both report
+/// success. Callers use this to log the gap loudly at startup.
+///
+/// Returns `true` when no declared root points at `sync_root`.
+pub fn sync_root_is_unwatched(share_roots: &HashMap<String, PathBuf>, sync_root: &Path) -> bool {
+    !share_roots.values().any(|root| root == sync_root)
+}
+
 /// Spawn a debounced watcher over every configured share root. No-op when
 /// `share_roots` is empty.
 pub fn spawn_share_index_watcher(
