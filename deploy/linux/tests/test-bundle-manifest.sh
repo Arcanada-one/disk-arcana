@@ -35,6 +35,13 @@ run_validator() {
   bash "$VALIDATOR" "$@"
 }
 
+run_validator_from_workdir() {
+  (
+    cd "$WORK"
+    bash "$VALIDATOR" "$@"
+  )
+}
+
 snapshot_tree() {
   local root="$1"
   (
@@ -158,6 +165,39 @@ if run_validator verify --root "$BASE" --expected-commit "$EXPECTED_COMMIT"; the
   pass "valid bundle passes manifest and commit preflight"
 else
   fail "valid bundle does not pass manifest and commit preflight"
+fi
+
+if TMPDIR="$BASE" run_validator verify --root "$BASE" --expected-commit "$EXPECTED_COMMIT"; then
+  pass "bundle remains valid when TMPDIR is the bundle root"
+else
+  fail "TMPDIR inside the bundle root changed valid verification"
+fi
+
+printf '\n# relative dash-prefixed root must fail closed\n'
+rm -rf "$WORK/-bundle"
+cp -a "$BASE" "$WORK/-bundle"
+printf 'unexpected\n' >"$WORK/-bundle/unexpected"
+before="$(snapshot_tree "$WORK/-bundle")"
+set +e
+run_validator_from_workdir verify --root "-bundle" --expected-commit "$EXPECTED_COMMIT" \
+  >"$WORK/relative-dash-root.log" 2>&1
+status=$?
+set -e
+if (( status != 0 )); then
+  pass "dash-prefixed relative root rejects an extra member"
+else
+  fail "dash-prefixed relative root accepted an extra member"
+fi
+if grep -Fq 'extra top-level bundle member: unexpected' "$WORK/relative-dash-root.log"; then
+  pass "dash-prefixed relative root reports the extra member"
+else
+  fail "dash-prefixed relative root failed for the wrong reason"
+fi
+after="$(snapshot_tree "$WORK/-bundle")"
+if [[ "$before" == "$after" ]]; then
+  pass "dash-prefixed relative root leaves the target tree unchanged"
+else
+  fail "dash-prefixed relative root mutated the target tree"
 fi
 
 printf '\n# rejection and zero-mutation cases\n'
