@@ -446,3 +446,90 @@ async fn ac3_read_failure_on_to_upload_entry_does_not_crash_execute() {
         "only the readable file should have reached delta_upload"
     );
 }
+
+// ---------------------------------------------------------------------------
+// DISK-0079: a receive_only share must never upload.
+// ---------------------------------------------------------------------------
+
+/// The server may send `to_upload` entries regardless of what the client
+/// declared. Before this guard the client executed them unconditionally:
+/// measured on the Mac follower, a share configured `receive_only` produced
+/// 230 `upload skipped: cannot read local file` warnings — it was building and
+/// executing an upload list for a share that must never write to canon. Those
+/// reads happened to fail (transient rsync temp paths), so nothing reached the
+/// server; had the files existed, the follower would have uploaded them.
+///
+/// The stub counts `delta_upload` calls, so this asserts the wire was never
+/// touched — not merely that a warning was logged.
+#[tokio::test]
+async fn receive_only_share_never_calls_delta_upload() {
+    let scan_root = tempdir().expect("tempdir");
+    let local_path = scan_root.path().join(PROBE_PATH);
+    std::fs::write(&local_path, FILE_CONTENT).expect("write sentinel");
+
+    // The file EXISTS, so a failure to upload cannot be blamed on a bad read —
+    // only the direction guard can stop it.
+    let cycle = SyncStateResponse {
+        to_upload: vec![FileMetadata {
+            path: PROBE_PATH.into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let fx = spawn_stub(vec![cycle], /* reject_uploads */ false).await;
+    let client = connect(&fx).await;
+
+    let mut transport = RemoteSync::with_scan_root(
+        &client,
+        SHARE_NAME,
+        scan_root.path().to_path_buf(),
+        "receive-only-node",
+    )
+    .with_declared_direction(disk_client::config::schema::Direction::ReceiveOnly);
+
+    transport.execute().await.expect("cycle must succeed");
+
+    assert_eq!(
+        fx.upload_call_count.load(Ordering::SeqCst),
+        0,
+        "a receive_only share must not call delta_upload even once"
+    );
+    assert!(
+        local_path.exists(),
+        "the local file must be untouched by the refusal"
+    );
+}
+
+/// The guard must be narrow: a bidirectional share still uploads. Without this
+/// the previous test could be satisfied by breaking uploads outright.
+#[tokio::test]
+async fn bidirectional_share_still_uploads() {
+    let scan_root = tempdir().expect("tempdir");
+    std::fs::write(scan_root.path().join(PROBE_PATH), FILE_CONTENT).expect("write sentinel");
+
+    let cycle = SyncStateResponse {
+        to_upload: vec![FileMetadata {
+            path: PROBE_PATH.into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let fx = spawn_stub(vec![cycle], /* reject_uploads */ false).await;
+    let client = connect(&fx).await;
+
+    let mut transport = RemoteSync::with_scan_root(
+        &client,
+        SHARE_NAME,
+        scan_root.path().to_path_buf(),
+        "bidi-node",
+    )
+    .with_declared_direction(disk_client::config::schema::Direction::Bidirectional);
+
+    transport.execute().await.expect("cycle must succeed");
+
+    assert_eq!(
+        fx.upload_call_count.load(Ordering::SeqCst),
+        1,
+        "a bidirectional share must still upload"
+    );
+}
