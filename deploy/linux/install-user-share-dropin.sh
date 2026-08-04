@@ -23,6 +23,20 @@ DROPIN_SRC="${DISK_DROPIN_SRC:-}"
 DROPIN_DIR="${DISK_DROPIN_DIR:-}"
 MODE="dry-run"
 
+# Resolve a user's home without assuming `getent` exists (absent on macOS,
+# where these scripts are edited and unit-tested).
+owner_home_of() {
+  local user="$1" home
+  if command -v getent >/dev/null 2>&1; then
+    home="$(getent passwd "$user" 2>/dev/null | cut -d: -f6)"
+  fi
+  if [[ -z "${home:-}" ]]; then
+    home="$(eval printf '%s' "~$user" 2>/dev/null)"
+    [[ "$home" == "~$user" ]] && home=""
+  fi
+  printf '%s' "${home:-}"
+}
+
 log() { printf '%s\n' "$*"; }
 die() {
   printf 'ERROR: %s\n' "$*" >&2
@@ -55,7 +69,7 @@ fi
 
 # The drop-in belongs to the unit owner's config tree, not the caller's.
 if [[ -z "$DROPIN_DIR" ]]; then
-  owner_home="$(getent passwd "$UNIT_OWNER" | cut -d: -f6)"
+  owner_home="$(owner_home_of "$UNIT_OWNER")"
   [[ -n "$owner_home" ]] || die "unknown unit owner '$UNIT_OWNER' (set DISK_UNIT_OWNER)"
   DROPIN_DIR="$owner_home/.config/systemd/user/${UNIT_NAME}.d"
 fi
@@ -83,7 +97,7 @@ resolve_sync_root() {
   fi
 
   local owner_home unit_file
-  owner_home="$(getent passwd "$UNIT_OWNER" | cut -d: -f6)"
+  owner_home="$(owner_home_of "$UNIT_OWNER")"
   [[ -n "$owner_home" ]] || return 1
   unit_file="$owner_home/.config/systemd/user/$UNIT_NAME"
   [[ -r "$unit_file" ]] || return 1
@@ -93,14 +107,34 @@ resolve_sync_root() {
   printf '%s' "${value//%h/$owner_home}"
 }
 
+# The drop-in may declare the expected sync root for hosts where the owner's
+# home is unreadable to the caller (see the header of the shipped drop-in).
+declared_sync_root="$(sed -n 's|^# *x-disk-expected-sync-root: *||p' "$DROPIN_SRC" | tail -1)"
+
+live_sync_root="$(resolve_sync_root || true)"
+
 sync_root="${DISK_SYNC_ROOT_OVERRIDE:-}"
 if [[ -z "$sync_root" ]]; then
-  sync_root="$(resolve_sync_root || true)"
+  sync_root="${live_sync_root:-$declared_sync_root}"
 fi
 [[ -n "$sync_root" ]] || die "could not determine DISK_SYNC_ROOT.
-Neither the caller's user bus nor ${UNIT_OWNER}'s unit file provided it. When
-running from a session that does not own the unit (e.g. a CI runner under a
-different user), pass DISK_SYNC_ROOT_OVERRIDE explicitly."
+Neither the caller's user bus nor ${UNIT_OWNER}'s unit file provided it, and the
+drop-in declares no 'x-disk-expected-sync-root:'. When running from a session
+that does not own the unit (e.g. a CI runner under a different user), add that
+line to the drop-in or pass DISK_SYNC_ROOT_OVERRIDE explicitly."
+
+# A declared value must never diverge from reality unnoticed: when the live
+# value IS reachable, they have to agree.
+if [[ -n "$live_sync_root" && -n "$declared_sync_root" && "$live_sync_root" != "$declared_sync_root" ]]; then
+  die "the drop-in's declared sync root does not match the running unit.
+declared (x-disk-expected-sync-root): $declared_sync_root
+live (from ${UNIT_OWNER}'s unit):      $live_sync_root
+Fix the declaration rather than shipping a check against a stale path."
+fi
+
+if [[ -z "$live_sync_root" ]]; then
+  log "note: live DISK_SYNC_ROOT unreachable from this session; using the value declared in the drop-in"
+fi
 
 covered=0
 IFS=',' read -r -a entries <<<"$share_roots"
