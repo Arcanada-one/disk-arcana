@@ -102,7 +102,7 @@ impl MetadataStore {
         .bind(path)
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.map(|r| row_to_metadata(&r)).transpose()?)
+        row.map(|r| row_to_metadata(&r)).transpose()
     }
 
     pub async fn delete(&self, path: &str) -> Result<bool, StorageError> {
