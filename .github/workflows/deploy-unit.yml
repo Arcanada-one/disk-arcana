@@ -129,7 +129,7 @@ jobs:
             exit 0
           fi
           printf 'install must run as dev; runner user %s cannot switch to it.\n' "$(id -un)" >&2
-          printf 'Either grant `sudo -n -u dev` on this host or run the two commands as dev:\n' >&2
+          printf 'Either grant "sudo -n -u dev" on this host or run the two commands as dev:\n' >&2
           printf '  bash deploy/linux/install-user-share-dropin.sh --install\n' >&2
           printf '  bash deploy/linux/install-user-share-dropin.sh --verify\n' >&2
           exit 1
