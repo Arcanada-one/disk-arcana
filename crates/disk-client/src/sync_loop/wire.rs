@@ -480,6 +480,16 @@ impl<'a> SyncTransport for RemoteSync<'a> {
     /// exchange_state (preserves R6 behaviour for callers that have not
     /// upgraded to the full data-plane wiring).
     async fn execute(&mut self) -> Result<(), LoopError> {
+        // DISK-0077: a cycle that attempted DOWNLOADS and failed every one of
+        // them has received no bytes; returning Ok surfaces as
+        // `state=syncing, last_error=null` during a total outage.
+        //
+        // Downloads only. Uploads are excluded on purpose — see the DISK-0064
+        // note at the upload error arm: a failed upload must remain a no-op,
+        // because escalating it once cost local data.
+        let mut downloads_attempted: usize = 0;
+        let mut downloads_failed: usize = 0;
+        let mut first_download_error: Option<String> = None;
         // ── Scan ────────────────────────────────────────────────────────
         let local_files: Vec<FileMetadata> = if self.scan_root.as_os_str().is_empty() {
             Vec::new()
@@ -603,6 +613,13 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                         }
                     }
                     Err(e) => {
+                        // DISK-0077 deliberately does NOT count uploads here.
+                        // DISK-0064: a failed upload must stay a pure no-op —
+                        // treating it as a cycle failure would resurrect the
+                        // data-loss path that regression test guards
+                        // (`it_upload_hardening`), where the server never saw
+                        // the file and later told the client to delete its own
+                        // original.
                         tracing::warn!(
                             path = %to_upload.path,
                             error = %e,
@@ -641,6 +658,11 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                         {
                             Ok(b) => b,
                             Err(e) => {
+                                downloads_attempted += 1;
+                                downloads_failed += 1;
+                                if first_download_error.is_none() {
+                                    first_download_error = Some(e.to_string());
+                                }
                                 tracing::warn!(
                                     path = %to_download.path,
                                     error = %e,
@@ -658,6 +680,11 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                     {
                         Ok(b) => b,
                         Err(e) => {
+                            downloads_attempted += 1;
+                            downloads_failed += 1;
+                            if first_download_error.is_none() {
+                                first_download_error = Some(e.to_string());
+                            }
                             tracing::warn!(
                                 path = %to_download.path,
                                 error = %e,
@@ -686,6 +713,7 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                     );
                     continue;
                 }
+                downloads_attempted += 1;
 
                 // Blob cache keys:
                 //   plaintext files → blake3(plaintext)
@@ -985,6 +1013,24 @@ impl<'a> SyncTransport for RemoteSync<'a> {
             }
         }
 
+        // DISK-0077: every attempted download failed — the share received
+        // nothing. A per-file error repeated across every file is a
+        // share-level failure and must reach last_error.
+        if downloads_failed > 0 && downloads_failed == downloads_attempted {
+            let first =
+                first_download_error.unwrap_or_else(|| "unknown transfer error".to_string());
+            tracing::error!(
+                share = %self.share,
+                attempted = downloads_attempted,
+                failed = downloads_failed,
+                first_error = %first,
+                "sync cycle received nothing — every download failed"
+            );
+            return Err(LoopError::AllTransfersFailed {
+                attempted: downloads_attempted,
+                failed: downloads_failed,
+            });
+        }
         Ok(())
     }
 }
