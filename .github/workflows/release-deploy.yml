@@ -38,12 +38,16 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────────
   build:
     name: Build (x86_64-unknown-linux-gnu)
-    # `cross` drives the build through a container, so this job needs a runner
-    # with Docker access. Without the `docker` label the job can land on a
-    # runner that has none — a build-only dispatch was picked up by
-    # arcana-agents and died with `permission denied while trying to connect to
-    # the docker API at unix:///var/run/docker.sock`.
-    runs-on: [self-hosted, Linux, X64, docker]
+    # `cross` drives the build through a container, so this job needs Docker
+    # access — but `cargo install cross` compiles ON THE HOST first, so the
+    # runner also needs a working C toolchain. The `docker` label alone does
+    # not imply one: three runners carry it (arcana-ci-general, arcana-db,
+    # arcana-dbs) and only ci-general has `cc`. A build-only dispatch landed on
+    # arcana-dbs and died with `linker \`cc\` not found` while installing cross,
+    # while the identical workflow had passed minutes earlier purely because
+    # the scheduler happened to pick ci-general. Pin the label so the outcome
+    # does not depend on which runner is free.
+    runs-on: [self-hosted, Linux, X64, ci-general]
     outputs:
       artifact_name: ${{ steps.meta.outputs.artifact_name }}
     steps:
@@ -161,8 +165,9 @@ jobs:
   build-linux-client:
     name: Build Linux client (disk)
     if: startsWith(github.ref, 'refs/tags/')
-    # Also uses `cross`; same Docker requirement as `build` above.
-    runs-on: [self-hosted, Linux, X64, docker]
+    # Also uses `cross`; same host-toolchain requirement as `build` above —
+    # pinned to ci-general for the same reason (see the note on that job).
+    runs-on: [self-hosted, Linux, X64, ci-general]
     strategy:
       fail-fast: false
       matrix:

@@ -13,8 +13,10 @@ self-hosted-runner:
     - arcana-prod
     - arcana-prod-ci
     - dev
-    # Jobs that build through `cross` must land on a runner with Docker access;
-    # without requiring this label a build was scheduled on a runner that had
-    # none and failed with `permission denied` on /var/run/docker.sock.
+    # `cross` builds need BOTH Docker access and a host C toolchain, because
+    # `cargo install cross` compiles on the host. Three runners carry `docker`
+    # and only ci-general has `cc`, so the cross jobs pin `ci-general` rather
+    # than `docker` — see the note on the `build` job in release-deploy.yml.
+    - ci-general
     - docker
     - vika-pc
