@@ -8,8 +8,13 @@ self-hosted-runner:
   labels:
     - Linux
     - X64
+    - arcana-agents
     - arcana-devs
     - arcana-prod
     - arcana-prod-ci
     - dev
+    # Jobs that build through `cross` must land on a runner with Docker access;
+    # without requiring this label a build was scheduled on a runner that had
+    # none and failed with `permission denied` on /var/run/docker.sock.
+    - docker
     - vika-pc

@@ -38,7 +38,12 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────────
   build:
     name: Build (x86_64-unknown-linux-gnu)
-    runs-on: [self-hosted, Linux, X64]
+    # `cross` drives the build through a container, so this job needs a runner
+    # with Docker access. Without the `docker` label the job can land on a
+    # runner that has none — a build-only dispatch was picked up by
+    # arcana-agents and died with `permission denied while trying to connect to
+    # the docker API at unix:///var/run/docker.sock`.
+    runs-on: [self-hosted, Linux, X64, docker]
     outputs:
       artifact_name: ${{ steps.meta.outputs.artifact_name }}
     steps:
@@ -137,7 +142,8 @@ jobs:
   build-linux-client:
     name: Build Linux client (disk)
     if: startsWith(github.ref, 'refs/tags/')
-    runs-on: [self-hosted, Linux, X64]
+    # Also uses `cross`; same Docker requirement as `build` above.
+    runs-on: [self-hosted, Linux, X64, docker]
     strategy:
       fail-fast: false
       matrix:
