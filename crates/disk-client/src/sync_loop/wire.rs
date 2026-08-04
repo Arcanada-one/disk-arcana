@@ -128,6 +128,11 @@ pub struct RemoteSync<'a> {
     e2ee_wire_cache: HashMap<String, E2eeCachedWire>,
     /// LAN-preferred download path (DISK-0027 slice 2).
     lan_fetch: Option<LanFetchContext>,
+    /// DISK-0079: the share's declared direction, enforced on the upload path.
+    ///
+    /// `None` means "unconstrained" and preserves the previous behaviour for
+    /// the legacy/test constructors that never knew about direction.
+    declared_direction: Option<crate::config::schema::Direction>,
 }
 
 impl<'a> RemoteSync<'a> {
@@ -144,6 +149,7 @@ impl<'a> RemoteSync<'a> {
             e2ee_key: None,
             e2ee_wire_cache: HashMap::new(),
             lan_fetch: None,
+            declared_direction: None,
         }
     }
 
@@ -165,6 +171,7 @@ impl<'a> RemoteSync<'a> {
             e2ee_key: None,
             e2ee_wire_cache: HashMap::new(),
             lan_fetch: None,
+            declared_direction: None,
         }
     }
 
@@ -204,6 +211,22 @@ impl<'a> RemoteSync<'a> {
     /// Enable LAN-preferred delta fetch before cloud download (DISK-0027 slice 2).
     pub fn with_lan_fetch(mut self, ctx: LanFetchContext) -> Self {
         self.lan_fetch = Some(ctx);
+        self
+    }
+
+    /// DISK-0079: declare the share's direction so the upload path can honour
+    /// it.
+    ///
+    /// Without this the client executed `response.to_upload` unconditionally.
+    /// Measured on the Mac follower: a share configured `receive_only` logged
+    /// 230 `upload skipped: cannot read local file` warnings — it was building
+    /// and executing an upload list for a share that must never write to
+    /// canon. The reads happened to fail (transient rsync temp paths), so
+    /// nothing reached the server; had those files existed, the follower would
+    /// have uploaded them. The setting was honoured by the server ACL and
+    /// rendered by `/status`, but never consulted here.
+    pub fn with_declared_direction(mut self, direction: crate::config::schema::Direction) -> Self {
+        self.declared_direction = Some(direction);
         self
     }
 
@@ -559,7 +582,22 @@ impl<'a> SyncTransport for RemoteSync<'a> {
         // The local file is the source of truth; a transient upload failure
         // must never propagate into a local delete on any future cycle.
         if !self.scan_root.as_os_str().is_empty() {
-            for to_upload in &response.to_upload {
+            // DISK-0079: a receive-only share must never upload. Log once per
+            // cycle with a count rather than per file — the observed failure
+            // produced 230 near-identical warnings, which reads as noise
+            // instead of a contract violation.
+            let uploads_suppressed = matches!(
+                self.declared_direction,
+                Some(crate::config::schema::Direction::ReceiveOnly)
+            ) && !response.to_upload.is_empty();
+            if uploads_suppressed {
+                tracing::warn!(
+                    share = %self.share,
+                    entries = response.to_upload.len(),
+                    "server sent to_upload entries for a receive_only share — refusing to upload"
+                );
+            }
+            for to_upload in response.to_upload.iter().filter(|_| !uploads_suppressed) {
                 let file_path = self.scan_root.join(&to_upload.path);
                 // DISK-0064: log read failures explicitly rather than
                 // silently skipping them via `if let Ok(...)`.
