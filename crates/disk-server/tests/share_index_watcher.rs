@@ -421,3 +421,89 @@ async fn rsync_style_replace_does_not_tombstone_live_file() {
         "the target file must still exist on disk after the replace"
     );
 }
+
+/// DISK-0071: `request_full_reconcile` is the supported way to revive a row that
+/// says `deleted=1` while the file is present on disk.
+///
+/// Such rows are never served to any client and report no error anywhere, and
+/// re-delivering the bytes does not clear them — on arcana-agents 19 of 23
+/// re-delivered artefacts stayed unreachable for exactly this reason, and the
+/// share accumulated ~332 such rows. Hand-editing `files.deleted` in a live
+/// MetaDb is not an acceptable remedy; a reconciliation is, because it upserts
+/// every file it finds and an upsert clears the flag.
+#[tokio::test]
+async fn requested_reconcile_revives_tombstoned_row_with_bytes_present() {
+    let dir = tempdir().unwrap();
+    let share_root = dir.path().join("datarim-kb");
+    std::fs::create_dir_all(&share_root).unwrap();
+
+    // The file exists with real content the whole time.
+    let target = share_root.join("report.md");
+    std::fs::write(&target, b"artefact-content").unwrap();
+
+    let db_path = dir.path().join("meta.sqlite");
+    let meta_db = MetaDb::open(&db_path).await.unwrap();
+
+    // Seed the exact broken state: a tombstone for a path whose bytes are there.
+    meta_db
+        .upsert_file_scoped(
+            None,
+            "datarim-kb",
+            &disk_core::types::FileMeta {
+                path: PathBuf::from("report.md"),
+                content_hash: [0u8; 32],
+                size: 0,
+                mtime_ns: 0,
+                inode: None,
+                vector_clock: Default::default(),
+                deleted: true,
+                deleted_at: Some(1),
+                node_id: "server".into(),
+                encryption_nonce: None,
+                version_id: None,
+                parent_version_id: None,
+            },
+        )
+        .await
+        .unwrap();
+
+    let seeded = meta_db
+        .get_file_scoped(None, "datarim-kb", "report.md")
+        .await
+        .unwrap()
+        .expect("seeded row must exist");
+    assert!(
+        seeded.deleted,
+        "test setup must start from a tombstoned row"
+    );
+
+    let mut roots = std::collections::HashMap::new();
+    roots.insert("datarim-kb".to_string(), share_root.clone());
+
+    let handle = spawn_share_index_watcher(roots, meta_db.clone(), "server")
+        .expect("watcher startup must succeed")
+        .expect("configured watcher must spawn");
+
+    // No filesystem change at all — only an explicit reconcile request. This is
+    // what distinguishes the supported path from "touch the file and hope".
+    handle.request_full_reconcile();
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let row = meta_db
+            .get_file_scoped(None, "datarim-kb", "report.md")
+            .await
+            .unwrap();
+        if let Some(row) = row {
+            if !row.deleted && row.size == 16 {
+                assert!(target.exists(), "the file must still be on disk");
+                return;
+            }
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "requested reconcile did not revive the tombstoned row within the deadline"
+        );
+        sleep(Duration::from_millis(100)).await;
+    }
+}
