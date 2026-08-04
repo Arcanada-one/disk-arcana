@@ -461,6 +461,34 @@ async fn run_index_loop(
                     }
                 }
                 IndexEventKind::Tombstone => {
+                    // DISK-0071: a remove event does NOT prove the path is gone.
+                    // rsync (and any editor doing write-temp-then-rename) emits a
+                    // Remove for the temporary name and/or the target while the
+                    // final file is present, and tombstoning a live file makes it
+                    // permanently undeliverable: the bytes stay on disk, but a
+                    // `deleted=1` row is never served to clients and no error is
+                    // reported on either side. The Upsert arm already resolves the
+                    // path before touching the index; do the same here and treat a
+                    // still-existing file as an upsert instead.
+                    // Single stat, no retries: `resolve_existing_file` retries for
+                    // ~250 ms to let a just-created inode appear, which is right
+                    // for Upsert but wrong here — a genuinely deleted path would
+                    // pay that cost on every remove event and delay real
+                    // tombstones.
+                    if let Some(resolved) = resolve_present_file(root, &ev.abs_path) {
+                        if let Err(e) =
+                            upsert_local_file(&meta_db, &ev.vault_id, &node_id, root, &resolved)
+                                .await
+                        {
+                            tracing::warn!(
+                                vault_id = %ev.vault_id,
+                                path = %ev.abs_path.display(),
+                                error = %e,
+                                "share_index upsert-after-remove-event failed"
+                            );
+                        }
+                        continue;
+                    }
                     if let Err(e) =
                         tombstone_local_file(&meta_db, &ev.vault_id, &node_id, root, &ev.abs_path)
                             .await
@@ -692,6 +720,25 @@ async fn upsert_local_file(
     Ok(())
 }
 
+/// Resolve `abs` only if it is a regular file inside `root`, in one stat.
+///
+/// DISK-0071 uses this on remove events: a rename-over-target (rsync, editors)
+/// emits a Remove while the final file is present, and tombstoning a live file
+/// makes it permanently undeliverable. Unlike [`resolve_existing_file`] this
+/// never retries — a genuinely deleted path must be tombstoned immediately, not
+/// after a quarter-second of waiting.
+fn resolve_present_file(root: &Path, abs: &Path) -> Option<PathBuf> {
+    let meta = std::fs::symlink_metadata(abs).ok()?;
+    if meta.file_type().is_symlink() || !meta.is_file() {
+        return None;
+    }
+    if !abs.starts_with(root) {
+        return None;
+    }
+    let canonical = std::fs::canonicalize(abs).ok()?;
+    canonical.starts_with(root).then_some(canonical)
+}
+
 /// `notify` can fire before the inode is visible; retry briefly.
 ///
 /// Never follows symlinks — uses `symlink_metadata` + `is_file` check on the
@@ -797,6 +844,57 @@ fn unix_now_secs() -> i64 {
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    /// DISK-0071: the predicate that keeps a remove event from tombstoning a
+    /// live file. `translate_notify_event` maps EVERY `Remove` kind to
+    /// `Tombstone`, and a rename-over-target (rsync, editors) emits one while the
+    /// final file is present. Tombstoning then makes the path permanently
+    /// undeliverable — bytes on disk, `deleted=1` in the index, no error on
+    /// either side. On arcana-agents that left 19 of 23 re-delivered artefacts
+    /// unreachable.
+    #[test]
+    fn resolve_present_file_distinguishes_live_from_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let live = root.join("live.md");
+        std::fs::write(&live, b"content").unwrap();
+
+        assert!(
+            resolve_present_file(&root, &live).is_some(),
+            "a regular file inside the root must be recognised as present"
+        );
+
+        let gone = root.join("gone.md");
+        assert!(
+            resolve_present_file(&root, &gone).is_none(),
+            "a path with no file must NOT be reported present — a genuine delete \
+             still has to produce a tombstone"
+        );
+
+        // A remove event for a path that was replaced in place: the temporary
+        // name is gone, the target is present. Only the target may survive.
+        let tmp = root.join(".live.md.a1b2c3");
+        std::fs::write(&tmp, b"newer-content").unwrap();
+        std::fs::rename(&tmp, &live).unwrap();
+        assert!(
+            resolve_present_file(&root, &tmp).is_none(),
+            "the consumed temporary name must not be reported present"
+        );
+        assert!(
+            resolve_present_file(&root, &live).is_some(),
+            "the replaced target must be reported present, so the remove event \
+             for it is treated as an upsert instead of a tombstone"
+        );
+
+        // A path outside the root must never resolve, even if it exists.
+        let outside = dir.path().parent().unwrap().join("escape.md");
+        let _ = std::fs::write(&outside, b"x");
+        assert!(
+            resolve_present_file(&root, &outside).is_none(),
+            "a path outside the share root must not resolve"
+        );
+        let _ = std::fs::remove_file(&outside);
+    }
 
     #[test]
     fn translate_maps_create_to_upsert() {
