@@ -99,12 +99,11 @@ impl StorageBackend for S3StorageBackend {
                 path: path.as_str().to_string(),
             });
         }
-        let refs: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM storage_objects WHERE content_sha256 = ?",
-        )
-        .bind(&sha)
-        .fetch_one(self.meta.pool())
-        .await?;
+        let refs: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM storage_objects WHERE content_sha256 = ?")
+                .bind(&sha)
+                .fetch_one(self.meta.pool())
+                .await?;
         if refs.0 == 0 {
             delete_object(&self.client, self.bucket(), &store_key).await?;
         }
@@ -112,13 +111,13 @@ impl StorageBackend for S3StorageBackend {
     }
 
     async fn rename(&self, request: RenameRequest) -> Result<ObjectMetadata, StorageError> {
-        let from_meta = self
-            .meta
-            .get(request.from.as_str())
-            .await?
-            .ok_or_else(|| StorageError::NotFound {
-                path: request.from.as_str().to_string(),
-            })?;
+        let from_meta =
+            self.meta
+                .get(request.from.as_str())
+                .await?
+                .ok_or_else(|| StorageError::NotFound {
+                    path: request.from.as_str().to_string(),
+                })?;
         if self.meta.get(request.to.as_str()).await?.is_some() {
             return Err(StorageError::AlreadyExists {
                 path: request.to.as_str().to_string(),
@@ -213,7 +212,9 @@ mod smoke_tests {
     use super::*;
     use tempfile::TempDir;
 
-    async fn smoke_roundtrip(open: impl std::future::Future<Output = Result<S3StorageBackend, StorageError>>) {
+    async fn smoke_roundtrip(
+        open: impl std::future::Future<Output = Result<S3StorageBackend, StorageError>>,
+    ) {
         let dir = TempDir::new().unwrap();
         let backend = open.await.unwrap();
         let key = StorageObjectKey::new("smoke/demo.bin").unwrap();
@@ -239,6 +240,9 @@ mod smoke_tests {
     #[ignore = "requires DISK_R2_* env and sandbox bucket"]
     async fn smoke_r2_roundtrip() {
         let dir = TempDir::new().unwrap();
-        smoke_roundtrip(S3StorageBackend::open_cloudflare_r2(dir.path().join("meta.db"))).await;
+        smoke_roundtrip(S3StorageBackend::open_cloudflare_r2(
+            dir.path().join("meta.db"),
+        ))
+        .await;
     }
 }

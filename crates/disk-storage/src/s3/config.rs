@@ -38,9 +38,8 @@ impl S3BackendConfig {
     /// `DISK_R2_SECRET_ACCESS_KEY`, optional `DISK_R2_ENDPOINT` override.
     pub fn cloudflare_r2_from_env() -> Result<Self, StorageError> {
         let account_id = require_env("DISK_R2_ACCOUNT_ID")?;
-        let endpoint_url = std::env::var("DISK_R2_ENDPOINT").unwrap_or_else(|_| {
-            format!("https://{account_id}.r2.cloudflarestorage.com")
-        });
+        let endpoint_url = std::env::var("DISK_R2_ENDPOINT")
+            .unwrap_or_else(|_| format!("https://{account_id}.r2.cloudflarestorage.com"));
         Ok(Self {
             endpoint_url,
             region: std::env::var("DISK_R2_REGION").unwrap_or_else(|_| "auto".into()),
