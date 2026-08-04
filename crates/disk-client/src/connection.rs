@@ -61,6 +61,24 @@ pub struct DiskClient {
     session_token: Arc<tokio::sync::RwLock<Option<String>>>,
 }
 
+/// DISK-0078: per-request ceiling on the gRPC channel. A single transfer must
+/// not outlast this; the 600s cycle deadline is the outer bound.
+const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Bound on the initial dial, so an unreachable server fails fast instead of
+/// hanging the first cycle.
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// TCP-level keep-alive: makes the kernel notice a peer that vanished.
+const TCP_KEEPALIVE: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// HTTP/2 PING interval — detects a half-open connection that TCP still
+/// believes is ESTABLISHED, the exact state observed during the hang.
+const HTTP2_KEEPALIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// How long to wait for a keep-alive PING ack before declaring the connection dead.
+const HTTP2_KEEPALIVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 impl DiskClient {
     /// Update the SaaS tenant sent as `x-disk-tenant` on subsequent sync RPCs.
     pub fn set_tenant_id(&mut self, tenant_id: Option<String>) {
@@ -115,6 +133,25 @@ impl DiskClient {
         }
         endpoint = endpoint.tls_config(tls_config)?;
 
+        // DISK-0078: bound every wire operation.
+        //
+        // Without these the endpoint waits forever. Measured on the Mac
+        // follower after a server restart: TCP connections stayed ESTABLISHED
+        // while the sync cycle made no progress for 5+ minutes — no log line,
+        // no byte written, CPU at 0% with every thread parked. A half-open
+        // connection whose peer is gone looks alive to the kernel, so a
+        // request issued on it never returns and never errors.
+        //
+        // All values sit well inside the 600s cycle deadline from the same
+        // task, so the transport fails first and names the cause rather than
+        // the cycle timing out generically.
+        endpoint = endpoint
+            .timeout(REQUEST_TIMEOUT)
+            .connect_timeout(CONNECT_TIMEOUT)
+            .tcp_keepalive(Some(TCP_KEEPALIVE))
+            .http2_keep_alive_interval(HTTP2_KEEPALIVE_INTERVAL)
+            .keep_alive_timeout(HTTP2_KEEPALIVE_TIMEOUT)
+            .keep_alive_while_idle(true);
         let channel = endpoint.connect().await?;
 
         Ok(Self {
