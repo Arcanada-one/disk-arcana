@@ -345,3 +345,79 @@ async fn share_index_watcher_cross_vault_move_tombstones_source_and_upserts_dest
         "dest path must not appear under vault A"
     );
 }
+
+/// DISK-0071: a remove event must not tombstone a path whose file is present.
+///
+/// rsync writes `.name.XXXX` and renames it over the target, so `notify` emits a
+/// Remove for the temporary name and often for the target too. Tombstoning on
+/// that event makes a live file permanently undeliverable: the bytes stay on
+/// disk, but a `deleted=1` row is never served to any client and nothing reports
+/// an error. This is what left 19 of 23 re-delivered artefacts unreachable on
+/// arcana-agents while their contents sat intact in the share.
+#[tokio::test]
+async fn rsync_style_replace_does_not_tombstone_live_file() {
+    let dir = tempdir().unwrap();
+    let share_root = dir.path().join("datarim-kb");
+    std::fs::create_dir_all(&share_root).unwrap();
+
+    let db_path = dir.path().join("meta.sqlite");
+    let meta_db = MetaDb::open(&db_path).await.unwrap();
+
+    let mut roots = std::collections::HashMap::new();
+    roots.insert("datarim-kb".to_string(), share_root.clone());
+
+    let _handle = spawn_share_index_watcher(roots, meta_db.clone(), "server")
+        .expect("watcher startup must succeed")
+        .expect("configured watcher must spawn");
+
+    sleep(Duration::from_millis(200)).await;
+
+    let target = share_root.join("report.md");
+    std::fs::write(&target, b"original").unwrap();
+
+    // Wait for the first index row so the replace below is a genuine update.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Ok(Some(row)) = meta_db
+            .get_file_scoped(None, "datarim-kb", "report.md")
+            .await
+        {
+            if !row.deleted {
+                break;
+            }
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "initial index row for report.md never appeared"
+        );
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    // The rsync pattern: write a sibling temporary file, then rename it over the
+    // target. The rename produces a Remove for the temp name and replaces the
+    // target in place.
+    let tmp = share_root.join(".report.md.a1b2c3");
+    std::fs::write(&tmp, b"replaced-content-longer").unwrap();
+    std::fs::rename(&tmp, &target).unwrap();
+
+    // Give the watcher more than one debounce window to settle, then assert the
+    // row reflects a live file. A tombstone here is the defect.
+    sleep(Duration::from_secs(3)).await;
+
+    let row = meta_db
+        .get_file_scoped(None, "datarim-kb", "report.md")
+        .await
+        .expect("query must succeed")
+        .expect("row must still exist after an in-place replace");
+
+    assert!(
+        !row.deleted,
+        "a file present on disk was tombstoned after an rsync-style replace \
+         (size in index: {}); such a row is never served to clients",
+        row.size
+    );
+    assert!(
+        target.exists(),
+        "the target file must still exist on disk after the replace"
+    );
+}
