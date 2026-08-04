@@ -215,7 +215,6 @@ mod smoke_tests {
     async fn smoke_roundtrip(
         open: impl std::future::Future<Output = Result<S3StorageBackend, StorageError>>,
     ) {
-        let dir = TempDir::new().unwrap();
         let backend = open.await.unwrap();
         let key = StorageObjectKey::new("smoke/demo.bin").unwrap();
         let data = b"disk-arcana-s3-smoke";
