@@ -160,10 +160,26 @@ impl Drop for ServerHandle {
 /// acceptable for local tests; collisions surface as a startup failure that
 /// fails the test loudly rather than silently corrupting results.
 fn reserve_port() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral");
-    let port = listener.local_addr().unwrap().port();
-    drop(listener);
-    port
+    reserve_ports::<1>()[0]
+}
+
+/// Reserve `N` DISTINCT ephemeral ports.
+///
+/// Reserving one port at a time and dropping its listener immediately lets the
+/// OS hand the very same port back on the next call, so two "reserved" ports can
+/// be identical — that is a real observed failure, not a theoretical one: CI hit
+/// `assertion `left != right` failed` here on main. Holding every listener until
+/// all N are chosen makes the ports distinct by construction.
+fn reserve_ports<const N: usize>() -> [u16; N] {
+    let listeners: Vec<std::net::TcpListener> = (0..N)
+        .map(|_| std::net::TcpListener::bind("127.0.0.1:0").expect("bind ephemeral"))
+        .collect();
+    let mut ports = [0u16; N];
+    for (slot, listener) in ports.iter_mut().zip(&listeners) {
+        *slot = listener.local_addr().unwrap().port();
+    }
+    // Listeners drop together here, after every port has been read.
+    ports
 }
 
 async fn spawn_server() -> ServerHandle {
@@ -211,13 +227,13 @@ async fn spawn_server() -> ServerHandle {
     let (child, mtls_port, public_port) = loop {
         attempt += 1;
 
-        let mtls_port = reserve_port();
-        let public_port = reserve_port();
+        // All three ports must be distinct — take them in one reservation so the
+        // OS cannot reissue a just-released port (see reserve_ports).
+        let [mtls_port, public_port, health_port] = reserve_ports::<3>();
         // The health listener defaults to the FIXED 0.0.0.0:9446; left at the
         // default, parallel test servers collide on it (Address already in use)
         // → the health server errors → the whole process shuts down. Bind it to
         // a unique loopback port per server so the three tests don't fight.
-        let health_port = reserve_port();
         assert_ne!(mtls_port, public_port);
         assert_ne!(mtls_port, health_port);
         assert_ne!(public_port, health_port);
