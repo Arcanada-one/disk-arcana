@@ -7,11 +7,18 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: "Deploy target (dev or prod)"
+        description: "Deploy target (build-only publishes an artifact and deploys nowhere)"
         required: true
-        default: "dev"
+        default: "build-only"
         type: choice
         options:
+          # DISK-0071: hosts outside the two deploy targets (e.g. arcana-agents,
+          # which runs a user-scope unit and cannot be reached by deploy-dev)
+          # still need a binary built from a given commit. Before this option the
+          # only way to get one was target=dev, which also deployed to
+          # arcana-devs — a side effect nobody asked for when all you need is the
+          # artifact.
+          - build-only
           - dev
           - prod
 
