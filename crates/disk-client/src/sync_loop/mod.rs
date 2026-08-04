@@ -74,6 +74,17 @@ pub enum LoopError {
     /// no retry until config or ACL is fixed (R-DIR-6).
     #[error("acl.role_mismatch — declared direction differs from server ACL")]
     AclRoleMismatch,
+
+    /// DISK-0077: every file the cycle attempted failed. Individual
+    /// transfer errors are logged and skipped so one bad file cannot stall
+    /// a share — but when *nothing* got through, the cycle transferred no
+    /// bytes and must not be reported as a success. Measured on the Mac
+    /// follower: an expired session made every download fail with
+    /// `session expired or unknown`, thousands of times, while `/status`
+    /// still read `state=syncing, last_error=null` — a total outage
+    /// indistinguishable from health.
+    #[error("transfer.all_failed — all {failed} of {attempted} transfers failed this cycle")]
+    AllTransfersFailed { attempted: usize, failed: usize },
 }
 
 impl LoopError {
@@ -81,7 +92,9 @@ impl LoopError {
     /// `acl.role_mismatch` is the only non-retryable variant.
     pub fn should_backoff(&self) -> bool {
         match self {
-            LoopError::ShareUnknown | LoopError::TransportUnavailable => true,
+            LoopError::ShareUnknown
+            | LoopError::TransportUnavailable
+            | LoopError::AllTransfersFailed { .. } => true,
             LoopError::AclRoleMismatch => false,
         }
     }
@@ -274,6 +287,10 @@ impl SyncLoop {
                 let delay = self.backoff.next_delay(rng);
                 self.state = match err {
                     LoopError::TransportUnavailable => LoopState::ServerUnreachable,
+                    // DISK-0077: Backoff maps to the schema string
+                    // "unknown_share", which would misname the cause. A cycle
+                    // that moved nothing is an error, and must read as one.
+                    LoopError::AllTransfersFailed { .. } => LoopState::Error,
                     _ => LoopState::Backoff,
                 };
                 self.backoff_until = Some(now + delay);
@@ -355,6 +372,69 @@ mod tests {
     #[test]
     fn acl_role_mismatch_does_not_backoff() {
         assert!(!LoopError::AclRoleMismatch.should_backoff());
+    }
+
+    // ----------- DISK-0077: a cycle that moved nothing is not a success -----
+
+    #[test]
+    fn all_transfers_failed_triggers_backoff() {
+        assert!(LoopError::AllTransfersFailed {
+            attempted: 12,
+            failed: 12
+        }
+        .should_backoff());
+    }
+
+    #[test]
+    fn all_transfers_failed_is_reported_as_error_not_unknown_share() {
+        // Measured failure this reproduces: an expired session made every
+        // download fail, thousands of times, while /status kept reporting
+        // `state=syncing, last_error=null` — a total outage that read as
+        // health. The cycle must now land in a state that names itself, and
+        // must NOT reuse Backoff, whose schema string is "unknown_share" and
+        // would misattribute the cause to a missing share.
+        let mut s = SyncLoop::new();
+        let mut rng = rng_seed();
+        let now = Instant::now();
+        s.begin_sync(now, LoopTrigger::Tick);
+        s.finish_sync(
+            Err(LoopError::AllTransfersFailed {
+                attempted: 4096,
+                failed: 4096,
+            }),
+            now,
+            &mut rng,
+        );
+
+        assert_eq!(
+            s.state(),
+            LoopState::Error,
+            "a cycle that transferred nothing must not read as syncing or idle"
+        );
+        assert!(
+            s.last_error().is_some(),
+            "last_error must be set — it is the field an operator checks"
+        );
+        let rendered = s.last_error().unwrap().to_string();
+        assert!(
+            rendered.contains("4096"),
+            "the error must carry the scale of the failure: {rendered}"
+        );
+    }
+
+    #[test]
+    fn a_partially_successful_cycle_is_still_a_success() {
+        // The guard must fire only when EVERY transfer failed: one bad file
+        // among many keeps the share healthy, which is what the per-file
+        // `continue` exists for.
+        let mut s = SyncLoop::new();
+        let mut rng = rng_seed();
+        let now = Instant::now();
+        s.begin_sync(now, LoopTrigger::Tick);
+        s.finish_sync(Ok(()), now, &mut rng);
+
+        assert_eq!(s.state(), LoopState::Idle);
+        assert!(s.last_error().is_none());
     }
 
     // ----------- Backoff curve -----------
