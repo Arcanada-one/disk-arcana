@@ -452,7 +452,9 @@ async fn run_index_loop(
         // saturation — a full reconcile must run even when no new event
         // arrives to unblock the receiver.
         if saturation.swap(false, Ordering::AcqRel) {
-            full_reconcile(&meta_db, &node_id, &canonical_roots).await?;
+            // Count is logged inside full_reconcile; discarding it here is
+            // deliberate — the loop has no caller to report it to.
+            let _revived = full_reconcile(&meta_db, &node_id, &canonical_roots).await?;
         }
 
         let first = match tokio::time::timeout(SATURATION_POLL_INTERVAL, rx.recv()).await {
@@ -533,7 +535,9 @@ async fn run_index_loop(
         // After draining the batch, reconcile if saturation occurred during
         // processing — this recovers events dropped while the channel was full.
         if saturation.swap(false, Ordering::AcqRel) {
-            full_reconcile(&meta_db, &node_id, &canonical_roots).await?;
+            // Count is logged inside full_reconcile; discarding it here is
+            // deliberate — the loop has no caller to report it to.
+            let _revived = full_reconcile(&meta_db, &node_id, &canonical_roots).await?;
         }
     }
 }
@@ -629,11 +633,13 @@ fn walk_files_impl(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), ShareIndexE
 ///
 /// Called by [`run_index_loop`] when the saturation flag is raised by a
 /// callback that could not `try_send` because the bounded channel was full.
+/// Returns the number of rows that claimed `deleted=1` while their file was
+/// present on disk — silently undeliverable paths this pass revived (DISK-0071).
 async fn full_reconcile(
     meta_db: &MetaDb,
     node_id: &str,
     canonical_roots: &HashMap<String, PathBuf>,
-) -> Result<(), ShareIndexError> {
+) -> Result<usize, ShareIndexError> {
     // ── Phase 1: gather everything (no mutation) ──
     // Walk filesystem (fail-closed — any I/O error aborts).
     let mut vault_files: HashMap<&str, Vec<PathBuf>> = HashMap::new();
@@ -648,6 +654,7 @@ async fn full_reconcile(
     }
 
     // ── Phase 2: apply mutations ──
+    let mut revived_total = 0usize;
     for (vault_id, root) in canonical_roots {
         let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
 
@@ -667,6 +674,26 @@ async fn full_reconcile(
 
         // Tombstone rows for files that disappeared from disk.
         if let Some(tracked) = vault_db_rows.get(vault_id.as_str()) {
+            // DISK-0071: count rows that claim the path is deleted while its bytes
+            // are on disk. Such a row is never served to any client and reports no
+            // error anywhere — the failure is completely silent, which is how ~332
+            // of them accumulated unnoticed on arcana-agents. The upsert pass above
+            // has already revived these, so this is the pre-reconcile divergence:
+            // a non-zero count means clients were being denied files that existed.
+            let revived_from_tombstone = tracked
+                .iter()
+                .filter(|row| row.deleted && seen.contains(&root.join(&row.path)))
+                .count();
+            revived_total += revived_from_tombstone;
+            if revived_from_tombstone > 0 {
+                tracing::warn!(
+                    vault_id = %vault_id,
+                    revived = revived_from_tombstone,
+                    "share_index reconcile revived rows tombstoned while their files \
+                     were present on disk — those paths were silently undeliverable"
+                );
+            }
+
             for file_meta in tracked {
                 if file_meta.deleted {
                     continue;
@@ -687,7 +714,7 @@ async fn full_reconcile(
             }
         }
     }
-    Ok(())
+    Ok(revived_total)
 }
 
 async fn upsert_local_file(
@@ -1414,6 +1441,88 @@ mod tests {
         let mut restore = std::fs::metadata(&hidden).unwrap().permissions();
         restore.set_mode(0o755);
         std::fs::set_permissions(&hidden, restore).unwrap();
+    }
+
+    /// DISK-0071: reconciliation must report how many rows claimed `deleted=1`
+    /// while their file was on disk. Those paths are served to nobody and raise
+    /// no error anywhere, which is how ~332 of them piled up unnoticed on
+    /// arcana-agents. A count is the only way an operator learns it happened.
+    #[tokio::test]
+    async fn full_reconcile_reports_rows_revived_from_tombstone() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(directory.path()).unwrap();
+        let meta_db = MetaDb::open(&directory.path().join("meta.sqlite"))
+            .await
+            .unwrap();
+
+        let seed_tombstone = |name: &str| {
+            let db = meta_db.clone();
+            let name = name.to_string();
+            async move {
+                db.upsert_file_scoped(
+                    None,
+                    "v",
+                    &FileMeta {
+                        path: PathBuf::from(&name),
+                        content_hash: [0u8; 32],
+                        size: 0,
+                        mtime_ns: 0,
+                        inode: None,
+                        vector_clock: Default::default(),
+                        deleted: true,
+                        deleted_at: Some(1),
+                        node_id: "test".into(),
+                        encryption_nonce: None,
+                        version_id: None,
+                        parent_version_id: None,
+                    },
+                )
+                .await
+                .unwrap();
+            }
+        };
+
+        // Two tombstoned rows whose bytes ARE on disk — the silent-failure case.
+        std::fs::write(root.join("present-a.md"), b"aaa").unwrap();
+        std::fs::write(root.join("present-b.md"), b"bbbb").unwrap();
+        seed_tombstone("present-a.md").await;
+        seed_tombstone("present-b.md").await;
+
+        // One tombstoned row whose file really is gone — a correct tombstone that
+        // must NOT be counted, or the number would just measure tombstones.
+        seed_tombstone("really-gone.md").await;
+
+        let mut roots = HashMap::new();
+        roots.insert("v".to_string(), root.clone());
+
+        let revived = full_reconcile(&meta_db, "test", &roots).await.unwrap();
+        assert_eq!(
+            revived, 2,
+            "only the two tombstoned rows whose files exist may be counted"
+        );
+
+        // And the count must reflect real repair, not just arithmetic.
+        for name in ["present-a.md", "present-b.md"] {
+            let row = meta_db
+                .get_file_scoped(None, "v", name)
+                .await
+                .unwrap()
+                .expect("row must exist");
+            assert!(!row.deleted, "{name} must be live after reconcile");
+        }
+        let gone = meta_db
+            .get_file_scoped(None, "v", "really-gone.md")
+            .await
+            .unwrap()
+            .expect("row must exist");
+        assert!(
+            gone.deleted,
+            "a genuinely missing file must stay tombstoned"
+        );
+
+        // A second pass has nothing left to revive.
+        let again = full_reconcile(&meta_db, "test", &roots).await.unwrap();
+        assert_eq!(again, 0, "a clean reconcile must report zero revivals");
     }
 
     // ── Blocker 2: never follow symlinks ──
