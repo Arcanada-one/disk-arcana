@@ -378,7 +378,10 @@ async fn rsync_style_replace_does_not_tombstone_live_file() {
     // Wait for the first index row so the replace below is a genuine update.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     loop {
-        if let Ok(Some(row)) = meta_db.get_file_scoped(None, "datarim-kb", "report.md").await {
+        if let Ok(Some(row)) = meta_db
+            .get_file_scoped(None, "datarim-kb", "report.md")
+            .await
+        {
             if !row.deleted {
                 break;
             }
