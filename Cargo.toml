@@ -7,6 +7,7 @@ members = [
     "crates/disk-client",
     "crates/disk-cli",
     "crates/disk-gui",
+    "crates/disk-storage",
 ]
 
 [workspace.package]
