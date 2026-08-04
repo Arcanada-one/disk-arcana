@@ -85,4 +85,43 @@ EOF
 run_installer "$work/renamed.conf" ||
   fail "a differently named share covering sync_root should pass: $(cat "$work/out.log")"
 
-echo "DISK-0070 user drop-in contract: PASS (shipped drop-in valid, 3 bad configs rejected)"
+# 6. A dry-run against a DIFFERING installed copy must succeed: a difference is
+#    the expected result of a diff, not a failure. The first CI dispatch failed
+#    exactly here — `diff`'s non-zero status killed the step under `set -e`.
+installed_dir="$work/installed"
+mkdir -p "$installed_dir"
+cat >"$installed_dir/$(basename "$SHIPPED_DROPIN")" <<'EOF'
+[Service]
+Environment=DISK_SHARE_ROOTS=stale-share:/some/old/path
+EOF
+if ! DISK_SYNC_ROOT_OVERRIDE="$SYNC_ROOT" \
+  DISK_DROPIN_DIR="$installed_dir" \
+  bash "$INSTALLER" --dropin "$SHIPPED_DROPIN" >"$work/out.log" 2>&1; then
+  cat "$work/out.log" >&2
+  fail "dry-run must not fail merely because the installed copy differs"
+fi
+grep -q 'differs from the installed copy' "$work/out.log" ||
+  fail "expected the differing-copy notice, got: $(cat "$work/out.log")"
+
+# 7. Resolution must work from a session that does not own the unit — the CI
+#    runner on arcana-agents executes as a different user, and `systemctl --user`
+#    there reaches the caller's own bus, never the owner's.
+if ! DISK_UNIT_OWNER="$(id -un)" \
+  DISK_SYNC_ROOT_OVERRIDE="$SYNC_ROOT" \
+  DISK_DROPIN_DIR="$work/dropins" \
+  bash "$INSTALLER" --dropin "$SHIPPED_DROPIN" >"$work/out.log" 2>&1; then
+  cat "$work/out.log" >&2
+  fail "dry-run must work without the unit owner's systemd bus"
+fi
+
+# 8. install/verify must refuse a foreign session instead of half-applying.
+for mode in --install --verify; do
+  if DISK_UNIT_OWNER="definitely-not-$(id -un)" \
+    DISK_SYNC_ROOT_OVERRIDE="$SYNC_ROOT" \
+    DISK_DROPIN_DIR="$work/dropins" \
+    bash "$INSTALLER" --dropin "$SHIPPED_DROPIN" "$mode" >"$work/out.log" 2>&1; then
+    fail "$mode ran as the wrong user instead of refusing"
+  fi
+done
+
+echo "DISK-0070 user drop-in contract: PASS (shipped drop-in valid, 3 bad configs rejected, diff/ownership guards held)"

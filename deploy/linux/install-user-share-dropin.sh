@@ -16,8 +16,11 @@
 set -euo pipefail
 
 UNIT_NAME="disk-arcana-server.service"
+# The user that owns the user-scope unit. On arcana-agents the CI runner is a
+# different user, so the owner cannot be assumed to be the caller.
+UNIT_OWNER="${DISK_UNIT_OWNER:-dev}"
 DROPIN_SRC="${DISK_DROPIN_SRC:-}"
-DROPIN_DIR="${DISK_DROPIN_DIR:-$HOME/.config/systemd/user/${UNIT_NAME}.d}"
+DROPIN_DIR="${DISK_DROPIN_DIR:-}"
 MODE="dry-run"
 
 log() { printf '%s\n' "$*"; }
@@ -50,6 +53,13 @@ if [[ -z "$DROPIN_SRC" ]]; then
 fi
 [[ -f "$DROPIN_SRC" ]] || die "drop-in source not found: $DROPIN_SRC"
 
+# The drop-in belongs to the unit owner's config tree, not the caller's.
+if [[ -z "$DROPIN_DIR" ]]; then
+  owner_home="$(getent passwd "$UNIT_OWNER" | cut -d: -f6)"
+  [[ -n "$owner_home" ]] || die "unknown unit owner '$UNIT_OWNER' (set DISK_UNIT_OWNER)"
+  DROPIN_DIR="$owner_home/.config/systemd/user/${UNIT_NAME}.d"
+fi
+
 # --- contract: every served share must be declared -------------------------
 # Read DISK_SHARE_ROOTS from the drop-in and DISK_SYNC_ROOT from the unit, then
 # refuse a combination that leaves the sync-root share unwatched. This is the
@@ -58,12 +68,39 @@ fi
 share_roots="$(sed -n 's|^Environment=DISK_SHARE_ROOTS=||p' "$DROPIN_SRC" | tail -1)"
 [[ -n "$share_roots" ]] || die "$DROPIN_SRC declares no DISK_SHARE_ROOTS"
 
+# Resolving DISK_SYNC_ROOT has to work from a session that does NOT own the
+# unit: on arcana-agents the CI runner executes as `support-proof` while the
+# server is a user unit of `dev`, so `systemctl --user` reaches the caller's own
+# bus and never sees it. Try the live bus first, then read the unit file of the
+# owning user directly. `%h` in the unit expands to that user's home.
+resolve_sync_root() {
+  local value
+  value="$(systemctl --user show "$UNIT_NAME" -p Environment --value 2>/dev/null |
+    tr ' ' '\n' | sed -n 's|^DISK_SYNC_ROOT=||p' | tail -1)"
+  if [[ -n "$value" ]]; then
+    printf '%s' "$value"
+    return 0
+  fi
+
+  local owner_home unit_file
+  owner_home="$(getent passwd "$UNIT_OWNER" | cut -d: -f6)"
+  [[ -n "$owner_home" ]] || return 1
+  unit_file="$owner_home/.config/systemd/user/$UNIT_NAME"
+  [[ -r "$unit_file" ]] || return 1
+
+  value="$(sed -n 's|^Environment=DISK_SYNC_ROOT=||p' "$unit_file" | tail -1)"
+  [[ -n "$value" ]] || return 1
+  printf '%s' "${value//%h/$owner_home}"
+}
+
 sync_root="${DISK_SYNC_ROOT_OVERRIDE:-}"
 if [[ -z "$sync_root" ]]; then
-  sync_root="$(systemctl --user show "$UNIT_NAME" -p Environment --value 2>/dev/null |
-    tr ' ' '\n' | sed -n 's|^DISK_SYNC_ROOT=||p' | tail -1)"
+  sync_root="$(resolve_sync_root || true)"
 fi
-[[ -n "$sync_root" ]] || die "could not determine DISK_SYNC_ROOT (set DISK_SYNC_ROOT_OVERRIDE to check offline)"
+[[ -n "$sync_root" ]] || die "could not determine DISK_SYNC_ROOT.
+Neither the caller's user bus nor ${UNIT_OWNER}'s unit file provided it. When
+running from a session that does not own the unit (e.g. a CI runner under a
+different user), pass DISK_SYNC_ROOT_OVERRIDE explicitly."
 
 covered=0
 IFS=',' read -r -a entries <<<"$share_roots"
@@ -90,13 +127,26 @@ case "$MODE" in
   dry-run)
     log "--- would install: $DROPIN_SRC -> $dest"
     if [[ -f "$dest" ]]; then
-      diff -u "$dest" "$DROPIN_SRC" && log "(installed copy is identical)"
+      # A difference is the expected outcome of a dry-run, not an error, so the
+      # non-zero exit status of `diff` must not fail the step.
+      if diff -u "$dest" "$DROPIN_SRC"; then
+        log "(installed copy is identical)"
+      else
+        log "(differs from the installed copy — shown above)"
+      fi
     else
       log "(no installed copy yet)"
     fi
     log "Run with --install to apply."
     ;;
   install)
+    # Writing into another user's config tree and restarting their unit needs
+    # that user's own session; refuse loudly instead of half-applying.
+    if [[ "$(id -un)" != "$UNIT_OWNER" ]]; then
+      die "--install must run as '$UNIT_OWNER' (current user: $(id -un)).
+The drop-in lives in that user's config tree and the restart needs their systemd
+session; a foreign session cannot reach either."
+    fi
     mkdir -p "$DROPIN_DIR"
     install -m 0644 "$DROPIN_SRC" "$dest"
     systemctl --user daemon-reload
@@ -104,6 +154,10 @@ case "$MODE" in
     log "installed and restarted $UNIT_NAME"
     ;;
   verify)
+    if [[ "$(id -un)" != "$UNIT_OWNER" ]]; then
+      die "--verify must run as '$UNIT_OWNER' (current user: $(id -un)) — the
+loaded environment is only visible on that user's systemd bus."
+    fi
     loaded="$(systemctl --user show "$UNIT_NAME" -p Environment --value 2>/dev/null |
       tr ' ' '\n' | sed -n 's|^DISK_SHARE_ROOTS=||p' | tail -1)"
     [[ "$loaded" == "$share_roots" ]] ||

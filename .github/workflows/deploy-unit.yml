@@ -96,17 +96,43 @@ jobs:
         if: inputs.target == 'arcana-agents'
         run: bash deploy/linux/tests/test-user-share-dropin.sh
 
+      # The arcana-agents runner executes as a different user than the one
+      # owning the server's user unit, so `systemctl --user` here reaches the
+      # runner's own bus. The installer falls back to reading the owner's unit
+      # file; DISK_UNIT_OWNER names that user.
       - name: Diff share drop-in against installed copy
         if: inputs.target == 'arcana-agents'
+        env:
+          DISK_UNIT_OWNER: dev
         run: bash deploy/linux/install-user-share-dropin.sh
 
+      # `--install` and `--verify` must run in the owner's own session: the
+      # drop-in lives in their config tree and the restart needs their bus. The
+      # installer refuses a foreign session rather than half-applying, so the
+      # delivery is done through that user instead of the runner account.
       - name: Install share drop-in and restart the user unit
         if: inputs.target == 'arcana-agents' && inputs.mode == 'install'
-        run: bash deploy/linux/install-user-share-dropin.sh --install
-
-      - name: Verify loaded share roots
-        if: inputs.target == 'arcana-agents' && inputs.mode == 'install'
-        run: bash deploy/linux/install-user-share-dropin.sh --verify
+        env:
+          DISK_UNIT_OWNER: dev
+        run: |
+          set -euo pipefail
+          if [[ "$(id -un)" == "dev" ]]; then
+            bash deploy/linux/install-user-share-dropin.sh --install
+            bash deploy/linux/install-user-share-dropin.sh --verify
+            exit 0
+          fi
+          if sudo -n -u dev true 2>/dev/null; then
+            sudo -n -u dev --preserve-env=DISK_UNIT_OWNER \
+              bash "$PWD/deploy/linux/install-user-share-dropin.sh" --install
+            sudo -n -u dev --preserve-env=DISK_UNIT_OWNER \
+              bash "$PWD/deploy/linux/install-user-share-dropin.sh" --verify
+            exit 0
+          fi
+          printf 'install must run as dev; runner user %s cannot switch to it.\n' "$(id -un)" >&2
+          printf 'Either grant `sudo -n -u dev` on this host or run the two commands as dev:\n' >&2
+          printf '  bash deploy/linux/install-user-share-dropin.sh --install\n' >&2
+          printf '  bash deploy/linux/install-user-share-dropin.sh --verify\n' >&2
+          exit 1
 
       - name: Summary
         if: always()
