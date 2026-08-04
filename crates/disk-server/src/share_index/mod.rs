@@ -416,7 +416,11 @@ fn translate_notify_event(ev: &notify::Event, vault_id: &str, root: &Path) -> Ve
     ev.paths
         .iter()
         .enumerate()
-        .filter(|(_, p)| p.starts_with(root))
+        // DISK-0077: drop events for the server's own stores before they ever
+        // reach the index — the watcher would otherwise index the very files
+        // the server writes while serving, and that write stream is what
+        // starved the MetaDb lock.
+        .filter(|(_, p)| p.starts_with(root) && !is_internal_path(root, p))
         .map(|(i, p)| {
             let per_path_kind = match ev.kind {
                 EventKind::Modify(ModifyKind::Name(RenameMode::From)) => IndexEventKind::Tombstone,
@@ -548,13 +552,49 @@ async fn run_index_loop(
 /// Fail-closed: any `read_dir`, `file_type`, or iteration error aborts the
 /// entire walk with a typed [`ShareIndexError`] so reconciliation cannot
 /// silently miss a subtree.
+/// Directory names the server itself writes inside a share root. They must
+/// never enter the index.
+///
+/// DISK-0077: `.version-blobs` is the server's own content-addressed version
+/// store, constructed as `cfg.sync_root.join(".version-blobs")` (see
+/// `main.rs`) — i.e. *inside* the tree the share-index watcher observes. Every
+/// version the server wrote produced a file under the watched root, the
+/// watcher indexed it, and the index grew on its own exhaust: measured on the
+/// canon host, a 60s window added 22 rows of which all 22 were
+/// `.version-blobs` paths while real content added none, and the store grew
+/// ~660MB/hour unbounded. That write stream exhausted SQLite's
+/// `busy_timeout` (37 of 129 statements ended at exactly 5.004-5.006s, i.e.
+/// they never ran), which starved the client's sync cycle while `/status`
+/// still reported `state=syncing, last_error=null`.
+///
+/// Relocating the store would strand the versions already written under
+/// existing roots, so the boundary is drawn here instead: the store stays put
+/// and the index refuses to look at it.
+const INTERNAL_DIR_NAMES: &[&str] = &[".version-blobs"];
+
+/// True when `path` lies inside one of the server's internal directories
+/// relative to `root`.
+///
+/// Compares path *components* rather than a string prefix: a user file named
+/// `.version-blobs-notes.md` must stay indexed, and only a real directory
+/// boundary counts.
+fn is_internal_path(root: &Path, path: &Path) -> bool {
+    let Ok(rel) = path.strip_prefix(root) else {
+        return false;
+    };
+    rel.components().any(|c| {
+        matches!(c, std::path::Component::Normal(name)
+            if INTERNAL_DIR_NAMES.iter().any(|d| name == std::ffi::OsStr::new(d)))
+    })
+}
+
 fn walk_files(root: &Path) -> Result<Vec<PathBuf>, ShareIndexError> {
     let mut files = Vec::new();
-    walk_files_impl(root, &mut files)?;
+    walk_files_impl(root, root, &mut files)?;
     Ok(files)
 }
 
-fn walk_files_impl(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), ShareIndexError> {
+fn walk_files_impl(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), ShareIndexError> {
     let iter = std::fs::read_dir(dir).map_err(|source| ShareIndexError::Io {
         path: dir.to_path_buf(),
         source,
@@ -574,6 +614,11 @@ fn walk_files_impl(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), ShareIndexE
         // Never follow symlinks — filesystem index must reflect only
         // regular files physically under the configured root.
         if ft.is_symlink() {
+            continue;
+        }
+
+        // DISK-0077: never descend into (or index) the server's own stores.
+        if is_internal_path(root, &entry.path()) {
             continue;
         }
 
@@ -612,7 +657,7 @@ fn walk_files_impl(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), ShareIndexE
                 );
                 continue;
             }
-            walk_files_impl(&canonical, out)?;
+            walk_files_impl(root, &canonical, out)?;
         }
         // else: skip block devices, FIFOs, sockets, etc.
     }
@@ -895,6 +940,96 @@ fn unix_now_secs() -> i64 {
 
 #[cfg(test)]
 mod tests {
+    // ── DISK-0077: the server's own stores must never enter the index ──
+
+    #[test]
+    fn walk_files_skips_the_servers_own_version_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+
+        // Real content: must be indexed.
+        std::fs::write(root.join("note.md"), b"real").unwrap();
+        std::fs::create_dir_all(root.join("qa/run-1")).unwrap();
+        std::fs::write(root.join("qa/run-1/shot.png"), b"png").unwrap();
+
+        // The server's own version store, nested exactly as main.rs builds it.
+        std::fs::create_dir_all(root.join(".version-blobs/ab")).unwrap();
+        std::fs::write(root.join(".version-blobs/ab/deadbeef"), b"blob").unwrap();
+        std::fs::create_dir_all(root.join(".version-blobs/cd")).unwrap();
+        std::fs::write(root.join(".version-blobs/cd/cafebabe"), b"blob").unwrap();
+
+        let found = walk_files(&root).unwrap();
+        let rel: Vec<String> = found
+            .iter()
+            .map(|p| {
+                p.strip_prefix(&root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect();
+
+        // Without the filter this walk returns 4 entries and the assertion below
+        // fails on the two blob paths — that failure is the point of the test.
+        assert!(
+            rel.contains(&"note.md".to_string()),
+            "real content dropped: {rel:?}"
+        );
+        assert!(
+            rel.contains(&"qa/run-1/shot.png".to_string()),
+            "nested real content dropped: {rel:?}"
+        );
+        assert!(
+            !rel.iter().any(|r| r.starts_with(".version-blobs/")),
+            "server version store leaked into the index: {rel:?}"
+        );
+        assert_eq!(rel.len(), 2, "unexpected entries: {rel:?}");
+    }
+
+    #[test]
+    fn watcher_events_for_the_version_store_are_dropped() {
+        use notify::event::{CreateKind, EventKind};
+
+        let root = PathBuf::from("/share");
+        let blob = root.join(".version-blobs/ab/deadbeef");
+        let real = root.join("qa/shot.png");
+
+        let ev = notify::Event {
+            kind: EventKind::Create(CreateKind::File),
+            paths: vec![blob, real.clone()],
+            attrs: notify::event::EventAttributes::default(),
+        };
+
+        let out = translate_notify_event(&ev, "v", &root);
+        assert_eq!(
+            out.len(),
+            1,
+            "expected only the real path to survive: {out:?}"
+        );
+        assert_eq!(out[0].abs_path, real);
+    }
+
+    #[test]
+    fn a_user_file_named_like_the_store_is_still_indexed() {
+        // The filter compares path components, not string prefixes: a file whose
+        // name merely begins with the store's name is user content.
+        let root = PathBuf::from("/share");
+        assert!(is_internal_path(&root, &root.join(".version-blobs/ab/x")));
+        assert!(!is_internal_path(
+            &root,
+            &root.join(".version-blobs-notes.md")
+        ));
+        assert!(!is_internal_path(
+            &root,
+            &root.join("qa/.version-blobs-report.md")
+        ));
+        // A path outside the root is not ours to judge.
+        assert!(!is_internal_path(
+            &root,
+            &PathBuf::from("/elsewhere/.version-blobs/x")
+        ));
+    }
+
     use super::*;
     use std::cell::Cell;
 
