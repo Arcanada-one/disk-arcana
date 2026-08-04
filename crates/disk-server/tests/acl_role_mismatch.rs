@@ -7,7 +7,9 @@
 //! Uses `SyncServiceImpl::with_acl` to inject a pre-seeded `AclEnforcer` and
 //! an in-memory SQLite `AuditEmitter`.
 
-use disk_proto::disk::{sync_service_server::SyncService, DeltaDownloadRequest};
+use disk_proto::disk::{
+    sync_service_server::SyncService, DeltaDownloadRequest, FileMetadata, SyncStateRequest,
+};
 use disk_server::{
     acl::{AclEnforcer, CertFingerprint, EnforcedRole, EnforcementTable},
     audit::AuditEmitter,
@@ -166,4 +168,86 @@ async fn acl_receive_only_can_download_but_not_upload() {
             .await
             .unwrap();
     assert_eq!(count, 0, "no mismatch audit rows for permitted download");
+}
+
+// ---------------------------------------------------------------------------
+// DISK-0079: the server must not hand upload work to a receive-only follower.
+// ---------------------------------------------------------------------------
+
+/// Measured on the Mac follower: a share declared `receive_only` was handed a
+/// `to_upload` list by the reconciler and the client executed it — 230 upload
+/// attempts against the canonical host. The client refuses such a list since
+/// PR #168, but a guarantee enforced on one side only is one deployment away
+/// from being no guarantee at all: an older or third-party client would still
+/// obey.
+///
+/// The client here reports a file the server does not have, which is exactly
+/// the shape that makes the reconciler emit `to_upload`. With a bidirectional
+/// role that list is non-empty (asserted below, so this test cannot pass by
+/// simply producing no work); with `receive_only` it must be empty.
+#[tokio::test]
+async fn receive_only_caller_is_never_given_upload_work() {
+    async fn to_upload_len_for(role: EnforcedRole) -> usize {
+        let der = fake_cert_der(0xAB);
+        let fp = cert_fp_from_der(&der);
+
+        let mut table = EnforcementTable::new(1);
+        table.insert(fp, "kb", role);
+        let enforcer = AclEnforcer::new_loaded(table);
+
+        let pool = make_in_memory_pool().await;
+        let audit = AuditEmitter::new(pool.clone());
+        let root = tempdir().unwrap();
+        let store = AuthStore::new();
+        let db_dir = tempdir().unwrap();
+        let db = disk_core::MetaDb::open(&db_dir.path().join("meta.sqlite"))
+            .await
+            .expect("open meta db");
+        let svc =
+            SyncServiceImpl::with_acl(store.clone(), root.path().to_path_buf(), enforcer, audit)
+                .with_meta_db(db, "server");
+
+        let key = store.register_node("kb-node", "N", "test", None).unwrap();
+        let (token, _) = store.authenticate("kb-node", key.as_str()).unwrap();
+
+        // The client reports a file the server has never seen → the reconciler
+        // wants it uploaded.
+        let mut req = Request::new(SyncStateRequest {
+            files: vec![FileMetadata {
+                path: "notes/only-on-client.md".into(),
+                size: 3,
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        req.metadata_mut().insert(
+            "authorization",
+            format!("Bearer {}", token.as_str()).parse().unwrap(),
+        );
+        req.metadata_mut()
+            .insert("x-disk-share", "kb".parse().unwrap());
+        req.extensions_mut().insert(CertificateDer::from(der));
+
+        let resp = svc
+            .exchange_state(req)
+            .await
+            .expect("exchange_state must succeed for an allowed role")
+            .into_inner();
+        resp.to_upload.len()
+    }
+
+    // Control: the same request against a bidirectional role DOES produce
+    // upload work. Without this the assertion below could be satisfied by a
+    // reconciler that never emits anything.
+    assert_eq!(
+        to_upload_len_for(EnforcedRole::Bidirectional).await,
+        1,
+        "control: a bidirectional caller must still be asked to upload"
+    );
+
+    assert_eq!(
+        to_upload_len_for(EnforcedRole::ReceiveOnly).await,
+        0,
+        "a receive_only caller must never be handed upload work"
+    );
 }

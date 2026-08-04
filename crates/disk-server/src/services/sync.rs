@@ -318,6 +318,28 @@ impl SyncServiceImpl {
     /// - Enforcer resolves a role in `allowed_roles`.
     ///
     /// Returns `Err(PermissionDenied)` on mismatch and emits an audit row.
+    /// DISK-0079: resolve the caller's enforced role, when one is knowable.
+    ///
+    /// `check_acl_by_cert` resolves the role and then throws it away, so the
+    /// reconciler had no idea it was talking to a receive-only follower and
+    /// happily told it to upload. Measured on the Mac follower: a share
+    /// declared `receive_only` was handed a `to_upload` list, and the client
+    /// executed it — 230 upload attempts against the canonical host.
+    ///
+    /// Returns `None` when the role cannot be established (no ACL enforcer, no
+    /// client certificate, or an unresolvable fingerprint). `None` must mean
+    /// "unconstrained", never "deny": the legacy bearer-token path has no cert
+    /// and must keep working exactly as before.
+    async fn resolved_role(
+        &self,
+        cert_id: Option<&CertIdentity>,
+        share: &str,
+    ) -> Option<EnforcedRole> {
+        let enforcer = self.acl_enforcer.as_ref()?;
+        let fp: CertFingerprint = cert_id?.fingerprint;
+        enforcer.resolve(&fp, share).await.ok()
+    }
+
     async fn check_acl_by_cert(
         &self,
         cert_id: Option<&CertIdentity>,
@@ -855,6 +877,8 @@ impl SyncService for SyncServiceImpl {
             "bidirectional",
         )
         .await?;
+        // DISK-0079: a receive-only follower must never be asked to upload.
+        let caller_role = self.resolved_role(cert_id.as_ref(), &share).await;
         let req = request.into_inner();
 
         // Build the server's current state.
@@ -1077,6 +1101,21 @@ impl SyncService for SyncServiceImpl {
             .selective_includes_for_node(tenant.as_deref(), &node_id, vault_id)
             .await?;
         to_download = Self::filter_proto_paths(to_download, &includes);
+        // DISK-0079: never hand upload work to a receive-only follower.
+        //
+        // The client now refuses such a list on its own (PR #168), but a
+        // guarantee enforced on only one side is one deployment away from
+        // being no guarantee at all — an older or third-party client would
+        // still obey. Dropping it here means the follower is never asked.
+        if matches!(caller_role, Some(EnforcedRole::ReceiveOnly)) && !to_upload.is_empty() {
+            tracing::warn!(
+                share = %share,
+                node_id = %node_id,
+                entries = to_upload.len(),
+                "reconciler produced upload work for a receive_only caller — dropping it"
+            );
+            to_upload.clear();
+        }
         to_upload = Self::filter_proto_paths(to_upload, &includes);
         to_delete = Self::filter_proto_paths(to_delete, &includes);
 
