@@ -169,11 +169,26 @@ async fn main() -> anyhow::Result<()> {
         "server",
     )
     .context("start share-index watchers for DISK_SHARE_ROOTS")?;
-    if _share_index.is_some() {
+    if let Some(handle) = _share_index.as_ref() {
         tracing::info!(
             shares = cfg.share_roots.len(),
             "share_index watcher spawned for DISK_SHARE_ROOTS"
         );
+
+        // DISK-0073: a row already marked `deleted=1` is not revived by writing
+        // the file again — measured on arcana-agents, where a re-delivered
+        // 17884-byte artefact kept `deleted=1` for minutes while a brand-new
+        // file in the same directory indexed live within ~40 s. Such rows are
+        // served to nobody and report no error, so without this the only way
+        // out was to notice the divergence by hand.
+        //
+        // A reconcile pass upserts every file it finds and an upsert clears the
+        // flag, so ask for one as soon as the watchers are armed. It is
+        // fail-closed (any walk or DB error aborts before the first mutation)
+        // and logs how many rows it revived, which turns a silent gap into a
+        // startup line.
+        handle.request_full_reconcile();
+        tracing::info!("share_index reconcile requested at startup (DISK-0073)");
     }
 
     // DISK-0070: SyncService serves any share absent from `share_roots` out of
