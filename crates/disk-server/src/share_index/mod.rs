@@ -65,6 +65,26 @@ pub struct ShareIndexHandle {
     task: JoinHandle<()>,
     stop: Arc<AtomicBool>,
     watcher_threads: Vec<std::thread::JoinHandle<()>>,
+    saturation: Arc<AtomicBool>,
+}
+
+impl ShareIndexHandle {
+    /// Request a full reconciliation of every configured share root.
+    ///
+    /// DISK-0071: a path whose row is `deleted=1` while its bytes are present on
+    /// disk is never served to any client and reports no error anywhere. Such
+    /// rows accumulate whenever tombstones are written for files that did not
+    /// actually disappear, and putting the bytes back does not clear them —
+    /// only a reconciliation does, because [`full_reconcile`] upserts every file
+    /// it finds on disk and an upsert sets `deleted = false`.
+    ///
+    /// This is the supported way to revive them: it reuses the existing
+    /// fail-closed reconciliation (any I/O or DB error aborts before the first
+    /// mutation) instead of touching `files.deleted` by hand. Reconciliation
+    /// starts on the index loop's next turn, within one poll interval.
+    pub fn request_full_reconcile(&self) {
+        self.saturation.store(true, Ordering::Release);
+    }
 }
 
 impl Drop for ShareIndexHandle {
@@ -185,8 +205,13 @@ pub fn spawn_share_index_watcher(
 
     drop(tx);
 
+    // The index loop owns one handle to the saturation flag; the returned
+    // ShareIndexHandle keeps another so callers can request a reconciliation
+    // (DISK-0071).
+    let loop_saturation = saturation.clone();
     let task = tokio::spawn(async move {
-        if let Err(e) = run_index_loop(rx, meta_db, node_id, canonical_roots, saturation).await {
+        if let Err(e) = run_index_loop(rx, meta_db, node_id, canonical_roots, loop_saturation).await
+        {
             tracing::error!(error = %e, "share_index loop exited");
         }
     });
@@ -195,6 +220,7 @@ pub fn spawn_share_index_watcher(
         task,
         stop,
         watcher_threads,
+        saturation,
     }))
 }
 
@@ -2040,6 +2066,7 @@ mod tests {
             task: loop_task,
             stop: stop.clone(),
             watcher_threads: vec![watcher_thread],
+            saturation: saturation.clone(),
         };
 
         // ── External watchdog: drop on a dedicated thread, bounded by
