@@ -55,8 +55,27 @@ jobs:
 
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
 
-      - name: Verify protoc
-        run: protoc --version
+      - name: Ensure protoc is available
+        # The self-hosted pool is heterogeneous: requiring the `docker` label
+        # (needed by `cross`) moves this job onto runners that have no
+        # preinstalled protoc, where a bare `protoc --version` dies with exit
+        # 127 before anything compiles. Same rootless fetch ci.yml already uses;
+        # no-op when protoc is present.
+        run: |
+          set -euo pipefail
+          if command -v protoc >/dev/null 2>&1; then
+            protoc --version
+            exit 0
+          fi
+          PROTOC_VERSION=25.3
+          PROTOC_DIR=$(mktemp -d "${RUNNER_TEMP:-/tmp}/protoc.XXXXXX")
+          curl -sSL -o "$PROTOC_DIR/protoc.zip" \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+          python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' \
+            "$PROTOC_DIR/protoc.zip" "$PROTOC_DIR"
+          chmod +x "$PROTOC_DIR/bin/protoc"
+          echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
+          "$PROTOC_DIR/bin/protoc" --version
 
       - name: Install cross
         run: cargo install cross --locked --quiet
@@ -158,8 +177,27 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
-      - name: Verify protoc
-        run: protoc --version
+      - name: Ensure protoc is available
+        # The self-hosted pool is heterogeneous: requiring the `docker` label
+        # (needed by `cross`) moves this job onto runners that have no
+        # preinstalled protoc, where a bare `protoc --version` dies with exit
+        # 127 before anything compiles. Same rootless fetch ci.yml already uses;
+        # no-op when protoc is present.
+        run: |
+          set -euo pipefail
+          if command -v protoc >/dev/null 2>&1; then
+            protoc --version
+            exit 0
+          fi
+          PROTOC_VERSION=25.3
+          PROTOC_DIR=$(mktemp -d "${RUNNER_TEMP:-/tmp}/protoc.XXXXXX")
+          curl -sSL -o "$PROTOC_DIR/protoc.zip" \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip"
+          python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' \
+            "$PROTOC_DIR/protoc.zip" "$PROTOC_DIR"
+          chmod +x "$PROTOC_DIR/bin/protoc"
+          echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
+          "$PROTOC_DIR/bin/protoc" --version
       - name: Install cross
         run: cargo install cross --locked --quiet
       - name: Build disk CLI
