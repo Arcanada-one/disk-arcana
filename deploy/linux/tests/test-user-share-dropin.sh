@@ -124,4 +124,33 @@ for mode in --install --verify; do
   fi
 done
 
-echo "DISK-0070 user drop-in contract: PASS (shipped drop-in valid, 3 bad configs rejected, diff/ownership guards held)"
+# 9. When the owner's session is unreachable — the real arcana-agents case, where
+#    /home/dev is drwxr-x--- and the runner is a different user — the declared
+#    `x-disk-expected-sync-root:` must carry the check instead of failing.
+if ! DISK_UNIT_OWNER="nonexistent-user-for-test" \
+  DISK_DROPIN_DIR="$work/dropins" \
+  bash "$INSTALLER" --dropin "$SHIPPED_DROPIN" >"$work/out.log" 2>&1; then
+  cat "$work/out.log" >&2
+  fail "the declared sync root must be used when the live value is unreachable"
+fi
+grep -q 'using the value declared in the drop-in' "$work/out.log" ||
+  fail "expected the declared-fallback notice, got: $(cat "$work/out.log")"
+grep -q 'getent: command not found' "$work/out.log" &&
+  fail "getent error leaked into the output"
+
+# 10. The shipped drop-in must actually declare it — otherwise check 9 passes
+#     for the wrong reason and the CI step would break again on that host.
+grep -q '^# *x-disk-expected-sync-root: *'"$SYNC_ROOT"'$' "$SHIPPED_DROPIN" ||
+  fail "shipped drop-in must declare x-disk-expected-sync-root: $SYNC_ROOT"
+
+# 11. A declared value that does not cover the sync root must still be rejected,
+#     so the fallback cannot become a way to skip the contract.
+sed 's|^# x-disk-expected-sync-root: .*|# x-disk-expected-sync-root: /somewhere/else|' \
+  "$SHIPPED_DROPIN" >"$work/stale-declared.conf"
+if DISK_UNIT_OWNER="nonexistent-user-for-test" \
+  DISK_DROPIN_DIR="$work/dropins" \
+  bash "$INSTALLER" --dropin "$work/stale-declared.conf" >"$work/out.log" 2>&1; then
+  fail "a declared sync root outside the share list must be rejected"
+fi
+
+echo "DISK-0070 user drop-in contract: PASS (shipped drop-in valid, 4 bad configs rejected, diff/ownership/declared-root guards held)"
