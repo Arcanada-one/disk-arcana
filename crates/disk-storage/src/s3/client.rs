@@ -1,9 +1,9 @@
 use std::time::Duration;
 
-use aws_sdk_s3::error::ProvideErrorMetadata;
-use aws_sdk_s3::Client;
 use aws_sdk_s3::config::{Builder as S3ConfigBuilder, Credentials, Region};
+use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::primitives::ByteStream;
+use aws_sdk_s3::Client;
 
 use crate::s3::config::S3BackendConfig;
 use crate::StorageError;
@@ -71,7 +71,11 @@ pub(crate) async fn put_object(
     .await
 }
 
-pub(crate) async fn get_object(client: &Client, bucket: &str, key: &str) -> Result<Vec<u8>, StorageError> {
+pub(crate) async fn get_object(
+    client: &Client,
+    bucket: &str,
+    key: &str,
+) -> Result<Vec<u8>, StorageError> {
     with_retry(|| async {
         let out = client
             .get_object()
@@ -91,7 +95,11 @@ pub(crate) async fn get_object(client: &Client, bucket: &str, key: &str) -> Resu
     .await
 }
 
-pub(crate) async fn delete_object(client: &Client, bucket: &str, key: &str) -> Result<(), StorageError> {
+pub(crate) async fn delete_object(
+    client: &Client,
+    bucket: &str,
+    key: &str,
+) -> Result<(), StorageError> {
     with_retry(|| async {
         client
             .delete_object()
@@ -108,8 +116,10 @@ pub(crate) async fn delete_object(client: &Client, bucket: &str, key: &str) -> R
 pub(crate) fn map_sdk_error<E: std::error::Error + ProvideErrorMetadata>(err: E) -> StorageError {
     let code = err.code().unwrap_or("unknown");
     let msg = format!("{code}: {err}");
-    if matches!(code, "InternalError" | "ServiceUnavailable" | "SlowDown" | "RequestTimeout")
-        || msg.contains("503")
+    if matches!(
+        code,
+        "InternalError" | "ServiceUnavailable" | "SlowDown" | "RequestTimeout"
+    ) || msg.contains("503")
         || msg.contains("429")
     {
         StorageError::S3Transient(msg)
