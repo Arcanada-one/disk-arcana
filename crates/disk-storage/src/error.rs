@@ -20,6 +20,9 @@ pub enum StorageError {
     #[error("sqlx: {0}")]
     Sqlx(#[from] sqlx::Error),
 
+    #[error("s3 transient: {0}")]
+    S3Transient(String),
+
     #[error("unsupported operation: {0}")]
     Unsupported(String),
 }

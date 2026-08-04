@@ -89,12 +89,6 @@ impl LocalDiskBackend {
     }
 }
 
-impl LocalDiskBackend {
-    pub(crate) fn meta(&self) -> &MetadataStore {
-        &self.meta
-    }
-}
-
 #[async_trait]
 impl StorageBackend for LocalDiskBackend {
     async fn put(
