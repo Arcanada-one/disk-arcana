@@ -31,6 +31,15 @@ pub use wire::{classify_client_error, classify_tonic_status, RemoteSync, SyncTra
 /// without inbound fs events to drive pull-side reconciliation.
 pub const POLL_INTERVAL: Duration = Duration::from_secs(5);
 
+/// DISK-0078: hard ceiling on one sync cycle.
+///
+/// A cycle has no business running for minutes: the observed hang sat
+/// motionless for 5+ minutes with zero log output. Ten minutes is deliberately
+/// generous — a large share doing real work must not be cut off — while still
+/// bounding the state an operator sees. Exceeding it is an error, not a
+/// silently prolonged `syncing`.
+pub const CYCLE_DEADLINE: Duration = Duration::from_secs(600);
+
 /// Backoff floor.
 pub const BACKOFF_BASE: Duration = Duration::from_secs(1);
 
@@ -85,6 +94,18 @@ pub enum LoopError {
     /// indistinguishable from health.
     #[error("transfer.all_failed — all {failed} of {attempted} transfers failed this cycle")]
     AllTransfersFailed { attempted: usize, failed: usize },
+
+    /// DISK-0078: the cycle exceeded its deadline and was abandoned.
+    ///
+    /// Measured on the Mac follower: after the server restarted, a cycle
+    /// began and never returned. `state` stayed `syncing` with
+    /// `last_success_at` frozen and `last_error` null for 5+ minutes of
+    /// sampling, the client log recorded not one line, and the file did not
+    /// grow by a byte — while TCP connections to the server were
+    /// ESTABLISHED. A state that can persist indefinitely without any
+    /// timestamp advancing is indistinguishable from health.
+    #[error("cycle.deadline_exceeded — sync cycle exceeded {secs}s and was abandoned")]
+    CycleDeadlineExceeded { secs: u64 },
 }
 
 impl LoopError {
@@ -94,7 +115,8 @@ impl LoopError {
         match self {
             LoopError::ShareUnknown
             | LoopError::TransportUnavailable
-            | LoopError::AllTransfersFailed { .. } => true,
+            | LoopError::AllTransfersFailed { .. }
+            | LoopError::CycleDeadlineExceeded { .. } => true,
             LoopError::AclRoleMismatch => false,
         }
     }
@@ -187,6 +209,9 @@ pub enum LoopTrigger {
 /// R6 wires Scan/Hash/Reconcile/gRPC into [`SyncLoop::begin_sync`].
 #[derive(Debug, Clone)]
 pub struct SyncLoop {
+    /// DISK-0078: per-cycle ceiling. Defaults to `CYCLE_DEADLINE`;
+    /// overridable so the guard can be tested without a ten-minute wait.
+    cycle_deadline: Duration,
     state: LoopState,
     backoff: Backoff,
     poll_interval: Duration,
@@ -212,12 +237,19 @@ impl SyncLoop {
             poll_interval: POLL_INTERVAL,
             backoff_until: None,
             last_error: None,
+            cycle_deadline: CYCLE_DEADLINE,
         }
     }
 
     /// Override the poll interval (tests).
     pub fn with_poll_interval(mut self, poll: Duration) -> Self {
         self.poll_interval = poll;
+        self
+    }
+
+    /// Override the per-cycle deadline (tests).
+    pub fn with_cycle_deadline(mut self, deadline: Duration) -> Self {
+        self.cycle_deadline = deadline;
         self
     }
 
@@ -290,7 +322,8 @@ impl SyncLoop {
                     // DISK-0077: Backoff maps to the schema string
                     // "unknown_share", which would misname the cause. A cycle
                     // that moved nothing is an error, and must read as one.
-                    LoopError::AllTransfersFailed { .. } => LoopState::Error,
+                    LoopError::AllTransfersFailed { .. }
+                    | LoopError::CycleDeadlineExceeded { .. } => LoopState::Error,
                     _ => LoopState::Backoff,
                 };
                 self.backoff_until = Some(now + delay);
@@ -337,7 +370,22 @@ impl SyncLoop {
         if !self.begin_sync(Instant::now(), trigger) {
             return None;
         }
-        let outcome = transport.execute().await;
+        // DISK-0078: bound the cycle. Without this the await is unconditional,
+        // and a transport that never returns leaves the share reporting
+        // `syncing` forever with no error and no advancing timestamp.
+        let deadline = self.cycle_deadline;
+        let outcome = match tokio::time::timeout(deadline, transport.execute()).await {
+            Ok(outcome) => outcome,
+            Err(_) => {
+                tracing::error!(
+                    deadline_secs = deadline.as_secs(),
+                    "sync cycle exceeded its deadline and was abandoned"
+                );
+                Err(LoopError::CycleDeadlineExceeded {
+                    secs: deadline.as_secs(),
+                })
+            }
+        };
         self.finish_sync(outcome, Instant::now(), rng);
         Some(outcome)
     }
@@ -375,6 +423,81 @@ mod tests {
     }
 
     // ----------- DISK-0077: a cycle that moved nothing is not a success -----
+
+    // ----------- DISK-0078: a cycle must not run forever -----------
+
+    /// A transport that never returns — the shape of the observed hang.
+    struct NeverReturns;
+
+    #[tonic::async_trait]
+    impl wire::SyncTransport for NeverReturns {
+        async fn execute(&mut self) -> Result<(), LoopError> {
+            // Sleeps far past the deadline. With tokio's paused clock this
+            // costs no wall time; without the deadline in run_iteration the
+            // test hangs until the harness kills it, which is exactly the
+            // production symptom.
+            tokio::time::sleep(Duration::from_secs(86_400)).await;
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_cycle_that_never_returns_is_abandoned_and_reported() {
+        // 50ms deadline against a transport that sleeps for a day: without the
+        // timeout in run_iteration this test hangs until the harness kills it,
+        // which is precisely the production symptom — the cycle begins and
+        // never returns, and the share reports `syncing` forever.
+        let mut s = SyncLoop::new().with_cycle_deadline(Duration::from_millis(50));
+        let mut rng = rng_seed();
+        let mut transport = NeverReturns;
+
+        let outcome = s
+            .run_iteration(&mut transport, LoopTrigger::Tick, &mut rng)
+            .await;
+
+        assert!(
+            matches!(outcome, Some(Err(LoopError::CycleDeadlineExceeded { .. }))),
+            "a cycle past its deadline must end with an error, got {outcome:?}"
+        );
+        assert_eq!(
+            s.state(),
+            LoopState::Error,
+            "state must not stay `syncing` — that is the field an operator checks"
+        );
+        assert!(s.last_error().is_some(), "last_error must name the failure");
+    }
+
+    #[tokio::test]
+    async fn a_cycle_that_finishes_within_the_deadline_is_unaffected() {
+        // The guard must not truncate honest work: a transport that returns
+        // promptly still drives the loop to Idle with no error.
+        struct Prompt;
+
+        #[tonic::async_trait]
+        impl wire::SyncTransport for Prompt {
+            async fn execute(&mut self) -> Result<(), LoopError> {
+                Ok(())
+            }
+        }
+
+        let mut s = SyncLoop::new().with_cycle_deadline(Duration::from_secs(30));
+        let mut rng = rng_seed();
+        let mut transport = Prompt;
+
+        let outcome = s
+            .run_iteration(&mut transport, LoopTrigger::Tick, &mut rng)
+            .await;
+
+        assert!(matches!(outcome, Some(Ok(()))), "got {outcome:?}");
+        assert_eq!(s.state(), LoopState::Idle);
+        assert!(s.last_error().is_none());
+    }
+
+    #[test]
+    fn cycle_deadline_exceeded_is_retryable() {
+        // The next cycle should try again: a hang may be transient.
+        assert!(LoopError::CycleDeadlineExceeded { secs: 600 }.should_backoff());
+    }
 
     #[test]
     fn all_transfers_failed_triggers_backoff() {
