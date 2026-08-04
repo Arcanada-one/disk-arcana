@@ -159,10 +159,6 @@ impl Drop for ServerHandle {
 /// A small race window remains between release and re-bind by the binary —
 /// acceptable for local tests; collisions surface as a startup failure that
 /// fails the test loudly rather than silently corrupting results.
-fn reserve_port() -> u16 {
-    reserve_ports::<1>()[0]
-}
-
 /// Reserve `N` DISTINCT ephemeral ports.
 ///
 /// Reserving one port at a time and dropping its listener immediately lets the
