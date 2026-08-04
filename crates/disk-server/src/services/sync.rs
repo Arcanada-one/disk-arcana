@@ -497,8 +497,9 @@ impl SyncService for SyncServiceImpl {
         self.check_acl_by_cert(cert_id.as_ref(), &share, WRITE_ROLES, "send_only")
             .await?;
         let mut stream = request.into_inner();
+        let share_root = self.root_for(&share);
 
-        let mut assembled: Vec<u8> = Vec::new();
+        let mut spool: Option<UploadSpool> = None;
         let mut expected_hash: Option<Vec<u8>> = None;
         let mut last_path: Option<String> = None;
         #[cfg(feature = "publisher-verify")]
@@ -511,7 +512,7 @@ impl SyncService for SyncServiceImpl {
             if last_path.is_none() {
                 Self::require_selective_path(&req.path, &includes)?;
                 let candidate = std::path::Path::new(&req.path);
-                path_guard::validate(candidate, self.root_for(&share))
+                path_guard::validate(candidate, share_root)
                     .map_err(|e| Status::invalid_argument(format!("path guard: {e}")))?;
                 last_path = Some(req.path.clone());
                 expected_hash = Some(req.content_hash.clone());
@@ -534,25 +535,36 @@ impl SyncService for SyncServiceImpl {
                         return Err(Status::data_loss("chunk integrity failure (T-Tampering)"));
                     }
                 }
-                assembled.extend_from_slice(&chunk.data);
+                if spool.is_none() {
+                    spool = Some(UploadSpool::create(share_root)?);
+                }
+                spool.as_mut().unwrap().append(&chunk.data)?;
             }
         }
+
+        let (resulting_hash, file_size, staged_tmp) = match spool {
+            Some(s) => {
+                let (hash, path, size) = s.finalize()?;
+                (hash, size, Some(path))
+            }
+            None => (disk_core::delta::blake3_hash(&[]), 0, None),
+        };
 
         // Verify final content hash.
         if let Some(ref expected) = expected_hash {
             if !expected.is_empty() {
-                let actual: [u8; 32] = disk_core::delta::blake3_hash(&assembled);
                 let expected_arr: [u8; 32] = expected
                     .as_slice()
                     .try_into()
                     .map_err(|_| Status::invalid_argument("invalid content_hash length"))?;
-                if actual != expected_arr {
-                    return Err(Status::data_loss("content_hash mismatch after assembly"));
+                if resulting_hash != expected_arr {
+                    if let Some(ref tmp) = staged_tmp {
+                        let _ = std::fs::remove_file(tmp);
+                    }
+                    return Err(Status::data_loss("content_hash mismatch"));
                 }
             }
         }
-
-        let resulting_hash = disk_core::delta::blake3_hash(&assembled);
 
         // ── Publisher verification gate (P4b step 15) ──────────────────────
         // Only compiled when `publisher-verify` feature is enabled.
@@ -596,7 +608,11 @@ impl SyncService for SyncServiceImpl {
                             if let Some(parent) = qpath.parent() {
                                 let _ = std::fs::create_dir_all(parent);
                             }
-                            let _ = std::fs::write(&qpath, &assembled);
+                            if let Some(ref src) = staged_tmp {
+                                let _ = std::fs::copy(src, &qpath);
+                            } else {
+                                let _ = std::fs::write(&qpath, []);
+                            }
 
                             // Audit row.
                             if let Some(ref audit) = self.audit {
@@ -625,11 +641,11 @@ impl SyncService for SyncServiceImpl {
         // ── Storage quota gate (DISK-0018) ─────────────────────────────────
         if let (Some(enforcer), Some(file_path)) = (&self.quota_enforcer, last_path.as_deref()) {
             enforcer
-                .check_upload(tenant.as_deref(), &share, file_path, assembled.len() as u64)
+                .check_upload(tenant.as_deref(), &share, file_path, file_size)
                 .await?;
         }
 
-        // ── Commit assembled bytes to sync_root (DISK-0043) ────────────────
+        // ── Commit staged bytes to sync_root (DISK-0043 / DISK-0077 spool) ─
         //
         // SRE write-order (binding): bytes DURABLE first, then MetaDb row.
         // Crash between rename and upsert → next sync re-derives row from
@@ -641,7 +657,6 @@ impl SyncService for SyncServiceImpl {
         // check is co-located with the write (defence-in-depth).
         if let Some(file_path) = last_path.as_deref() {
             let candidate = std::path::Path::new(file_path);
-            let share_root = self.root_for(&share);
 
             // Security: path_guard::validate BEFORE any write (V-AC-6 binding).
             let target = path_guard::validate(candidate, share_root)
@@ -669,14 +684,20 @@ impl SyncService for SyncServiceImpl {
                     .map_err(|e| Status::internal(format!("create parent dir: {e}")))?;
             }
 
-            // 1. Write to a temp file inside sync_root (same device → atomic rename).
-            let tmp_name = format!(".tmp-{}", rand::random::<u64>());
-            let tmp_path = share_root.join(&tmp_name);
-            std::fs::write(&tmp_path, &assembled)
-                .map_err(|e| Status::internal(format!("write temp: {e}")))?;
+            // 1. Use spool temp file, or create an empty staging file.
+            let empty_upload = staged_tmp.is_none();
+            let tmp_path = if let Some(path) = staged_tmp {
+                path
+            } else {
+                let tmp_name = format!(".tmp-{}", rand::random::<u64>());
+                let path = share_root.join(&tmp_name);
+                std::fs::File::create(&path)
+                    .map_err(|e| Status::internal(format!("create empty temp: {e}")))?;
+                path
+            };
 
-            // 2. fsync the temp file for durability.
-            {
+            // 2. fsync empty staging files (spool path already fsynced in finalize).
+            if empty_upload {
                 let f = std::fs::OpenOptions::new()
                     .write(true)
                     .open(&tmp_path)
@@ -704,8 +725,6 @@ impl SyncService for SyncServiceImpl {
                     })
                     .map(|d| d.as_nanos() as i64)
                     .unwrap_or(0);
-
-                let file_size = assembled.len() as u64;
 
                 // Advance the server's vector clock for this write.
                 let mut vc = VectorClock::new();
@@ -1245,6 +1264,64 @@ fn file_meta_to_proto(m: &FileMeta) -> FileMetadata {
         version_id: m.version_id.unwrap_or(0),
         parent_version_id: m.parent_version_id.unwrap_or(0),
         ..Default::default()
+    }
+}
+
+/// Streams incoming upload chunks to a temp file with incremental blake3 (DISK-0077).
+///
+/// Avoids holding the full object in RAM; bounded memory per connection.
+struct UploadSpool {
+    path: std::path::PathBuf,
+    file: std::fs::File,
+    hasher: blake3::Hasher,
+    size: u64,
+    keep_on_drop: bool,
+}
+
+impl UploadSpool {
+    fn create(share_root: &std::path::Path) -> Result<Self, Status> {
+        let tmp_name = format!(".tmp-{}", rand::random::<u64>());
+        let path = share_root.join(&tmp_name);
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|e| Status::internal(format!("create upload spool: {e}")))?;
+        Ok(Self {
+            path,
+            file,
+            hasher: blake3::Hasher::new(),
+            size: 0,
+            keep_on_drop: false,
+        })
+    }
+
+    fn append(&mut self, data: &[u8]) -> Result<(), Status> {
+        use std::io::Write;
+        self.file
+            .write_all(data)
+            .map_err(|e| Status::internal(format!("spool write: {e}")))?;
+        self.hasher.update(data);
+        self.size += data.len() as u64;
+        Ok(())
+    }
+
+    fn finalize(mut self) -> Result<([u8; 32], std::path::PathBuf, u64), Status> {
+        self.file
+            .sync_all()
+            .map_err(|e| Status::internal(format!("spool fsync: {e}")))?;
+        let hash = *self.hasher.finalize().as_bytes();
+        self.keep_on_drop = true;
+        let path = std::mem::take(&mut self.path);
+        Ok((hash, path, self.size))
+    }
+}
+
+impl Drop for UploadSpool {
+    fn drop(&mut self) {
+        if !self.keep_on_drop && !self.path.as_os_str().is_empty() {
+            let _ = std::fs::remove_file(&self.path);
+        }
     }
 }
 
