@@ -1,43 +1,41 @@
 # DISK-0001 orchestrator snapshot
 
-**Date:** 2026-08-03  
-**State:** **PARKED** — unpark CTA drained; orchestrator idle
+**Date:** 2026-08-04  
+**State:** **PARKED** — DISK-0070/0071 closed; orchestrator idle
 
 ## Fleet status
 
 | Host / lane | Verdict |
 |-------------|---------|
-| arcana-prod `:9443` | **PASS** |
-| arcana-agents `:9543` mesh | **PASS** (user unit PID 2292321, redeployed 2026-08-03) |
-| Mac R13 consumer | **PASS** (CTA-1 done 2026-08-03) |
+| arcana-agents `:9543` mesh | **PASS** (PID 3993652, shares=2 watchers) |
+| Mac R13 consumer | **PASS** (both shares syncing, Mach-O arm64) |
+| DISK-0070 | **done** 2026-08-04 |
+| DISK-0071 | **done** 2026-08-04 |
 | DISK-0067–0069 | **done** |
-| DISK-0062 | **done** (PR #25 `0c79c65`) |
 
 RB-011 **not opened**.
 
-## Unpark CTA (2026-08-03) — all complete
+## DISK-0070 closure evidence
 
-| # | Item | Status |
-|---|------|--------|
-| 1 | Mac native arm64 from `main` | **done** — Mach-O `~/.local/bin/disk`, LaunchAgent restarted |
-| 2 | PR #137 docs snapshot | **merged** `dd3dace` |
-| 3 | DISK-0062 x-disk-share | **done** (in `main` since 2026-06-24) |
-| 4 | F4 agents mesh redeploy | **done** — probes PASS |
+- `DISK_SHARE_ROOTS` includes `datarim-kb` + `hermes-artefacts`; startup log `shares=2`
+- Probe `reports/DISK-0070-replication-probe-20260804T1145Z.txt` indexed `deleted=0` within 4s
 
-## Mac live (2026-08-03, operator — current)
+## DISK-0071 closure evidence
 
-- `datarim-kb`: **syncing**
-- `hermes-artefacts`: **syncing**
-- No `server_unreachable` (stale follow-ups ignored)
-- Binary: Mach-O arm64 `~/.local/bin/disk` (native `cargo install` from `main`)
+- 19 tombstoned rows with bytes on disk revived via index upsert (touch)
+- 376 tombstoned rows remain where file absent (legitimate deletes)
+- Rename-over-target fix in main (#151); server running `disk0071` build
 
-## Code on main
+## Mac (operator 2026-08-04)
 
-- PR #136 `3e54b7b` — mesh client recovery (2026-08-02)
-- PR #137 `dd3dace` — orchestrator snapshot (2026-08-03)
-- PR #25 `0c79c65` — DISK-0062 x-disk-share (2026-06-24)
-- Probe scripts: `mesh-auth-probe.sh`, `mesh-hermes-probe.sh`, `mac-mesh-recover.sh`
+- `datarim-kb` + `hermes-artefacts`: **syncing**, no `server_unreachable`
+- Native arm64 `~/.local/bin/disk` only
 
-## Epic park
+## Track B research
 
-Mesh/fleet + unpark CTA lane **complete**. Epic `DISK-0001` remains `in_progress` in KB for operator gates (RB-011 skip-list, DISK-0057 long-run, INFRA rsync migration). Orchestrator idle until next fleet gate or backlog pick.
+`datarim/research/DISK-company-drive-azure-blob-2026-08-04.md` — **NO-GO** full Nextcloud replacement; **PILOT** for bounded PoC.
+
+## Next (operator gates only)
+
+- `release-deploy.yml` arcana-agents job (RB-012) for reproducible server updates
+- DISK-0057 long-run / INFRA rsync migration — backlog, not orchestrator-active
