@@ -49,6 +49,14 @@ def main():
     open(os.path.join(root, "notes", "healthy.md"), "w").write("ok")
     open(os.path.join(root, "notes", "wrongly-tombstoned.md"), "w").write("bytes are here")
 
+    # DISK-0090: a file reachable only THROUGH a symlinked directory. The
+    # indexer refuses symlinks, so its row is legitimately absent/tombstoned —
+    # counting it as a defect is a false positive, and six such paths under
+    # qa/playwright-CUBR-0081/{after,before} did exactly that on canon.
+    os.makedirs(os.path.join(root, "run-real"))
+    open(os.path.join(root, "run-real", "report.md"), "w").write("real bytes")
+    os.symlink("run-real", os.path.join(root, "linked"))
+
     db = os.path.join(tmp, "meta.sqlite")
     con = sqlite3.connect(db)
     con.executescript(SCHEMA)
@@ -58,6 +66,7 @@ def main():
     row(con, "kb", "notes/vanished.md", deleted=False)             # DEFECT 2
     row(con, "kb", "notes/properly-deleted.md", deleted=True)      # correct
     row(con, "kb", ".version-blobs/ab", deleted=True)              # benign: a directory
+    row(con, "kb", "linked/report.md", deleted=True)               # benign: behind a symlink
     row(con, "other", "somewhere.md", deleted=False)               # no root configured
     con.commit()
     con.close()
@@ -70,6 +79,15 @@ def main():
     kb = report["vaults"]["kb"]
 
     failures = []
+
+    if kb.get("unindexable_behind_symlink") != 1:
+        failures.append(
+            f"expected the symlinked path to be benign, got "
+            f"{kb.get('unindexable_behind_symlink')} — a file the indexer cannot "
+            "reach is not a defect"
+        )
+    if "linked/report.md" in kb["sample_tombstoned_but_present"]:
+        failures.append("a path behind a symlink was miscounted as a defect")
 
     if kb["tombstoned_but_present_on_disk"] != 1:
         failures.append(
@@ -121,7 +139,8 @@ def main():
             print("  -", f)
         return 1
     print("SELF-TEST PASSED: 1 tombstoned-but-present found, 1 live-but-missing found, "
-          "1 directory correctly treated as benign, unrooted vault reported, exit codes correct")
+          "1 directory and 1 symlinked path correctly treated as benign, "
+          "unrooted vault reported, exit codes correct")
     return 0
 
 
