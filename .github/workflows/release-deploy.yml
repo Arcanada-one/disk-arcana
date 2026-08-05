@@ -218,6 +218,85 @@ jobs:
           fail_on_unmatched_files: true
 
   # ──────────────────────────────────────────────────────────────────────────
+  # 1d. Build + sign macOS client binaries on tag (DISK-0010 install.sh assets).
+  #     Requires GitHub Secrets (see docs/runbooks/DISK-RB-013-macos-cli-release-signing.md).
+  #     Uses GitHub-hosted macos-14 (same pattern as build-windows-client).
+  # ──────────────────────────────────────────────────────────────────────────
+  build-macos-client:
+    name: Build macOS client (signed disk)
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            asset: disk-macos-arm64
+          - target: x86_64-apple-darwin
+            asset: disk-macos-x86_64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # v1.17.0
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+
+      - name: Install protoc
+        run: brew install protobuf
+
+      - name: Import Developer ID certificate
+        env:
+          DISK_MACOS_CERT_P12: ${{ secrets.DISK_MACOS_CERT_P12 }}
+          DISK_MACOS_CERT_PASSWORD: ${{ secrets.DISK_MACOS_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DISK_MACOS_CERT_P12}" ]]; then
+            echo "::error::DISK_MACOS_CERT_P12 secret is not configured — see docs/runbooks/DISK-RB-013-macos-cli-release-signing.md"
+            exit 1
+          fi
+          echo "$DISK_MACOS_CERT_P12" | base64 --decode > /tmp/disk-signing.p12
+          security create-keychain -p actions disk-sign.keychain
+          security default-keychain -s disk-sign.keychain
+          security unlock-keychain -p actions disk-sign.keychain
+          security import /tmp/disk-signing.p12 -k disk-sign.keychain \
+            -P "$DISK_MACOS_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions disk-sign.keychain
+
+      - name: Build disk CLI
+        run: cargo build --release -p disk-cli --bin disk --target ${{ matrix.target }}
+
+      - name: Sign and notarize
+        env:
+          DISK_SIGN_IDENTITY: ${{ secrets.DISK_SIGN_IDENTITY }}
+          DISK_NOTARY_KEYCHAIN_PROFILE: ${{ secrets.DISK_NOTARY_KEYCHAIN_PROFILE }}
+        run: |
+          set -euo pipefail
+          BIN="target/${{ matrix.target }}/release/disk"
+          if [[ -z "${DISK_SIGN_IDENTITY}" ]]; then
+            echo "::error::DISK_SIGN_IDENTITY secret is not configured"
+            exit 1
+          fi
+          if [[ -n "${DISK_NOTARY_KEYCHAIN_PROFILE}" ]]; then
+            xcrun notarytool store-credentials "$DISK_NOTARY_KEYCHAIN_PROFILE" \
+              --apple-id "${{ secrets.DISK_NOTARY_APPLE_ID }}" \
+              --team-id "${{ secrets.DISK_NOTARY_TEAM_ID }}" \
+              --password "${{ secrets.DISK_NOTARY_PASSWORD }}"
+          fi
+          bash scripts/sign-macos-cli.sh "$BIN"
+
+      - name: Stage release asset
+        run: |
+          cp "target/${{ matrix.target }}/release/disk" "${{ matrix.asset }}"
+          chmod +x "${{ matrix.asset }}"
+
+      - name: Attach macOS client to GitHub Release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3.0.2
+        with:
+          files: ${{ matrix.asset }}
+          fail_on_unmatched_files: true
+
+  # ──────────────────────────────────────────────────────────────────────────
   # 2. Deploy to arcana-devs — explicit workflow_dispatch target=dev ONLY.
   #    A tag push builds + attaches the release artifact but does NOT auto-deploy
   #    anywhere: deploys (dev or prod) are always an explicit operator action so
