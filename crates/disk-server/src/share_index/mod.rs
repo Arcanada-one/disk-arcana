@@ -821,6 +821,28 @@ async fn full_reconcile(
                 }
                 let abs = root.join(&file_meta.path);
                 if !seen.contains(&abs) {
+                    // DISK-0081: absence from `seen` is not proof the file is
+                    // gone — it only means this walk did not reach it. Confirm
+                    // against the filesystem before writing a tombstone, because
+                    // a tombstone propagates and the follower DELETES the file.
+                    //
+                    // This cost real data: after the DISK-0080 sweep removed
+                    // index rows, the next reconcile tombstoned 210 insights and
+                    // 3319 qa paths, the follower executed those deletions, and
+                    // canon went from 174 insights / 2528 qa files to 0 / 9.
+                    // The watcher's Tombstone arm has had this exact guard since
+                    // DISK-0071 (`resolve_present_file`); the reconcile arm never
+                    // got it, and a guard that exists on only one of two paths to
+                    // the same destructive operation is not a guard.
+                    if resolve_present_file(root, &abs).is_some() {
+                        tracing::warn!(
+                            vault_id = %vault_id,
+                            path = %abs.display(),
+                            "share_index reconcile skipped a tombstone: the walk did not \
+                             see this path but the file is on disk (DISK-0081)"
+                        );
+                        continue;
+                    }
                     if let Err(e) =
                         tombstone_local_file(meta_db, vault_id, node_id, root, &abs).await
                     {
@@ -1016,6 +1038,73 @@ fn unix_now_secs() -> i64 {
 
 #[cfg(test)]
 mod tests {
+
+    /// DISK-0081: a reconcile must never tombstone a path whose file is on disk.
+    ///
+    /// This reproduces the data loss I caused. The DISK-0080 sweep removed index
+    /// rows; the next reconcile saw rows its walk did not match and wrote
+    /// tombstones; the follower executed them and canon went from 174 insights /
+    /// 2528 qa files to 0 / 9.
+    ///
+    /// My DISK-0080 tests asserted the sweep removed the right ROWS and spared
+    /// unclaimed ones — both true, and both useless here, because nothing
+    /// asserted what the reconciler DOES next. This asserts the consequence.
+    ///
+    /// The divergence is staged the only way it can occur in practice: a row
+    /// exists for a path the walk does not return. `.version-blobs` is skipped
+    /// by `walk_files` (DISK-0077) while its files are plainly on disk, so a row
+    /// pointing there is present-but-unseen — exactly the shape that turned into
+    /// a tombstone.
+    #[tokio::test]
+    async fn reconcile_never_tombstones_a_path_whose_file_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("meta.sqlite")).await.unwrap();
+        let root = dir.path().join("kb");
+        std::fs::create_dir_all(root.join(".version-blobs/ab")).unwrap();
+        let root = std::fs::canonicalize(&root).unwrap();
+
+        // A file the walk WILL see, so the reconcile has normal work to do.
+        std::fs::write(root.join("plain.md"), b"ordinary").unwrap();
+
+        // A file that exists but the walk skips.
+        let hidden_rel = ".version-blobs/ab/deadbeef";
+        let hidden = root.join(hidden_rel);
+        std::fs::write(&hidden, b"present but unseen").unwrap();
+
+        // Index a live row for that unseen path.
+        let row = FileMeta {
+            path: PathBuf::from(hidden_rel),
+            content_hash: [0xEE; 32],
+            size: 18,
+            mtime_ns: 1,
+            inode: None,
+            vector_clock: disk_core::VectorClock::default(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "seed".into(),
+            encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
+        };
+        db.upsert_file_scoped(None, "kb", &row).await.unwrap();
+
+        let mut roots = HashMap::new();
+        roots.insert("kb".to_string(), root.clone());
+
+        full_reconcile(&db, "node", &roots).await.unwrap();
+
+        let after = db.list_files_scoped(None, "kb").await.unwrap();
+        let hidden_row = after
+            .iter()
+            .find(|r| r.path.as_os_str() == hidden_rel)
+            .expect("the row must still exist");
+        assert!(
+            !hidden_row.deleted,
+            "a path whose file is on disk must never be tombstoned — that tombstone \
+             propagates and the follower DELETES the file"
+        );
+        assert!(hidden.exists(), "the file itself must be untouched");
+    }
 
     // ── DISK-0080: legacy shadow rows ──────────────────────────────────────
 
