@@ -680,6 +680,79 @@ fn walk_files_impl(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<()
 /// callback that could not `try_send` because the bounded channel was full.
 /// Returns the number of rows that claimed `deleted=1` while their file was
 /// present on disk — silently undeliverable paths this pass revived (DISK-0071).
+/// DISK-0080: drop legacy `vault_id = "default"` rows that shadow a configured
+/// share.
+///
+/// `MetaDb::upsert_file()` — the unscoped wrapper — silently wrote
+/// `vault_id="default"`. One production caller used it (the client's E2EE wire
+/// index, fixed in #171) while every other writer scoped by share name, so a
+/// path could end up with two live rows carrying different content hashes. The
+/// server then advertised metadata from one row while serving bytes matching
+/// the other, and the client's hash check rejected every download and retried
+/// forever, because a hash mismatch is never transient.
+///
+/// Measured on the canon host before this sweep: 669 paths lived under both
+/// `datarim-kb` and `default`, of which 6 disagreed on `content_hash`. For all
+/// six the share-scoped row matched the bytes on disk — verified by blake3, not
+/// by size alone — and the `default` row was an older copy (smaller, and with
+/// an earlier mtime in every case).
+///
+/// The rule is deliberately narrow: a `default` row is removed **only** when
+/// the same path also exists under a configured share. A `default` row for a
+/// path no share claims is left untouched, because this function cannot know
+/// whether some other deployment owns it. Removing rows we cannot attribute
+/// would trade a delivery bug for data loss.
+async fn sweep_shadowed_default_rows(
+    meta_db: &MetaDb,
+    canonical_roots: &HashMap<String, PathBuf>,
+) -> Result<usize, ShareIndexError> {
+    const LEGACY_VAULT: &str = "default";
+
+    // A configured share literally named "default" is its own owner — nothing
+    // to sweep, and sweeping would delete live rows.
+    if canonical_roots.contains_key(LEGACY_VAULT) {
+        return Ok(0);
+    }
+
+    let legacy_rows = meta_db.list_files_scoped(None, LEGACY_VAULT).await?;
+    if legacy_rows.is_empty() {
+        return Ok(0);
+    }
+
+    // Paths claimed by a configured share.
+    let mut claimed: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for vault_id in canonical_roots.keys() {
+        for row in meta_db.list_files_scoped(None, vault_id).await? {
+            claimed.insert(row.path.to_string_lossy().to_string());
+        }
+    }
+
+    let mut removed = 0usize;
+    for row in legacy_rows {
+        let path = row.path.to_string_lossy().to_string();
+        if !claimed.contains(&path) {
+            continue; // not ours to judge
+        }
+        if let Err(e) = meta_db.delete_file_scoped(None, LEGACY_VAULT, &path).await {
+            tracing::warn!(
+                path = %path,
+                error = %e,
+                "share_index: could not remove shadowed legacy row"
+            );
+            continue;
+        }
+        removed += 1;
+    }
+
+    if removed > 0 {
+        tracing::warn!(
+            removed,
+            "share_index removed legacy vault_id=\"default\" rows shadowing a configured share (DISK-0080)"
+        );
+    }
+    Ok(removed)
+}
+
 async fn full_reconcile(
     meta_db: &MetaDb,
     node_id: &str,
@@ -699,6 +772,9 @@ async fn full_reconcile(
     }
 
     // ── Phase 2: apply mutations ──
+    // DISK-0080: clear legacy shadow rows first, so the reconcile below sees a
+    // single row per path and cannot re-derive a conflicting hash.
+    let _swept = sweep_shadowed_default_rows(meta_db, canonical_roots).await?;
     let mut revived_total = 0usize;
     for (vault_id, root) in canonical_roots {
         let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
@@ -940,6 +1016,110 @@ fn unix_now_secs() -> i64 {
 
 #[cfg(test)]
 mod tests {
+
+    // ── DISK-0080: legacy shadow rows ──────────────────────────────────────
+
+    async fn seed_row(db: &MetaDb, vault: &str, path: &str, hash: [u8; 32], size: u64) {
+        let meta = disk_core::types::FileMeta {
+            path: PathBuf::from(path),
+            content_hash: hash,
+            size,
+            mtime_ns: 1,
+            inode: None,
+            vector_clock: disk_core::VectorClock::default(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "seed".into(),
+            encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
+        };
+        db.upsert_file_scoped(None, vault, &meta).await.unwrap();
+    }
+
+    /// A `default` row that shadows a path a configured share also holds is the
+    /// exact shape that broke delivery: two live rows, different hashes, so the
+    /// server advertised one and served the other and the client retried
+    /// forever. It must go.
+    #[tokio::test]
+    async fn sweep_removes_a_default_row_shadowing_a_configured_share() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("meta.sqlite")).await.unwrap();
+        let root = dir.path().join("kb");
+        std::fs::create_dir_all(&root).unwrap();
+        let root = std::fs::canonicalize(&root).unwrap();
+
+        seed_row(&db, "kb", "notes/a.md", [0xAA; 32], 10).await;
+        seed_row(&db, "default", "notes/a.md", [0xBB; 32], 7).await;
+
+        let mut roots = HashMap::new();
+        roots.insert("kb".to_string(), root);
+
+        let removed = sweep_shadowed_default_rows(&db, &roots).await.unwrap();
+        assert_eq!(removed, 1, "the shadowing row must be removed");
+
+        let left = db.list_files_scoped(None, "default").await.unwrap();
+        assert!(left.is_empty(), "no shadow row may survive: {left:?}");
+
+        let kept = db.list_files_scoped(None, "kb").await.unwrap();
+        assert_eq!(kept.len(), 1, "the share-scoped row must survive untouched");
+        assert_eq!(
+            kept[0].content_hash, [0xAA; 32],
+            "the surviving row must be the share's own, not the legacy copy"
+        );
+    }
+
+    /// The sweep must NOT touch a `default` row for a path no configured share
+    /// claims. This function cannot know whether another deployment owns it,
+    /// and deleting what we cannot attribute would trade a delivery bug for
+    /// data loss.
+    #[tokio::test]
+    async fn sweep_leaves_unclaimed_default_rows_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("meta.sqlite")).await.unwrap();
+        let root = dir.path().join("kb");
+        std::fs::create_dir_all(&root).unwrap();
+        let root = std::fs::canonicalize(&root).unwrap();
+
+        seed_row(&db, "kb", "notes/a.md", [0xAA; 32], 10).await;
+        seed_row(&db, "default", "somewhere/else.md", [0xCC; 32], 5).await;
+
+        let mut roots = HashMap::new();
+        roots.insert("kb".to_string(), root);
+
+        let removed = sweep_shadowed_default_rows(&db, &roots).await.unwrap();
+        assert_eq!(removed, 0, "an unclaimed legacy row must not be removed");
+        assert_eq!(
+            db.list_files_scoped(None, "default").await.unwrap().len(),
+            1,
+            "the unclaimed row must still be there"
+        );
+    }
+
+    /// If a share is genuinely named "default" it owns those rows, and sweeping
+    /// would delete live data.
+    #[tokio::test]
+    async fn sweep_is_a_noop_when_default_is_itself_a_configured_share() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("meta.sqlite")).await.unwrap();
+        let root = dir.path().join("default");
+        std::fs::create_dir_all(&root).unwrap();
+        let root = std::fs::canonicalize(&root).unwrap();
+
+        seed_row(&db, "default", "notes/a.md", [0xAA; 32], 10).await;
+
+        let mut roots = HashMap::new();
+        roots.insert("default".to_string(), root);
+
+        let removed = sweep_shadowed_default_rows(&db, &roots).await.unwrap();
+        assert_eq!(removed, 0);
+        assert_eq!(
+            db.list_files_scoped(None, "default").await.unwrap().len(),
+            1,
+            "a configured share named default must keep its rows"
+        );
+    }
+
     // ── DISK-0077: the server's own stores must never enter the index ──
 
     #[test]
