@@ -1288,6 +1288,10 @@ fn file_meta_to_proto(m: &FileMeta) -> FileMetadata {
 }
 
 #[cfg(test)]
+// DISK-0080: this module uses the unscoped `upsert_file`, deprecated for
+// production because it writes vault_id="default" and produced duplicate
+// rows per path. These tests do not care which vault they write to.
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
