@@ -39,6 +39,14 @@ sudo ./scripts/install-linux.sh --binary ./target/release/disk
 
 ## macOS
 
+Prebuilt binaries (`disk-macos-arm64`, `disk-macos-x86_64`) must be **Developer ID signed and notarized** for Gatekeeper. See [DISK-RB-013](runbooks/DISK-RB-013-macos-cli-release-signing.md).
+
+```bash
+curl -fsSL https://disk.arcanada.ai/install.sh | sh
+```
+
+Or build from source:
+
 ```bash
 cargo build --release -p disk-cli
 sudo ./scripts/install-macos.sh --binary ./target/release/disk
