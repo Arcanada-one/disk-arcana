@@ -125,3 +125,109 @@ pub fn scan_root(
 ) -> Result<Vec<FileMeta>, ScannerError> {
     FileScanner::new(root.to_path_buf(), filter, HashMap::new(), node_id).scan()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::filter::{Filter, FilterRules};
+    use std::collections::HashMap;
+
+    fn scanner_for(root: &std::path::Path, last_known: HashMap<PathBuf, FileMeta>) -> FileScanner {
+        FileScanner::new(
+            root.to_path_buf(),
+            Filter::from_config(&FilterRules::default()).unwrap(),
+            last_known,
+            "test-node".into(),
+        )
+    }
+
+    fn meta_for(path: &str, size: u64, mtime_ns: i64, hash: [u8; 32]) -> FileMeta {
+        FileMeta {
+            path: PathBuf::from(path),
+            content_hash: hash,
+            size,
+            mtime_ns,
+            inode: None,
+            vector_clock: crate::VectorClock::default(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "test-node".into(),
+            encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
+        }
+    }
+
+    /// DISK-0078: a populated `last_known` cache must actually suppress
+    /// re-hashing.
+    ///
+    /// The sync loop passed `HashMap::new()`, so every cycle streamed and
+    /// blake3'd the entire tree — 13k files on the Mac follower — which is the
+    /// CPU-bound work behind the 99.3% CPU measured while a cycle looked stuck.
+    ///
+    /// This asserts the fast path OBSERVABLY, not by timing: the cache is
+    /// seeded with a deliberately WRONG hash for an unchanged file. If the
+    /// scanner honours the cache it returns that wrong hash; if it re-hashes,
+    /// it returns the real one. Timing-based assertions would be flaky; this
+    /// cannot be.
+    #[test]
+    fn a_matching_cache_entry_suppresses_rehashing() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("note.md");
+        std::fs::write(&file, b"real content").unwrap();
+
+        let stat = std::fs::metadata(&file).unwrap();
+        let size = stat.len();
+        let mtime_ns = {
+            use std::os::unix::fs::MetadataExt;
+            stat.mtime() * 1_000_000_000 + stat.mtime_nsec()
+        };
+
+        let sentinel = [0x5A; 32];
+        let mut cache = HashMap::new();
+        cache.insert(
+            PathBuf::from("note.md"),
+            meta_for("note.md", size, mtime_ns, sentinel),
+        );
+
+        let scanned = scanner_for(dir.path(), cache).scan().unwrap();
+        let entry = scanned
+            .iter()
+            .find(|m| m.path.as_os_str() == "note.md")
+            .expect("file must be scanned");
+
+        assert_eq!(
+            entry.content_hash, sentinel,
+            "an unchanged file must take the cached hash — the scanner re-hashed instead"
+        );
+    }
+
+    /// The fast path must not survive a real change, or a modified file would
+    /// sync with a stale hash. Same sentinel technique, mtime deliberately off.
+    #[test]
+    fn a_stale_cache_entry_does_not_suppress_rehashing() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("note.md");
+        std::fs::write(&file, b"real content").unwrap();
+
+        let sentinel = [0x5A; 32];
+        let mut cache = HashMap::new();
+        // mtime that cannot match what the filesystem reports.
+        cache.insert(
+            PathBuf::from("note.md"),
+            meta_for("note.md", 12, 1, sentinel),
+        );
+
+        let scanned = scanner_for(dir.path(), cache).scan().unwrap();
+        let entry = scanned
+            .iter()
+            .find(|m| m.path.as_os_str() == "note.md")
+            .expect("file must be scanned");
+
+        assert_ne!(
+            entry.content_hash, sentinel,
+            "a stale cache entry must be ignored and the file re-hashed"
+        );
+        assert_eq!(entry.content_hash, super::hash_file(&file).unwrap());
+    }
+}
