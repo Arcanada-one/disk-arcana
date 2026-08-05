@@ -358,9 +358,24 @@ impl<'a> RemoteSync<'a> {
                 version_id: None,
                 parent_version_id: None,
             };
-            if let Err(e) = db.upsert_file(&meta).await {
+            // DISK-0080: scope the row to this share.
+            //
+            // `upsert_file()` is the unscoped convenience wrapper — it silently
+            // substitutes VAULT_DEFAULT, so this one call wrote its rows under
+            // vault_id="default" while every other writer used the share name.
+            // The result was TWO rows per path with different content hashes:
+            // measured on the canon host, `.kb-last-push` carried
+            // 71A1F033… under `datarim-kb` (the file's real blake3) and a stale
+            // CEFDE447… under `default`, both deleted=0, both state=clean. The
+            // server then advertised metadata from one row while the bytes
+            // matched the other, the client's hash check correctly rejected the
+            // download, and it repeated forever — 37 logged occurrences,
+            // ~2 per 10 minutes, never converging because a hash mismatch is
+            // not transient.
+            if let Err(e) = db.upsert_file_scoped(None, &self.share, &meta).await {
                 tracing::warn!(
                     path = %rel_path,
+                    share = %self.share,
                     error = %e,
                     "E2EE: failed to persist wire index (non-fatal)"
                 );
