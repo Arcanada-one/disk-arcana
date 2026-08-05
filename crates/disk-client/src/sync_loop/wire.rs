@@ -513,6 +513,8 @@ impl<'a> SyncTransport for RemoteSync<'a> {
         let mut downloads_attempted: usize = 0;
         let mut downloads_failed: usize = 0;
         let mut first_download_error: Option<String> = None;
+        // DISK-0078: set when the server rejects the session mid-cycle.
+        let mut session_rejected = false;
         // ── Scan ────────────────────────────────────────────────────────
         let local_files: Vec<FileMetadata> = if self.scan_root.as_os_str().is_empty() {
             Vec::new()
@@ -568,7 +570,22 @@ impl<'a> SyncTransport for RemoteSync<'a> {
             .await
         {
             Ok(r) => r,
-            Err(e) => return Err(classify_client_error(&e)),
+            Err(e) => {
+                // DISK-0078: the token cache was write-only, so a session the
+                // server had already invalidated still looked healthy to
+                // `ensure_client_session` and re-authentication never ran.
+                // Dropping it here makes the next cycle recover on its own —
+                // measured on the Mac follower, this state otherwise required
+                // a manual daemon restart, three times in one day.
+                if DiskClient::is_session_rejected(&e) {
+                    tracing::warn!(
+                        share = %self.share,
+                        "server rejected the session — clearing the cached token so the next cycle re-authenticates"
+                    );
+                    self.client.clear_session_token().await;
+                }
+                return Err(classify_client_error(&e));
+            }
         };
 
         // ── Execute actions ─────────────────────────────────────────────
@@ -701,6 +718,9 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                                 if first_download_error.is_none() {
                                     first_download_error = Some(e.to_string());
                                 }
+                                if DiskClient::is_session_rejected(&e) {
+                                    session_rejected = true;
+                                }
                                 tracing::warn!(
                                     path = %to_download.path,
                                     error = %e,
@@ -722,6 +742,9 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                             downloads_failed += 1;
                             if first_download_error.is_none() {
                                 first_download_error = Some(e.to_string());
+                            }
+                            if DiskClient::is_session_rejected(&e) {
+                                session_rejected = true;
                             }
                             tracing::warn!(
                                 path = %to_download.path,
@@ -1054,6 +1077,13 @@ impl<'a> SyncTransport for RemoteSync<'a> {
         // DISK-0077: every attempted download failed — the share received
         // nothing. A per-file error repeated across every file is a
         // share-level failure and must reach last_error.
+        if session_rejected {
+            tracing::warn!(
+                share = %self.share,
+                "server rejected the session during transfers — clearing the cached token"
+            );
+            self.client.clear_session_token().await;
+        }
         if downloads_failed > 0 && downloads_failed == downloads_attempted {
             let first =
                 first_download_error.unwrap_or_else(|| "unknown transfer error".to_string());

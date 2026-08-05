@@ -267,6 +267,32 @@ impl DiskClient {
             .ok_or(ClientError::NotAuthenticated)
     }
 
+    /// DISK-0078: forget the cached session token.
+    ///
+    /// The cache was write-only: `session_token()` returns whatever was last
+    /// stored, so after the server restarted and invalidated the session the
+    /// client still reported a healthy token. `ensure_client_session` gates
+    /// re-authentication on `session_token().is_err()`, which was therefore
+    /// never true, and the daemon issued request after request with a token
+    /// the server had already forgotten — thousands of
+    /// `session expired or unknown` failures, three manual restarts in one day.
+    ///
+    /// Clearing the cache makes the next `ensure_client_session` re-authenticate
+    /// on its own.
+    pub async fn clear_session_token(&self) {
+        *self.session_token.write().await = None;
+    }
+
+    /// True when the gRPC failure says the server no longer accepts this
+    /// session, i.e. re-authentication is the right response.
+    ///
+    /// Matches on the status code rather than the message: the server has used
+    /// both "session expired or unknown" and plain `Unauthenticated`, and a
+    /// message-substring check would silently stop working if either changed.
+    pub fn is_session_rejected(err: &ClientError) -> bool {
+        matches!(err, ClientError::Status(s) if s.code() == tonic::Code::Unauthenticated)
+    }
+
     /// Inject a session token directly into the cache.
     ///
     /// Production code should obtain a token via [`authenticate`]; this entry

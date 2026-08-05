@@ -75,6 +75,9 @@ struct RejectUploadStub {
     upload_call_count: Arc<AtomicU32>,
     /// When `true`, `delta_upload` returns `Internal` (upload rejected).
     reject_uploads: bool,
+    /// DISK-0078: when `true`, `exchange_state` answers `Unauthenticated` —
+    /// the status the server returns once a restart has invalidated a session.
+    expire_session: bool,
 }
 
 #[tonic::async_trait]
@@ -86,6 +89,9 @@ impl SyncService for RejectUploadStub {
         &self,
         _req: Request<SyncStateRequest>,
     ) -> Result<Response<SyncStateResponse>, Status> {
+        if self.expire_session {
+            return Err(Status::unauthenticated("session expired or unknown"));
+        }
         let mut q = self.responses.lock().await;
         let r = if q.is_empty() {
             SyncStateResponse::default()
@@ -143,6 +149,19 @@ struct Fixture {
 }
 
 async fn spawn_stub(responses: Vec<SyncStateResponse>, reject_uploads: bool) -> Fixture {
+    spawn_stub_inner(responses, reject_uploads, false).await
+}
+
+/// DISK-0078 variant: the server rejects the session on `exchange_state`.
+async fn spawn_stub_expiring_sessions() -> Fixture {
+    spawn_stub_inner(Vec::new(), false, true).await
+}
+
+async fn spawn_stub_inner(
+    responses: Vec<SyncStateResponse>,
+    reject_uploads: bool,
+    expire_session: bool,
+) -> Fixture {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind 0");
     let port = listener.local_addr().expect("local_addr").port();
 
@@ -160,6 +179,7 @@ async fn spawn_stub(responses: Vec<SyncStateResponse>, reject_uploads: bool) -> 
         responses: Arc::new(AsyncMutex::new(responses)),
         upload_call_count: Arc::clone(&upload_call_count),
         reject_uploads,
+        expire_session,
     };
 
     let identity = Identity::from_pem(&cert_pem, &key_pem);
@@ -531,5 +551,75 @@ async fn bidirectional_share_still_uploads() {
         fx.upload_call_count.load(Ordering::SeqCst),
         1,
         "a bidirectional share must still upload"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// DISK-0078: a rejected session must clear the cached token.
+// ---------------------------------------------------------------------------
+
+/// The token cache was write-only: `session_token()` returned whatever was
+/// last stored, so after a server restart invalidated the session the client
+/// still reported a healthy token. `ensure_client_session` gates
+/// re-authentication on `session_token().is_err()`, which was therefore never
+/// true — the daemon kept using a token the server had already forgotten, and
+/// recovery required a manual restart (three times on 2026-08-04).
+///
+/// After a rejected cycle the cache must be empty; that is what makes the next
+/// `ensure_client_session` re-authenticate on its own.
+#[tokio::test]
+async fn a_rejected_session_clears_the_cached_token() {
+    let scan_root = tempdir().expect("tempdir");
+    let fx = spawn_stub_expiring_sessions().await;
+    let client = connect(&fx).await;
+
+    // Seed a token, exactly as a successful authenticate() would.
+    client.set_session_token("stale-token".into()).await;
+    assert!(
+        client.session_token().await.is_ok(),
+        "precondition: the cache holds a token"
+    );
+
+    let mut transport = RemoteSync::with_scan_root(
+        &client,
+        SHARE_NAME,
+        scan_root.path().to_path_buf(),
+        "reauth-node",
+    );
+
+    let outcome = transport.execute().await;
+    assert!(
+        outcome.is_err(),
+        "an unauthenticated cycle must not report success"
+    );
+
+    assert!(
+        client.session_token().await.is_err(),
+        "a rejected session must leave the token cache empty so the next \
+         ensure_client_session re-authenticates"
+    );
+}
+
+/// The clear must be narrow: an ordinary cycle keeps its token. Otherwise the
+/// daemon would re-authenticate on every iteration.
+#[tokio::test]
+async fn a_healthy_cycle_keeps_its_token() {
+    let scan_root = tempdir().expect("tempdir");
+    let fx = spawn_stub(vec![SyncStateResponse::default()], false).await;
+    let client = connect(&fx).await;
+
+    client.set_session_token("live-token".into()).await;
+
+    let mut transport = RemoteSync::with_scan_root(
+        &client,
+        SHARE_NAME,
+        scan_root.path().to_path_buf(),
+        "healthy-node",
+    );
+    transport.execute().await.expect("cycle must succeed");
+
+    assert!(
+        client.session_token().await.is_ok(),
+        "a healthy cycle must not discard its session"
     );
 }
