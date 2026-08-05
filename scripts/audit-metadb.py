@@ -61,6 +61,22 @@ def parse_roots(spec):
     return roots
 
 
+def _reached_through_symlink(root, rel_path):
+    """True when the path is, or sits behind, a symlink.
+
+    The indexer refuses symlinked entries so it cannot escape the share
+    root. A path reachable only by traversing one is therefore correctly
+    missing from the index, and counting it as a defect is a false
+    positive.
+    """
+    cur = root
+    for part in rel_path.split("/")[:-1]:
+        cur = os.path.join(cur, part)
+        if os.path.islink(cur):
+            return True
+    return os.path.islink(os.path.join(root, rel_path))
+
+
 def audit(db_path, roots):
     con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     report = {"db": db_path, "roots": roots, "vaults": {}, "unrooted_vaults": []}
@@ -77,6 +93,7 @@ def audit(db_path, roots):
             continue
 
         live = dead = 0
+        unindexable = 0               # reachable only through a symlink: correctly absent
         tombstoned_but_present = []   # the real defect: bytes on disk, row says deleted
         tombstoned_dirs = 0           # NOT a defect: index tracks files only
         live_but_missing = []         # row says present, nothing on disk
@@ -87,6 +104,17 @@ def audit(db_path, roots):
             abs_path = os.path.join(root, path)
             is_file = os.path.isfile(abs_path)
             is_dir = os.path.isdir(abs_path)
+            # DISK-0090: the indexer never follows symlinks -- walk_files rejects
+            # a symlinked entry outright, so a file reachable only THROUGH a
+            # symlinked directory legitimately has no live row. os.path.isfile()
+            # DOES follow symlinks, so without this check those paths read as
+            # "tombstoned but present" forever. Measured on canon: six files
+            # under qa/playwright-CUBR-0081/{after,before}/ -- both symlinks to
+            # run-* directories -- were reported as defects while the index was
+            # in fact correct to omit them.
+            if is_file and _reached_through_symlink(root, path):
+                unindexable += 1
+                continue
             if deleted:
                 dead += 1
                 if is_file:
@@ -104,6 +132,7 @@ def audit(db_path, roots):
             "tombstoned_rows": dead,
             "tombstoned_but_present_on_disk": len(tombstoned_but_present),
             "tombstoned_paths_that_are_directories": tombstoned_dirs,
+            "unindexable_behind_symlink": unindexable,
             "live_but_missing_from_disk": len(live_but_missing),
             "sample_tombstoned_but_present": tombstoned_but_present[:10],
             "sample_live_but_missing": live_but_missing[:10],
@@ -144,6 +173,7 @@ def main():
             print(f"  DEFECT tombstoned but on disk    {r['tombstoned_but_present_on_disk']}")
             print(f"  DEFECT live but missing on disk  {r['live_but_missing_from_disk']}")
             print(f"  benign: tombstoned dirs          {r['tombstoned_paths_that_are_directories']}")
+            print(f"  benign: behind a symlink         {r['unindexable_behind_symlink']}")
             for p in r["sample_tombstoned_but_present"]:
                 print(f"    tombstoned-but-present: {p}")
             for p in r["sample_live_but_missing"]:
