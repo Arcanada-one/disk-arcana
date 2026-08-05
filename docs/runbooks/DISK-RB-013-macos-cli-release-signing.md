@@ -14,7 +14,15 @@ Gatekeeper trust for the public `disk` CLI binary (v0.1.0+). Operators run this 
 | Install target | `/usr/local/bin/disk` | `scripts/install-macos.sh --binary <path>` |
 | CI job | `.github/workflows/release-deploy.yml` → `build-macos-client` | Tag push `v*.*.*`, `macos-14` runner |
 
-arcana-devs is **Linux-only** — codesign/notarytool cannot run there. Build/sign on operator Mac or macOS CI.
+arcana-devs is **Linux-only** — codesign/notarytool cannot run there. On DEVS, verify **packaging only**:
+
+```bash
+# From disk-arcana repo on arcana-devs (or any Linux host)
+./scripts/verify-macos-release-assets.sh              # list assets on latest tag
+DISK_VERSION=v0.1.0 ./scripts/verify-macos-release-assets.sh --download  # + Mach-O probe
+```
+
+Build/sign on operator Mac or macOS CI (`build-macos-client` job, `macos-14` runner).
 
 ## Operator prerequisites (stop if any missing)
 
@@ -90,10 +98,11 @@ disk=./dist/macos/disk-macos-arm64   # or signed target/release/disk
 codesign --verify --strict -vvv "$disk"
 # expect: valid on disk; satisfies its Designated Requirement
 
+spctl --assess --type execute -vv "$disk"
+# expect: accepted (source=Notarized Developer ID when notarized)
+
 spctl -a -vv -t install "$disk"
-# expect: accepted
-#   source=Notarized Developer ID   (when notarized)
-#   source=Developer ID             (signed only — may still quarantine on download)
+# expect: accepted (install/quarantine context)
 
 ./"$disk" --help
 ```
@@ -123,6 +132,7 @@ Then `curl -fsSL https://disk.arcanada.ai/install.sh | sh` on macOS will fetch a
 
 ## Related
 
+- `scripts/verify-macos-release-assets.sh` — DEVS/Linux release asset probe (no codesign)
 - `scripts/sign-macos-cli.sh` — sign + optional notarize + verify
 - `scripts/build-macos-release.sh` — dual-arch release build
 - `scripts/install.sh` — public installer (expects signed release assets)

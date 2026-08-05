@@ -106,10 +106,13 @@ else
   echo "    Gatekeeper may still block downloaded binaries without notarization on modern macOS."
 fi
 
-echo "==> spctl -a -vv -t install"
-if ! spctl -a -vv -t install "$BINARY" 2>&1 | tee /dev/stderr | grep -qiE 'accepted|allow'; then
-  echo "error: spctl did not report accepted/allow — binary is not Gatekeeper-trusted yet" >&2
+echo "==> spctl --assess --type execute -vv"
+if ! spctl --assess --type execute -vv "$BINARY" 2>&1 | tee /dev/stderr | grep -qiE 'accepted|allow'; then
+  echo "error: spctl --assess did not report accepted/allow" >&2
   exit 1
 fi
+
+echo "==> spctl -a -t install -vv (download/install context)"
+spctl -a -vv -t install "$BINARY" 2>&1 | tee /dev/stderr || true
 
 echo "==> OK: $BINARY is signed (and notarized when profile was set)"
