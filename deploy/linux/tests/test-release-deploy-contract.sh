@@ -282,7 +282,13 @@ grep -qF 'name: Stage runner probe (read-only)' "$STAGE_PROBE_WORKFLOW" ||
 stage_probe_on="$(sed -n '/^on:/,/^permissions:/p' "$STAGE_PROBE_WORKFLOW")"
 [[ "$stage_probe_on" == *'workflow_dispatch:'* ]] ||
   fail "group-scoped stage probe is not workflow-dispatch enabled"
-! grep -qE '^[[:space:]]+(push|pull_request|schedule|workflow_call):' <<<"$stage_probe_on" ||
+stage_probe_trigger_count="$(awk '
+  /^on:$/ {in_on=1; next}
+  /^permissions:/ {in_on=0}
+  in_on && /^  [a-zA-Z0-9_-]+:$/ {count++}
+  END {print count + 0}
+' "$STAGE_PROBE_WORKFLOW")"
+[[ "$stage_probe_trigger_count" == 1 ]] ||
   fail "group-scoped stage probe has an additional trigger"
 grep -qF 'permissions: {}' "$STAGE_PROBE_WORKFLOW" ||
   fail "group-scoped stage probe permissions are not empty"
@@ -292,22 +298,24 @@ grep -qF 'labels: [self-hosted, Linux, X64, disk-arcana-stage]' <<<"$stage_probe
   fail "group-scoped stage probe does not require the exact dedicated labels"
 grep -qF 'environment: staging' <<<"$stage_probe_block" ||
   fail "group-scoped stage probe does not use the staging environment"
-! grep -qE '^[[:space:]]*uses:' "$STAGE_PROBE_WORKFLOW" ||
+! grep -qE '^[[:space:]]*-[[:space:]]*uses:' "$STAGE_PROBE_WORKFLOW" ||
   fail "group-scoped stage probe is not actionless"
 ! grep -qE '^[[:space:]]*(if|continue-on-error):' <<<"$stage_probe_block" ||
   fail "group-scoped stage probe contains a skippable or non-blocking step"
 
 stage_source_guard="$(sed -n '/^      - name: Exact main source$/,/^      - name: Read-only readiness verdict$/p' \
   "$STAGE_PROBE_WORKFLOW")"
-[[ "$stage_source_guard" == *'[[ "$GITHUB_REF" == refs/heads/main ]]'* ]] ||
-  fail "group-scoped stage probe does not require exact main"
-[[ "$stage_source_guard" == *'[[ "$GITHUB_REPOSITORY" == Arcanada-one/disk-arcana ]]'* ]] ||
-  fail "group-scoped stage probe does not require the Disk repository"
-[[ "$stage_source_guard" == *'Arcanada-one/disk-arcana/.github/workflows/stage-runner-probe.yml@refs/heads/main'* ]] ||
-  fail "group-scoped stage probe does not require its exact main workflow reference"
 ! grep -qE '^[[:space:]]*(if|then|elif|else|case|while|until|for)[[:space:]]' \
   <<<"$stage_source_guard" ||
   fail "group-scoped stage probe exact-main guard is conditional"
+grep -qFx '          [[ "$GITHUB_REF" == refs/heads/main ]]' <<<"$stage_source_guard" ||
+  fail "group-scoped stage probe does not execute the exact-main guard directly"
+grep -qFx '          [[ "$GITHUB_REPOSITORY" == Arcanada-one/disk-arcana ]]' \
+  <<<"$stage_source_guard" ||
+  fail "group-scoped stage probe does not execute the repository guard directly"
+grep -qFx '          [[ "$GITHUB_WORKFLOW_REF" == Arcanada-one/disk-arcana/.github/workflows/stage-runner-probe.yml@refs/heads/main ]]' \
+  <<<"$stage_source_guard" ||
+  fail "group-scoped stage probe does not execute its exact workflow-reference guard directly"
 
 [[ "$stage_probe_block" == *'[[ "$(id -u)" != 0 ]]'* ]] ||
   fail "group-scoped stage probe does not reject root execution"
@@ -347,6 +355,12 @@ stage_source_guard="$(sed -n '/^      - name: Exact main source$/,/^      - name
   fail "group-scoped stage probe does not require StartLimitBurst=5"
 [[ "$stage_probe_block" == *'curl --fail --silent --show-error --max-time 10 -o /dev/null'* ]] ||
   fail "group-scoped stage probe does not require a body-suppressed health check"
+[[ "$(grep -cE '^[[:space:]]*curl[[:space:]]' <<<"$stage_probe_block")" -eq 1 ]] ||
+  fail "group-scoped stage probe contains an additional network request"
+[[ "$(grep -cF 'http://127.0.0.1:9446/health' <<<"$stage_probe_block")" -eq 1 ]] ||
+  fail "group-scoped stage probe health request is not loopback-only"
+! grep -qE '^[[:space:]]*(ssh|scp|sftp|nc|ncat|netcat|wget|gh)[[:space:]]' \
+  <<<"$stage_probe_block" || fail "group-scoped stage probe contains an external I/O command"
 
 ! grep -qE '(^|[;&|])[[:space:]]*(rm|mv|cp|install|touch|mkdir|chmod|chown|setfacl|tee|truncate|mount|umount|kill|pkill|reboot|shutdown|apt|apt-get|dnf|yum|pacman|snap)[[:space:]]|systemctl[[:space:]]+(--user[[:space:]]+)?(enable|disable|start|stop|restart|reload|daemon-reload|mask|unmask|edit|link|preset)|loginctl[[:space:]]+(enable-linger|disable-linger)|(^|[;&|])[[:space:]]*(podman|docker)[[:space:]]+(run|create|start|stop|restart|rm|build|pull|push|exec)' \
   <<<"$stage_probe_block" || fail "group-scoped stage probe contains a host mutation"
@@ -693,6 +707,14 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
     "stage probe action step"
   printf 'PASS  added action step is rejected for the intended reason\n'
 
+  extra_trigger_stage_probe="$fixture_root/stage-probe-extra-trigger.yml"
+  sed '/^  workflow_dispatch:$/a\  repository_dispatch:' \
+    "$STAGE_PROBE_WORKFLOW" >"$extra_trigger_stage_probe"
+  run_stage_probe_fixture "$extra_trigger_stage_probe" \
+    'FAIL  group-scoped stage probe has an additional trigger' \
+    "additional stage probe trigger"
+  printf 'PASS  additional stage probe trigger is rejected for the intended reason\n'
+
   conditional_main_stage_probe="$fixture_root/stage-probe-conditional-main.yml"
   awk '
     !mutated && index($0, "[[ \"$GITHUB_REF\" == refs/heads/main ]]") {
@@ -710,6 +732,31 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
     'FAIL  group-scoped stage probe exact-main guard is conditional' \
     "conditional exact-main guard"
   printf 'PASS  conditional exact-main guard is rejected for the intended reason\n'
+
+  inert_main_stage_probe="$fixture_root/stage-probe-inert-main-function.yml"
+  awk '
+    !mutated && index($0, "[[ \"$GITHUB_REF\" == refs/heads/main ]]") {
+      match($0, /[^ ]/)
+      prefix=substr($0, 1, RSTART - 1)
+      print prefix "source_guard() {"
+      print "  " $0
+      in_guard=1
+      mutated=1
+      next
+    }
+    in_guard && index($0, "[[ \"$GITHUB_WORKFLOW_REF\"") {
+      print "  " $0
+      print prefix "}"
+      in_guard=0
+      next
+    }
+    in_guard {print "  " $0; next}
+    {print}
+  ' "$STAGE_PROBE_WORKFLOW" >"$inert_main_stage_probe"
+  run_stage_probe_fixture "$inert_main_stage_probe" \
+    'FAIL  group-scoped stage probe does not execute the exact-main guard directly' \
+    "inert exact-main function"
+  printf 'PASS  inert exact-main function is rejected for the intended reason\n'
 
   mutating_stage_probe="$fixture_root/stage-probe-systemd-mutation.yml"
   sed '/rootless_userns=/a\          systemctl restart disk-arcana-server' \
@@ -734,6 +781,14 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
     'FAIL  group-scoped stage probe writes to a host path' \
     "stage read-write redirection"
   printf 'PASS  stage read-write redirection is rejected for the intended reason\n'
+
+  offhost_curl_stage_probe="$fixture_root/stage-probe-offhost-curl.yml"
+  sed '/^          hostname$/i\          curl --fail --silent https://example.com/' \
+    "$STAGE_PROBE_WORKFLOW" >"$offhost_curl_stage_probe"
+  run_stage_probe_fixture "$offhost_curl_stage_probe" \
+    'FAIL  group-scoped stage probe contains an additional network request' \
+    "off-host stage probe request"
+  printf 'PASS  off-host stage probe request is rejected for the intended reason\n'
 
   docker_accept_stage_probe="$fixture_root/stage-probe-docker-accept.yml"
   sed 's/\[\[ "$docker_socket_writable" == false \]\]/[[ "$docker_socket_writable" == true ]]/' \

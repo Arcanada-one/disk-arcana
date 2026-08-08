@@ -1,0 +1,100 @@
+# INFRA-0370: actionless probe for the restricted staging runner group.
+#
+# This workflow intentionally has no `uses:` steps and performs no host
+# mutation. It must prove the dedicated runner's least-privilege and service
+# durability contract before release-deploy.yml may target staging.
+
+name: Stage runner probe (read-only)
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  probe:
+    name: Dedicated staging runner readiness
+    environment: staging
+    runs-on:
+      group: disk-arcana-stage
+      labels: [self-hosted, Linux, X64, disk-arcana-stage]
+    timeout-minutes: 10
+    steps:
+      - name: Exact main source
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$GITHUB_REPOSITORY" == Arcanada-one/disk-arcana ]]
+          [[ "$GITHUB_WORKFLOW_REF" == Arcanada-one/disk-arcana/.github/workflows/stage-runner-probe.yml@refs/heads/main ]]
+
+      - name: Read-only readiness verdict
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          bool_command() {
+            if "$@" >/dev/null 2>&1; then printf true; else printf false; fi
+          }
+
+          subid_count() {
+            local file="$1"
+            awk -F: -v user="$(id -un)" '
+              $1 == user && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ {total += $3}
+              END {print total + 0}
+            ' "$file" 2>/dev/null
+          }
+
+          [[ "$(id -u)" != 0 ]]
+          [[ " $(id -Gn) " == *" disk-arcana-deploy "* ]]
+
+          rootless_userns=false
+          if command -v unshare >/dev/null 2>&1; then
+            rootless_userns="$(bool_command unshare --user --map-root-user true)"
+          fi
+          subuid_count="$(subid_count /etc/subuid)"
+          subgid_count="$(subid_count /etc/subgid)"
+          user_systemd="$(bool_command systemctl --user show-environment)"
+          linger="$(loginctl show-user "$(id -u)" -p Linger --value 2>/dev/null || printf unknown)"
+          podman="$(bool_command command -v podman)"
+          docker_socket_writable="$(bool_command test -w /var/run/docker.sock)"
+          runner_services="$(systemctl list-units --type=service --all 'actions.runner.*' \
+            --no-legend --no-pager 2>/dev/null | awk 'END {print NR + 0}')"
+
+          [[ "$rootless_userns" == true ]]
+          (( subuid_count >= 65536 ))
+          (( subgid_count >= 65536 ))
+          [[ "$user_systemd" == true ]]
+          [[ "$linger" == yes ]]
+          [[ "$podman" == true ]]
+          [[ "$docker_socket_writable" == false ]]
+          [[ "$runner_services" == 1 ]]
+
+          sudo_listing="$(LC_ALL=C sudo -n -l 2>/dev/null)"
+          mapfile -t sudo_commands < <(printf '%s\n' "$sudo_listing" | awk '
+            /NOPASSWD:/ {
+              sub(/^[[:space:]]*\([^)]*\)[[:space:]]*NOPASSWD:[[:space:]]*/, "")
+              print
+            }
+          ')
+          [[ "${#sudo_commands[@]}" -eq 1 ]]
+          [[ "${sudo_commands[0]}" == '/usr/local/sbin/disk-arcana-deploy-broker --deploy *' ]]
+
+          [[ -f /etc/systemd/system/disk-arcana-server.service ]]
+          [[ "$(systemctl is-active disk-arcana-server 2>/dev/null)" == active ]]
+          [[ "$(systemctl show disk-arcana-server -p UnitFileState --value 2>/dev/null)" == enabled ]]
+          [[ "$(systemctl show disk-arcana-server -p Restart --value 2>/dev/null)" == on-failure ]]
+          [[ "$(systemctl show disk-arcana-server -p StartLimitIntervalUSec --value 2>/dev/null)" == 2min ]]
+          [[ "$(systemctl show disk-arcana-server -p StartLimitBurst --value 2>/dev/null)" == 5 ]]
+          curl --fail --silent --show-error --max-time 10 -o /dev/null \
+            http://127.0.0.1:9446/health
+
+          hostname
+          uname -r
+          uname -m
+          systemd-analyze --version | sed -n '1p'
+          printf 'runner=%s uid=%s rootless_userns=%s subuid_count=%s subgid_count=%s user_systemd=%s linger=%s podman=%s docker_socket_writable=%s runner_services=%s\n' \
+            "$RUNNER_NAME" "$(id -u)" "$rootless_userns" "$subuid_count" \
+            "$subgid_count" "$user_systemd" "$linger" "$podman" \
+            "$docker_socket_writable" "$runner_services"
+          printf 'sudo_surface=exact-broker unit=present active=active UnitFileState=enabled Restart=on-failure StartLimitIntervalUSec=2min StartLimitBurst=5 health=ok\n'
