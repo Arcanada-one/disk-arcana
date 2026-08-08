@@ -6,7 +6,7 @@ IFS=$'\n\t'
 
 ROOT_REPO="$(git rev-parse --show-toplevel)"
 INSTALLER="$ROOT_REPO/deploy/linux/install.sh"
-UNIT="$ROOT_REPO/deploy/linux/disk-arcana-server.service"
+UNIT_SOURCE="$ROOT_REPO/deploy/linux/disk-arcana-server.service"
 TMP="$(mktemp -d)"
 trap 'rm -rf -- "$TMP"' EXIT
 TESTS=0
@@ -20,6 +20,7 @@ setup_case() {
   FAKE_ROOT="$CASE/root"
   JOURNAL_DIR="$CASE/audit"
   BINARY="$CASE/disk-arcana-server"
+  UNIT="$CASE/disk-arcana-server.service"
   OUTPUT="$CASE/output"
   FLAGS="$CASE/flags"
   SHIMS="$CASE/shims"
@@ -33,6 +34,7 @@ setup_case() {
   chmod 0600 "$FAKE_ROOT/etc/disk-arcana/env"
   printf 'cold binary\n' >"$BINARY"
   chmod 0755 "$BINARY"
+  install -m 0644 "$UNIT_SOURCE" "$UNIT"
 
   cat >"$SHIMS/hostname" <<'SHIM'
 #!/usr/bin/env bash
@@ -103,6 +105,15 @@ run_installer || { sed -n '1,80p' "$OUTPUT" >&2; fail "bootstrap with existing s
   fail "bootstrap did not preserve the existing group while creating the user"
 pass "cold bootstrap supports an existing service group without an existing user"
 
+setup_case unsafe-journal
+chmod 0755 "$JOURNAL_DIR"
+if run_installer; then
+  fail "world-readable bootstrap journal directory was accepted"
+fi
+assert_cold_absent
+[[ ! -e "$JOURNAL_DIR/install-current" ]] || fail "unsafe journal directory was written"
+pass "cold bootstrap rejects an unsafe journal directory before mutation"
+
 setup_case rollback
 if run_installer DISK_ARCANA_INSTALL_TEST_FAIL_AT=HEALTH_VERIFIED; then
   fail "injected cold-bootstrap failure returned success"
@@ -113,6 +124,19 @@ assert_cold_absent
 grep -qF 'state=FAILED_RECOVERED' "$JOURNAL_DIR/install-current" ||
   fail "rollback did not persist recovered state"
 pass "synchronous cold-bootstrap failure restores the absent baseline"
+
+for failure_point in CREATE_ACCOUNT STAGE_BINARY ACTIVATE_UNIT; do
+  setup_case "sync-${failure_point,,}"
+  if run_installer DISK_ARCANA_INSTALL_TEST_FAIL_AT="$failure_point"; then
+    fail "injected $failure_point failure returned success"
+  fi
+  assert_cold_absent
+  [[ ! -e "$JOURNAL_DIR/test-user-exists" && ! -e "$JOURNAL_DIR/test-group-exists" ]] ||
+    fail "$failure_point rollback retained created service account"
+  grep -qF 'state=FAILED_RECOVERED' "$JOURNAL_DIR/install-current" ||
+    fail "$failure_point failure did not persist recovered state"
+  pass "synchronous $failure_point failure restores the absent baseline"
+done
 
 for state in INVENTORIED ACCOUNT_READY DIRECTORIES_READY FILES_INSTALLED SERVICE_ENABLED HEALTH_VERIFIED; do
   setup_case "crash-$state"

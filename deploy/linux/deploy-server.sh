@@ -365,6 +365,17 @@ recover_current() {
   local prior_state backup expected_prefix
   [[ -f "$CURRENT_JOURNAL" && ! -L "$CURRENT_JOURNAL" ]] || return 0
   prior_state="$(journal_get state)" || return 1
+  case "$prior_state" in
+    FAILED_RECOVERY_REQUIRED|FAILED_RECOVERED)
+      printf 'state=%s manual_recovery_required=true\n' "$prior_state" >&2
+      return 1
+      ;;
+    BACKUP_WRITTEN|FILES_STAGED|FILES_ACTIVATED|DAEMON_RELOADED|SERVICE_RESTARTED|HEALTH_VERIFIED|COMMITTED) ;;
+    *)
+      printf 'state=UNKNOWN manual_recovery_required=true\n' >&2
+      return 1
+      ;;
+  esac
   TX_COMMIT="$(journal_get commit)" || return 1
   [[ "$TX_COMMIT" =~ ^[0-9a-f]{40}$ ]] || return 1
   backup="$(journal_get backup)" || return 1

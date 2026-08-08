@@ -74,6 +74,8 @@ readonly ENV_FILE="$CONFIG_ROOT/env"
 readonly DATA_ROOT="$ROOT/var/lib/disk-arcana"
 readonly LOG_ROOT="$ROOT/var/log/disk-arcana"
 readonly JOURNAL="$JOURNAL_DIR/install-current"
+readonly TMP_BINARY="$ROOT/usr/local/bin/.disk-arcana-server.bootstrap.$$"
+readonly TMP_UNIT="$ROOT/etc/systemd/system/.disk-arcana-server.service.bootstrap.$$"
 readonly -a DIRECTORY_NAMES=(config tls gpg data log)
 readonly -a DIRECTORY_PATHS=("$CONFIG_ROOT" "$CONFIG_ROOT/tls" "$CONFIG_ROOT/gpg" "$DATA_ROOT" "$LOG_ROOT")
 readonly -a DIRECTORY_MODES=(0750 0750 0700 0750 0750)
@@ -95,6 +97,18 @@ assert_no_symlink_components() {
     relative="${path#/}"; current=""
   fi
   IFS=/ read -r -a components <<<"$relative"
+  for component in "${components[@]}"; do
+    [[ -n "$component" && "$component" != . && "$component" != .. ]] || return 1
+    current="$current/$component"
+    [[ ! -L "$current" ]] || return 1
+  done
+}
+
+assert_no_symlink_components_unrooted() {
+  local path="$1" current="" component
+  local -a components=()
+  [[ "$path" == /* ]] || return 1
+  IFS=/ read -r -a components <<<"${path#/}"
   for component in "${components[@]}"; do
     [[ -n "$component" && "$component" != . && "$component" != .. ]] || return 1
     current="$current/$component"
@@ -241,7 +255,7 @@ restore_directories() {
 
 rollback() {
   systemctl disable --now disk-arcana-server >/dev/null 2>&1 || true
-  rm -f -- "$LIVE_BINARY" "$LIVE_UNIT"
+  rm -f -- "$TMP_BINARY" "$TMP_UNIT" "$LIVE_BINARY" "$LIVE_UNIT"
   systemctl daemon-reload >/dev/null 2>&1 || true
   restore_directories || return 1
   chmod "$TX_ENV_MODE" "$ENV_FILE" || return 1
@@ -252,6 +266,22 @@ rollback() {
   if [[ "$TX_GROUP_EXISTED" == 0 ]] && service_group_exists; then
     if (( TEST_MODE )); then rm -f -- "$JOURNAL_DIR/test-group-exists"; else groupdel disk-arcana || return 1; fi
   fi
+}
+
+fail_after_inventory() {
+  local message="$1"
+  if rollback; then
+    TX_STATE=FAILED_RECOVERED
+    write_journal || true
+  else
+    TX_STATE=FAILED_RECOVERY_REQUIRED
+    write_journal || true
+  fi
+  die "$message"
+}
+
+should_fail_at() {
+  (( TEST_MODE )) && [[ "${DISK_ARCANA_INSTALL_TEST_FAIL_AT:-}" == "$1" ]]
 }
 
 recover_unfinished() {
@@ -277,6 +307,16 @@ recover_unfinished() {
   return 3
 }
 
+assert_no_symlink_components_unrooted "$JOURNAL_DIR" || die "journal directory has a symlink component"
+[[ "$(stat -c '%a:%u:%g' "$JOURNAL_DIR")" == "700:$OWNER_UID:$OWNER_GID" ]] ||
+  die "root-issued journal directory has unsafe metadata"
+for source_path in "$BINARY_PATH" "$UNIT_PATH"; do
+  assert_no_symlink_components_unrooted "$source_path" || die "bootstrap source has a symlink component"
+  [[ "$(stat -c '%u:%g' "$source_path")" == "$OWNER_UID:$OWNER_GID" ]] ||
+    die "bootstrap source has unsafe ownership"
+  source_mode="$(stat -c '%a' "$source_path")"
+  (( (8#$source_mode & 0022) == 0 )) || die "bootstrap source is group/world writable"
+done
 [[ "$(hostname 2>/dev/null)" == "$EXPECTED_HOSTNAME" ]] || die "hostname mismatch"
 
 set +e
@@ -306,44 +346,50 @@ inventory_directories || die "cold-bootstrap directory inventory failed"
 transition INVENTORIED || die "could not persist cold-bootstrap inventory"
 
 if [[ "$TX_USER_EXISTED" == 0 ]]; then
-  create_service_account || die "could not create service account"
+  if should_fail_at CREATE_ACCOUNT || ! create_service_account; then
+    fail_after_inventory "could not create service account"
+  fi
 fi
-resolve_service_ids || die "could not resolve service account"
-chown "$OWNER_UID:$SERVICE_GID" "$ENV_FILE" || { rollback || true; die "could not secure service environment"; }
-chmod 0640 "$ENV_FILE" || { rollback || true; die "could not secure service environment"; }
-transition ACCOUNT_READY || { rollback || true; die "could not persist account state"; }
+resolve_service_ids || fail_after_inventory "could not resolve service account"
+chown "$OWNER_UID:$SERVICE_GID" "$ENV_FILE" || fail_after_inventory "could not secure service environment"
+chmod 0640 "$ENV_FILE" || fail_after_inventory "could not secure service environment"
+transition ACCOUNT_READY || fail_after_inventory "could not persist account state"
 
-ensure_directories || { rollback || true; die "could not create service directories"; }
-transition DIRECTORIES_READY || { rollback || true; die "could not persist directory state"; }
+ensure_directories || fail_after_inventory "could not create service directories"
+transition DIRECTORIES_READY || fail_after_inventory "could not persist directory state"
 
-tmp_binary="$(dirname "$LIVE_BINARY")/.disk-arcana-server.bootstrap.$$"
-tmp_unit="$(dirname "$LIVE_UNIT")/.disk-arcana-server.service.bootstrap.$$"
-install -o "$OWNER_UID" -g "$OWNER_GID" -m 0755 "$BINARY_PATH" "$tmp_binary"
-install -o "$OWNER_UID" -g "$OWNER_GID" -m 0644 "$UNIT_PATH" "$tmp_unit"
-fsync_path "$tmp_binary"; fsync_path "$tmp_unit"
-mv -f -- "$tmp_binary" "$LIVE_BINARY"; mv -f -- "$tmp_unit" "$LIVE_UNIT"
-fsync_path "$(dirname "$LIVE_BINARY")"; fsync_path "$(dirname "$LIVE_UNIT")"
-transition FILES_INSTALLED || { rollback || true; die "could not persist installed state"; }
+if should_fail_at STAGE_BINARY ||
+  ! install -o "$OWNER_UID" -g "$OWNER_GID" -m 0755 "$BINARY_PATH" "$TMP_BINARY"; then
+  fail_after_inventory "could not stage bootstrap binary"
+fi
+install -o "$OWNER_UID" -g "$OWNER_GID" -m 0644 "$UNIT_PATH" "$TMP_UNIT" ||
+  fail_after_inventory "could not stage bootstrap unit"
+fsync_path "$TMP_BINARY" || fail_after_inventory "could not fsync bootstrap binary"
+fsync_path "$TMP_UNIT" || fail_after_inventory "could not fsync bootstrap unit"
+mv -f -- "$TMP_BINARY" "$LIVE_BINARY" || fail_after_inventory "could not activate bootstrap binary"
+if should_fail_at ACTIVATE_UNIT || ! mv -f -- "$TMP_UNIT" "$LIVE_UNIT"; then
+  fail_after_inventory "could not activate bootstrap unit"
+fi
+fsync_path "$(dirname "$LIVE_BINARY")" || fail_after_inventory "could not fsync binary directory"
+fsync_path "$(dirname "$LIVE_UNIT")" || fail_after_inventory "could not fsync unit directory"
+transition FILES_INSTALLED || fail_after_inventory "could not persist installed state"
 
-systemctl daemon-reload >/dev/null 2>&1 || { rollback || true; die "daemon reload failed"; }
-systemctl enable --now disk-arcana-server >/dev/null 2>&1 || { rollback || true; die "cold service start failed"; }
-transition SERVICE_ENABLED || { rollback || true; die "could not persist enabled state"; }
+systemctl daemon-reload >/dev/null 2>&1 || fail_after_inventory "daemon reload failed"
+systemctl enable --now disk-arcana-server >/dev/null 2>&1 || fail_after_inventory "cold service start failed"
+transition SERVICE_ENABLED || fail_after_inventory "could not persist enabled state"
 
 health_body="$(curl --fail --silent --show-error --max-time 10 http://127.0.0.1:9446/health 2>/dev/null)" || {
-  rollback || true; die "cold service health failed"
+  fail_after_inventory "cold service health failed"
 }
 [[ "$(printf '%s' "$health_body" | tr -d '[:space:]')" == *'"status":"ok"'* ]] || {
-  rollback || true; die "cold service health failed"
+  fail_after_inventory "cold service health failed"
 }
-systemctl is-active --quiet disk-arcana-server >/dev/null 2>&1 || { rollback || true; die "cold service is not active"; }
-systemctl is-enabled --quiet disk-arcana-server >/dev/null 2>&1 || { rollback || true; die "cold service is not enabled"; }
-transition HEALTH_VERIFIED || { rollback || true; die "could not persist verified state"; }
+systemctl is-active --quiet disk-arcana-server >/dev/null 2>&1 || fail_after_inventory "cold service is not active"
+systemctl is-enabled --quiet disk-arcana-server >/dev/null 2>&1 || fail_after_inventory "cold service is not enabled"
+transition HEALTH_VERIFIED || fail_after_inventory "could not persist verified state"
 
 if (( TEST_MODE )) && [[ "${DISK_ARCANA_INSTALL_TEST_FAIL_AT:-}" == HEALTH_VERIFIED ]]; then
-  rollback || true
-  TX_STATE=FAILED_RECOVERED
-  write_journal || true
-  die "injected cold-bootstrap failure"
+  fail_after_inventory "injected cold-bootstrap failure"
 fi
-transition COMMITTED || { rollback || true; die "could not commit cold bootstrap"; }
+transition COMMITTED || fail_after_inventory "could not commit cold bootstrap"
 printf 'state=COMMITTED health=ok\n'

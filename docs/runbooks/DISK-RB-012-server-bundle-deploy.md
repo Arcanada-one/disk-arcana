@@ -29,12 +29,17 @@ Bootstrap is a separately authenticated root operation. It must not run in a
 GitHub workflow or through the CI runner's sudo access.
 
 1. From the approved tailnet root channel, create the service-independent
-   `/var/lib/disk-arcana-deploy` root and its `transactions` and
-   `bootstrap/<deployment-id>` children as `root:root 0700`. Never place deploy
+   `/var/lib/disk-arcana-deploy` root. Pre-create `transactions`,
+   `transactions/used-authorizations`, `transactions/provision-records`,
+   `transactions/provision-backups`, and `bootstrap/<deployment-id>` as
+   `root:root 0700`; the provisioner will not create these journal anchors.
+   Never place deploy
    journals, authorizations, inboxes, or backups under the service-writable
    `/var/lib/disk-arcana` tree.
-2. Put the exact merged bundle and a `root:root 0600` authorization file in that
-   directory. The file contains only these newline-delimited keys:
+2. Put the exact merged bundle as a `root:root 0700` directory and a
+   `root:root 0600` authorization file in that directory. Bundle members must
+   be root-owned and not group/world writable. The file contains only these
+   newline-delimited keys:
    `deployment_id`, `run_id`, `commit`, `manifest_sha`, `hostname`, `nonce`,
    `expires`, `runner_user`, `runner_group`, `import_root`, and
    `bootstrap_root`. Use `runner_group=disk-arcana-deploy`; bind
@@ -71,7 +76,9 @@ GitHub workflow or through the CI runner's sudo access.
 6. Require `state=COMMITTED`. Confirm the bootstrap directory is absent, the
    nonce is recorded below `/var/lib/disk-arcana-deploy/transactions`, and a
    second use is rejected. This removal is the bootstrap end-of-life proof.
-7. Read back `sudo -ln -U <runner-user>`. The only task-owned NOPASSWD grant may
+7. Read back `sudo -ln -U <runner-user>`. This effective-policy readback expands
+   sudoers aliases, includes, continuations, and inherited groups. The only
+   task-owned NOPASSWD grant may
    be `/usr/local/sbin/disk-arcana-deploy-broker --deploy *`. Any wildcard
    systemctl, journalctl, shell, `SETENV`, or other broader grant is a failure.
 
@@ -151,7 +158,8 @@ the helper restores both the prior binary and unit, reloads systemd, restarts
 the prior generation, and proves active health. `FAILED_RECOVERED` means that
 recovery completed; stop the run and diagnose before issuing a new deployment.
 `FAILED_RECOVERY_REQUIRED` means automatic recovery could not prove the prior
-generation. Do not edit either target or journal. Preserve:
+generation. Every normal invocation remains blocked even if the transient
+fault later clears. Do not edit either target or journal. Preserve:
 
 ```text
 systemctl status disk-arcana-server --no-pager
@@ -163,8 +171,9 @@ sha256sum /usr/local/bin/disk-arcana-server \
 
 Escalate with the workflow run, commit, artifact/manifest identities, terminal
 state, and transaction-record basename. A root operator may inspect the
-protected journal and backup, but must use the installed helper's recovery on a
-fresh invocation; manual file replacement is not a supported recovery action.
+protected journal and backup. Recovery then requires a separately reviewed,
+root-operated incident procedure; rerunning the ordinary deploy command and
+manual file replacement are not supported recovery actions.
 
 Backups below `/var/lib/disk-arcana-deploy/backups` are root-only recovery
 evidence. Retain the current successful generation and the immediately prior

@@ -369,6 +369,38 @@ grep -qF 'state=FAILED_RECOVERY_REQUIRED' \
   fail "rollback failure did not retain FAILED_RECOVERY_REQUIRED journal"
 pass "rollback failure is terminal FAILED_RECOVERY_REQUIRED"
 
+rm -f "$FLAGS/fail-restart" "$FLAGS/fail-recovery-restart"
+terminal_binary_sha="$(sha "$FAKE_ROOT/usr/local/bin/disk-arcana-server")"
+terminal_unit_sha="$(sha "$FAKE_ROOT/etc/systemd/system/disk-arcana-server.service")"
+if run_deploy; then
+  fail "terminal recovery journal was automatically retried"
+fi
+grep -qF 'state=FAILED_RECOVERY_REQUIRED' \
+  "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/current" ||
+  fail "subsequent invocation changed the terminal recovery state"
+[[ "$(sha "$FAKE_ROOT/usr/local/bin/disk-arcana-server")" == "$terminal_binary_sha" ]] ||
+  fail "terminal-state invocation changed the binary"
+[[ "$(sha "$FAKE_ROOT/etc/systemd/system/disk-arcana-server.service")" == "$terminal_unit_sha" ]] ||
+  fail "terminal-state invocation changed the unit"
+pass "terminal recovery state blocks later invocations even after the transient fault clears"
+
+setup_case unknown-journal-state
+: >"$FLAGS/fail-restart"
+: >"$FLAGS/fail-recovery-restart"
+if run_deploy; then
+  fail "unknown-state setup unexpectedly succeeded"
+fi
+sed -i 's/^state=FAILED_RECOVERY_REQUIRED$/state=CORRUPTED_STATE/' \
+  "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/current"
+rm -f "$FLAGS/fail-restart" "$FLAGS/fail-recovery-restart"
+if run_deploy; then
+  fail "unknown journal state was automatically recovered"
+fi
+grep -qF 'state=CORRUPTED_STATE' \
+  "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/current" ||
+  fail "unknown journal state was rewritten"
+pass "unknown transaction state fails closed for manual recovery"
+
 for recovery_failure in reload restart health; do
   setup_case "recovery-required-$recovery_failure"
   : >"$FLAGS/fail-reload"

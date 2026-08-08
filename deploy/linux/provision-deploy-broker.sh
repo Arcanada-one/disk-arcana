@@ -248,13 +248,8 @@ inventory_directories() {
 ensure_state_directory() {
   local path="$1"
   assert_no_symlink_components "$path" || return 1
-  if [[ -e "$path" ]]; then
-    [[ -d "$path" && ! -L "$path" ]] || return 1
-    [[ "$(stat -c '%a:%u:%g' "$path")" == "700:$EXPECT_UID:$EXPECT_GID" ]] || return 1
-  else
-    install -d -o "$EXPECT_UID" -g "$EXPECT_GID" -m 0700 "$path" || return 1
-    fsync_path "$(dirname "$path")" || return 1
-  fi
+  [[ -d "$path" && ! -L "$path" ]] || return 1
+  [[ "$(stat -c '%a:%u:%g' "$path")" == "700:$EXPECT_UID:$EXPECT_GID" ]] || return 1
 }
 
 ensure_directories() {
@@ -392,6 +387,38 @@ add_member() {
   fi
 }
 
+effective_nopasswd_commands() {
+  local listing
+  set +e
+  listing="$(sudo -n -l -U "$RUNNER_USER" 2>&1)"
+  set -e
+  if printf '%s\n' "$listing" | grep -q 'NOPASSWD:'; then
+    printf '%s\n' "$listing" | awk '
+      /NOPASSWD:/ {
+        sub(/^[[:space:]]*\([^)]*\)[[:space:]]*NOPASSWD:[[:space:]]*/, "")
+        print
+      }
+    '
+  fi
+}
+
+effective_sudo_is_prebootstrap_safe() {
+  local command
+  local -a commands=()
+  mapfile -t commands < <(effective_nopasswd_commands)
+  for command in "${commands[@]}"; do
+    [[ "$command" == /usr/local/sbin/disk-arcana-install-unit ||
+      "$command" == '/usr/local/sbin/disk-arcana-deploy-broker --deploy *' ]] || return 1
+  done
+}
+
+effective_sudo_is_broker_only() {
+  local -a commands=()
+  mapfile -t commands < <(effective_nopasswd_commands)
+  [[ "${#commands[@]}" -eq 1 ]] || return 1
+  [[ "${commands[0]}" == '/usr/local/sbin/disk-arcana-deploy-broker --deploy *' ]]
+}
+
 restore_privilege_state() {
   if [[ "$TX_MEMBER_EXISTED" == 0 ]] && member_exists; then
     if (( TEST_MODE )); then
@@ -410,6 +437,17 @@ restore_privilege_state() {
   fi
 }
 
+remove_uncommitted_backup() {
+  local backup_parent
+  backup_parent="$(dirname "$TX_BACKUP")" || return 1
+  [[ "$backup_parent" == "$BACKUP_ROOT" ]] || return 1
+  if [[ -e "$TX_BACKUP" ]]; then
+    [[ -d "$TX_BACKUP" && ! -L "$TX_BACKUP" ]] || return 1
+    rm -rf -- "$TX_BACKUP" || return 1
+    fsync_path "$BACKUP_ROOT" || return 1
+  fi
+}
+
 recover_unfinished() {
   local recovered_state
   [[ -f "$JOURNAL" && ! -L "$JOURNAL" ]] || return 0
@@ -424,6 +462,7 @@ recover_unfinished() {
       printf 'state=COMMITTED recovered_from=%s\n' "$recovered_state"
       ;;
     AUTHORITY_ISSUED)
+      remove_uncommitted_backup || return 1
       restore_directories || return 1
       revoke_bootstrap || return 1
       TX_STATE=FAILED_RECOVERED
@@ -443,6 +482,21 @@ recover_unfinished() {
       ;;
     *) return 1 ;;
   esac
+}
+
+rollback_failure() {
+  local message="${1:-broker provisioning failed after authority issuance}"
+  printf 'ERROR: %s\n' "$message" >&2
+  if recover_unfinished; then
+    exit 1
+  fi
+  TX_STATE=FAILED_RECOVERY_REQUIRED
+  write_journal || true
+  exit 1
+}
+
+should_fail_at() {
+  (( TEST_MODE )) && [[ "${DISK_ARCANA_PROVISION_TEST_FAIL_AT:-}" == "$1" ]]
 }
 
 recover_unfinished || die "unfinished broker provisioning could not be recovered"
@@ -485,6 +539,19 @@ done <"$AUTH"
 [[ "$BOOTSTRAP_ROOT" == /* && "$BOOTSTRAP_ROOT" != / && -d "$BOOTSTRAP_ROOT" && ! -L "$BOOTSTRAP_ROOT" ]] || die "unsafe bootstrap root"
 [[ "$BOOTSTRAP_ROOT" == "$DEPLOY_ROOT/bootstrap/$DEPLOYMENT_ID" ]] || die "bootstrap root is not canonical"
 assert_no_symlink_components "$BOOTSTRAP_ROOT" || die "bootstrap path has a symlink component"
+[[ "$(stat -c '%a:%u:%g' "$BOOTSTRAP_ROOT")" == "700:$EXPECT_UID:$EXPECT_GID" ]] ||
+  die "bootstrap root has unsafe metadata"
+[[ "$(stat -c '%a:%u:%g' "$BUNDLE")" == "700:$EXPECT_UID:$EXPECT_GID" ]] ||
+  die "bootstrap bundle has unsafe metadata"
+[[ "$(stat -c '%u:%g' "$AUTH")" == "$EXPECT_UID:$EXPECT_GID" ]] ||
+  die "authorization packet is not root-issued"
+for owned_ancestor in "$DEPLOY_ROOT" "$DEPLOY_ROOT/bootstrap"; do
+  [[ -d "$owned_ancestor" && ! -L "$owned_ancestor" ]] || die "bootstrap ancestor is unsafe"
+  [[ "$(stat -c '%u:%g' "$owned_ancestor")" == "$EXPECT_UID:$EXPECT_GID" ]] ||
+    die "bootstrap ancestor has unsafe ownership"
+  ancestor_mode="$(stat -c '%a' "$owned_ancestor")"
+  (( (8#$ancestor_mode & 0022) == 0 )) || die "bootstrap ancestor is group/world writable"
+done
 for privileged_path in "$STATE_ROOT" "$NONCE_ROOT" "$RECORD_ROOT" "$BACKUP_ROOT" \
   "$HELPER_TARGET" "$BROKER_TARGET" "$SUDOERS_TARGET" "$CONFIG_TARGET" "$INBOX_ROOT" "$LOCK_TARGET" \
   "$LEGACY_BROKER_TARGET" "$LEGACY_SUDOERS_TARGET"; do
@@ -535,24 +602,7 @@ validate_bundle() {
 
 validate_bundle || die "bundle validation failed"
 
-runner_groups="$(id -nG "$RUNNER_USER" 2>/dev/null || true)"
-while IFS= read -r policy; do
-  [[ "$policy" == "$SUDOERS_TARGET" || "$policy" == "$LEGACY_SUDOERS_TARGET" ]] && continue
-  if awk -v user="$RUNNER_USER" -v configured_group="$RUNNER_GROUP" -v groups="$runner_groups" '
-    BEGIN {
-      count=split(groups, raw, /[[:space:]]+/)
-      inherited[configured_group]=1
-      for (i=1; i<=count; i++) if (raw[i] != "") inherited[raw[i]]=1
-    }
-    /NOPASSWD:/ {
-      if (index($0, user)) found=1
-      for (group in inherited) if (index($0, "%" group)) found=1
-    }
-    END {exit !found}
-  ' "$policy"; then
-    die "broader passwordless sudo rule exists"
-  fi
-done < <(find "$ROOT/etc/sudoers" "$ROOT/etc/sudoers.d" -maxdepth 1 -type f 2>/dev/null || true)
+effective_sudo_is_prebootstrap_safe || die "effective passwordless sudo exceeds the legacy migration allowance"
 
 if (( ! TEST_MODE )); then
   id -u "$RUNNER_USER" >/dev/null 2>&1 || die "runner user does not exist"
@@ -561,6 +611,9 @@ fi
 [[ -d "$STATE_ROOT" && ! -L "$STATE_ROOT" ]] || die "transaction root must be root-issued before provisioning"
 [[ "$(stat -c '%a:%u:%g' "$STATE_ROOT")" == "700:$EXPECT_UID:$EXPECT_GID" ]] ||
   die "transaction root has unsafe metadata"
+ensure_state_directory "$NONCE_ROOT" || die "nonce state must be root-issued before provisioning"
+ensure_state_directory "$RECORD_ROOT" || die "provision records must be root-issued before provisioning"
+ensure_state_directory "$BACKUP_ROOT" || die "provision backups must be root-issued before provisioning"
 
 TX_STATE=AUTHORITY_ISSUED
 TX_DEPLOYMENT="$DEPLOYMENT_ID"
@@ -573,64 +626,54 @@ TX_BACKUP="$BACKUP_ROOT/$(date -u +%Y%m%dT%H%M%SZ)-$$"
 inventory_directories || die "privileged directory inventory failed"
 transition AUTHORITY_ISSUED || die "could not persist issued bootstrap authority"
 
-ensure_state_directory "$NONCE_ROOT" || die "could not prepare nonce state"
-ensure_state_directory "$RECORD_ROOT" || die "could not prepare provision records"
-ensure_state_directory "$BACKUP_ROOT" || die "could not prepare provision backups"
-ensure_directories || die "could not prepare privileged directories"
-install -d -o "$EXPECT_UID" -g "$EXPECT_GID" -m 0700 "$TX_BACKUP"
+should_fail_at PREPARE_DIRECTORIES && rollback_failure "injected directory preparation failure"
+ensure_directories || rollback_failure "could not prepare privileged directories"
+install -d -o "$EXPECT_UID" -g "$EXPECT_GID" -m 0700 "$TX_BACKUP" ||
+  rollback_failure "could not prepare transaction backup"
 tmp_helper="$TX_BACKUP/new-helper"
 tmp_broker="$TX_BACKUP/new-broker"
 tmp_sudoers="$TX_BACKUP/new-sudoers"
 tmp_config="$TX_BACKUP/new-config"
 tmp_lock="$TX_BACKUP/new-lock"
-install -m 0755 "$BUNDLE/deploy-server.sh" "$tmp_helper"
-install -m 0755 "$BUNDLE/deploy-server-broker.sh" "$tmp_broker"
-install -m 0440 "$BUNDLE/disk-arcana-deploy.sudoers" "$tmp_sudoers"
+should_fail_at STAGE_HELPER && rollback_failure "injected helper staging failure"
+install -m 0755 "$BUNDLE/deploy-server.sh" "$tmp_helper" || rollback_failure "could not stage deploy helper"
+install -m 0755 "$BUNDLE/deploy-server-broker.sh" "$tmp_broker" || rollback_failure "could not stage deploy broker"
+install -m 0440 "$BUNDLE/disk-arcana-deploy.sudoers" "$tmp_sudoers" || rollback_failure "could not stage sudoers policy"
 {
   printf 'runner_user=%s\n' "$RUNNER_USER"
   printf 'runner_group=%s\n' "$RUNNER_GROUP"
   printf 'import_root=%s\n' "$IMPORT_ROOT"
   printf 'expected_hostname=%s\n' "$EXPECTED_HOST"
-} >"$tmp_config"
-chmod 0600 "$tmp_config"
-install -m 0600 /dev/null "$tmp_lock"
-visudo -cf "$tmp_sudoers" >/dev/null 2>&1 || die "sudoers policy validation failed"
+} >"$tmp_config" || rollback_failure "could not stage broker configuration"
+chmod 0600 "$tmp_config" || rollback_failure "could not secure broker configuration"
+install -m 0600 /dev/null "$tmp_lock" || rollback_failure "could not stage deployment lock"
+visudo -cf "$tmp_sudoers" >/dev/null 2>&1 || rollback_failure "sudoers policy validation failed"
 for staged in "$tmp_helper" "$tmp_broker" "$tmp_sudoers" "$tmp_config" "$tmp_lock"; do
-  fsync_path "$staged" || die "could not fsync staged broker file"
+  fsync_path "$staged" || rollback_failure "could not fsync staged broker file"
 done
 TX_HELPER_SHA="$(sha "$tmp_helper")"
 TX_BROKER_SHA="$(sha "$tmp_broker")"
 TX_SUDOERS_SHA="$(sha "$tmp_sudoers")"
 TX_CONFIG_SHA="$(sha "$tmp_config")"
-fsync_path "$TX_BACKUP" || die "could not fsync broker backup directory"
-fsync_path "$BACKUP_ROOT" || die "could not fsync broker backup root"
+fsync_path "$TX_BACKUP" || rollback_failure "could not fsync broker backup directory"
+fsync_path "$BACKUP_ROOT" || rollback_failure "could not fsync broker backup root"
 
 for ((i = 0; i < ${#TARGETS[@]}; i++)); do
   name="${TARGET_NAMES[i]}"; target="${TARGETS[i]}"
-  [[ ! -L "$target" ]] || die "unsafe existing broker target"
+  if (( i == 0 )) && should_fail_at BACKUP_TARGET; then
+    rollback_failure "injected target backup failure"
+  fi
+  [[ ! -L "$target" ]] || rollback_failure "unsafe existing broker target"
   if [[ -e "$target" ]]; then
-    [[ -f "$target" ]] || die "existing broker target is not regular"
-    cp -a -- "$target" "$TX_BACKUP/$name"
-    : >"$TX_BACKUP/$name.present"
-    fsync_path "$TX_BACKUP/$name" || die "could not fsync broker backup"
-    fsync_path "$TX_BACKUP/$name.present" || die "could not fsync backup marker"
+    [[ -f "$target" ]] || rollback_failure "existing broker target is not regular"
+    cp -a -- "$target" "$TX_BACKUP/$name" || rollback_failure "could not back up broker target"
+    : >"$TX_BACKUP/$name.present" || rollback_failure "could not write backup marker"
+    fsync_path "$TX_BACKUP/$name" || rollback_failure "could not fsync broker backup"
+    fsync_path "$TX_BACKUP/$name.present" || rollback_failure "could not fsync backup marker"
   fi
 done
-fsync_path "$TX_BACKUP" || die "could not fsync broker backup directory"
-transition BACKUP_WRITTEN || die "could not persist broker backup transaction"
-
-rollback_failure() {
-  printf 'ERROR: broker provisioning failed after backup\n' >&2
-  if restore_targets && restore_privilege_state && restore_directories && revoke_bootstrap; then
-    TX_STATE=FAILED_RECOVERED
-    write_journal || true
-    archive_journal failed-recovered || true
-  else
-    TX_STATE=FAILED_RECOVERY_REQUIRED
-    write_journal || true
-  fi
-  exit 1
-}
+fsync_path "$TX_BACKUP" || rollback_failure "could not fsync broker backup directory"
+transition BACKUP_WRITTEN || rollback_failure "could not persist broker backup transaction"
 
 group_exists || create_group || rollback_failure
 member_exists || add_member || rollback_failure
@@ -649,6 +692,7 @@ done
 transition INSTALLED || rollback_failure
 
 installed_generation_ok || rollback_failure
+effective_sudo_is_broker_only || rollback_failure
 transition NARROW_RULE_VERIFIED || rollback_failure
 if (( TEST_MODE )) && [[ "${DISK_ARCANA_PROVISION_TEST_FAIL_AT:-}" == NARROW_RULE_VERIFIED ]]; then
   rollback_failure

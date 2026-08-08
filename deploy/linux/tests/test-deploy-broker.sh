@@ -37,7 +37,7 @@ sha() {
 
 make_bundle() {
   local bundle="$1"
-  install -d -m 0755 "$bundle"
+  install -d -m 0700 "$bundle"
   printf '%s\n' "$EXPECTED_COMMIT" >"$bundle/commit"
   printf 'server payload\n' >"$bundle/disk-arcana-server"
   chmod 0755 "$bundle/disk-arcana-server"
@@ -70,6 +70,23 @@ SHIM
 set -euo pipefail
 [[ "${1:-}" == verify && -f "${2:-}" ]]
 SHIM
+  cat >"$shims/sudo" <<'SHIM'
+#!/usr/bin/env bash
+set -euo pipefail
+root="${DISK_ARCANA_PROVISION_TEST_ROOT:?}"
+if [[ -n "${DISK_TEST_SUDO_LISTING:-}" ]]; then
+  cat -- "$DISK_TEST_SUDO_LISTING"
+  exit 0
+fi
+printf 'User %s may run the following commands on test-host:\n' "${RUNNER_USER:-runner}"
+if [[ -f "$root/etc/sudoers.d/disk-arcana-deploy" ]]; then
+  printf '    (root) NOPASSWD: /usr/local/sbin/disk-arcana-deploy-broker --deploy *\n'
+elif [[ -f "$root/etc/sudoers.d/disk-arcana-install-unit" ]]; then
+  printf '    (root) NOPASSWD: /usr/local/sbin/disk-arcana-install-unit\n'
+else
+  exit 1
+fi
+SHIM
   chmod 0755 "$shims"/*
 }
 
@@ -91,9 +108,17 @@ setup_case() {
     "$FAKE_ROOT/usr/local/sbin" \
     "$FAKE_ROOT/run/lock" \
     "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions" \
+    "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/used-authorizations" \
+    "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/provision-records" \
+    "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/provision-backups" \
     "$BOOTSTRAP" "$IMPORT_ROOT"
   chmod 0750 "$FAKE_ROOT/etc/disk-arcana"
-  chmod 0700 "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions"
+  chmod 0700 \
+    "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions" \
+    "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/used-authorizations" \
+    "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/provision-records" \
+    "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/provision-backups" \
+    "$BOOTSTRAP"
   make_bundle "$BUNDLE"
   write_shims "$CASE_ROOT"
   write_authorization "$AUTH" "$BUNDLE" "$(( $(date +%s) + 600 ))" "nonce${name//[^A-Za-z0-9]/}0123456789abcdef"
@@ -224,7 +249,7 @@ grep -qF 'state=COMMITTED' "$OUTPUT" || fail "provisioner did not report COMMITT
 pass "one-shot provision installs exact restricted broker boundary and revokes bootstrap path"
 
 installed_helper_sha="$(sha "$FAKE_ROOT/usr/local/libexec/disk-arcana/deploy-server.sh")"
-install -d -m 0755 "$BOOTSTRAP"
+install -d -m 0700 "$BOOTSTRAP"
 make_bundle "$BUNDLE"
 write_authorization "$AUTH" "$BUNDLE" "$(( $(date +%s) + 600 ))" 'nonceprovision0123456789abcdef'
 if run_provisioner; then
@@ -366,6 +391,19 @@ fi
 [[ ! -e "$BOOTSTRAP" ]] || fail "directory rollback retained bootstrap authority"
 pass "synchronous rollback restores prior directory existence and revokes authority"
 
+for failure_point in PREPARE_DIRECTORIES STAGE_HELPER BACKUP_TARGET; do
+  setup_case "sync-${failure_point,,}"
+  if run_provisioner DISK_ARCANA_PROVISION_TEST_FAIL_AT="$failure_point"; then
+    fail "injected $failure_point provisioning failure returned success"
+  fi
+  assert_not_provisioned
+  [[ ! -e "$BOOTSTRAP" ]] || fail "$failure_point failure retained bootstrap authority"
+  grep -RqsF 'state=FAILED_RECOVERED' \
+    "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/provision-records" ||
+    fail "$failure_point failure did not persist recovered evidence"
+  pass "synchronous $failure_point failure revokes authority and restores the baseline"
+done
+
 for state in AUTHORITY_ISSUED BACKUP_WRITTEN INSTALLED NARROW_RULE_VERIFIED; do
   setup_case "crash-$state"
   if run_provisioner DISK_ARCANA_PROVISION_TEST_KILL_AFTER_STATE="$state"; then
@@ -408,11 +446,22 @@ assert_not_provisioned
 [[ "$(tree_digest "$FAKE_ROOT")" == "$before_invalid" ]] || fail "expired authorization mutated fake root"
 pass "expired bootstrap authorization fails before mutation"
 
+setup_case unsafe-bootstrap-metadata
+chmod 0755 "$BOOTSTRAP"
+before_invalid="$(tree_digest "$FAKE_ROOT")"
+if run_provisioner; then
+  fail "world-readable bootstrap authority was accepted"
+fi
+assert_not_provisioned
+[[ "$(tree_digest "$FAKE_ROOT")" == "$before_invalid" ]] || fail "bootstrap metadata rejection mutated fake root"
+pass "bootstrap root and bundle must be private and root-issued"
+
 setup_case broad-sudo
 printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$RUNNER_USER" >"$FAKE_ROOT/etc/sudoers.d/broad-runner"
 chmod 0440 "$FAKE_ROOT/etc/sudoers.d/broad-runner"
+printf '    (ALL) NOPASSWD: ALL\n' >"$CASE_ROOT/effective-sudo"
 before_invalid="$(tree_digest "$FAKE_ROOT")"
-if run_provisioner; then
+if run_provisioner DISK_TEST_SUDO_LISTING="$CASE_ROOT/effective-sudo"; then
   fail "broader passwordless sudo rule was accepted"
 fi
 assert_not_provisioned
@@ -424,13 +473,40 @@ inherited_group="$(id -gn)"
 printf '%%%s ALL=(ALL) NOPASSWD: /usr/bin/systemctl *\n' "$inherited_group" \
   >"$FAKE_ROOT/etc/sudoers.d/broad-inherited-group"
 chmod 0440 "$FAKE_ROOT/etc/sudoers.d/broad-inherited-group"
+printf '    (ALL) NOPASSWD: /usr/bin/systemctl *\n' >"$CASE_ROOT/effective-sudo"
 before_invalid="$(tree_digest "$FAKE_ROOT")"
-if run_provisioner; then
+if run_provisioner DISK_TEST_SUDO_LISTING="$CASE_ROOT/effective-sudo"; then
   fail "inherited group passwordless sudo was accepted"
 fi
 assert_not_provisioned
 [[ "$(tree_digest "$FAKE_ROOT")" == "$before_invalid" ]] || fail "inherited-sudo rejection mutated fake root"
 pass "inherited group passwordless sudo blocks provisioning"
+
+setup_case aliased-included-sudo
+printf 'User_Alias DEPLOYERS = %s\nCmnd_Alias ROOT_SHELL = /bin/sh\nDEPLOYERS ALL=(ALL) NOPASSWD: ROOT_SHELL\n' \
+  "$RUNNER_USER" >"$FAKE_ROOT/etc/sudoers.d/aliased-include"
+chmod 0440 "$FAKE_ROOT/etc/sudoers.d/aliased-include"
+printf '    (ALL) NOPASSWD: /bin/sh\n' >"$CASE_ROOT/effective-sudo"
+before_invalid="$(tree_digest "$FAKE_ROOT")"
+if run_provisioner DISK_TEST_SUDO_LISTING="$CASE_ROOT/effective-sudo"; then
+  fail "alias-expanded passwordless sudo was accepted"
+fi
+assert_not_provisioned
+[[ "$(tree_digest "$FAKE_ROOT")" == "$before_invalid" ]] || fail "alias-sudo rejection mutated fake root"
+pass "effective sudo evaluation blocks alias-expanded and included authority"
+
+setup_case broadened-legacy-path
+printf 'User_Alias DEPLOYERS = %s\nDEPLOYERS ALL=(ALL) NOPASSWD: ALL\n' "$RUNNER_USER" \
+  >"$FAKE_ROOT/etc/sudoers.d/disk-arcana-install-unit"
+chmod 0440 "$FAKE_ROOT/etc/sudoers.d/disk-arcana-install-unit"
+printf '    (ALL) NOPASSWD: ALL\n' >"$CASE_ROOT/effective-sudo"
+before_invalid="$(tree_digest "$FAKE_ROOT")"
+if run_provisioner DISK_TEST_SUDO_LISTING="$CASE_ROOT/effective-sudo"; then
+  fail "broadened legacy sudoers path was accepted"
+fi
+assert_not_provisioned
+[[ "$(tree_digest "$FAKE_ROOT")" == "$before_invalid" ]] || fail "legacy-path rejection mutated fake root"
+pass "legacy sudoers filename cannot conceal broadened effective authority"
 
 setup_case symlink-ancestor
 mv "$FAKE_ROOT/usr/local/libexec" "$CASE_ROOT/libexec-real"
