@@ -18,11 +18,124 @@ fail() {
 
 assert_command_before() {
   local block="$1" gate="$2" delivery="$3" label="$4" gate_line delivery_line
-  gate_line="$(awk -v needle="$gate" 'index($0, needle) {print NR; exit}' <<<"$block")"
-  delivery_line="$(awk -v needle="$delivery" 'index($0, needle) {print NR; exit}' <<<"$block")"
+  gate_line="$(awk -v expected="$gate" '
+    {line=$0; sub(/^[[:space:]]+/, "", line); sub(/[[:space:]]+$/, "", line)}
+    line == expected {print NR; exit}
+  ' <<<"$block")"
+  delivery_line="$(awk -v prefix="$delivery" '
+    {line=$0; sub(/^[[:space:]]+/, "", line); sub(/[[:space:]]+$/, "", line)}
+    index(line, prefix) == 1 {print NR; exit}
+  ' <<<"$block")"
   [[ -n "$gate_line" ]] || fail "$label is missing the freshness gate"
   [[ -n "$delivery_line" ]] || fail "$label is missing its delivery command"
   (( gate_line < delivery_line )) || fail "$label runs before its freshness gate"
+}
+
+assert_unconditional_release_step() {
+  local block="$1" label="$2" gate_step
+  gate_step="$(awk '
+    {
+      raw=$0
+      line=$0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      match(raw, /[^ ]/)
+      indent=RSTART - 1
+    }
+    !in_gate && line == "- name: Fresh exact-main release gate" {
+      in_gate=1
+      step_indent=indent
+    }
+    in_gate && line != "- name: Fresh exact-main release gate" &&
+      indent == step_indent && line ~ /^- / {exit}
+    in_gate {print raw}
+  ' <<<"$block")"
+  [[ "$gate_step" == *'run: bash scripts/require-fresh-main.sh "$BUILT_SHA"'* ]] ||
+    fail "$label is missing its executable freshness step"
+  if grep -qE '^[[:space:]]*(if|continue-on-error)[[:space:]]*:' <<<"$gate_step"; then
+    fail "$label freshness step is conditional or non-blocking"
+  fi
+}
+
+assert_unconditional_shell_gate_before_delivery() {
+  local block="$1" gate="$2" delivery="$3" label="$4"
+  local run_line run_indent gate_line gate_indent first_indent first_line second_indent second_line
+  local -a post_gate=()
+  read -r run_line run_indent gate_line gate_indent < <(awk -v expected="$gate" '
+    {
+      raw=$0
+      line=$0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      match(raw, /[^ ]/)
+      indent=RSTART - 1
+    }
+    line == "run: |" {run_line=NR; run_indent=indent}
+    line == expected {print run_line, run_indent, NR, indent; exit}
+  ' <<<"$block")
+  mapfile -t post_gate < <(awk -v expected="$gate" '
+    {
+      raw=$0
+      line=$0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+    }
+    found && line != "" && line !~ /^#/ {
+      match(raw, /[^ ]/)
+      print RSTART - 1 "\t" line
+      count++
+      if (count == 2) exit
+    }
+    line == expected {found=1}
+  ' <<<"$block")
+  [[ -n "$run_line" && -n "$run_indent" && -n "$gate_line" && -n "$gate_indent" ]] ||
+    fail "$label is missing its executable freshness gate"
+  [[ "${#post_gate[@]}" -eq 2 ]] ||
+    fail "$label freshness gate is not directly load-bearing on delivery"
+  first_indent="${post_gate[0]%%$'\t'*}"
+  first_line="${post_gate[0]#*$'\t'}"
+  second_indent="${post_gate[1]%%$'\t'*}"
+  second_line="${post_gate[1]#*$'\t'}"
+  (( gate_indent == run_indent + 2 && first_indent == gate_indent && second_indent == gate_indent )) ||
+    fail "$label freshness gate is not unconditional or load-bearing"
+  [[ "$first_line" == authorization_id=* && "$second_line" == "$delivery"* ]] ||
+    fail "$label freshness gate is not directly load-bearing on delivery"
+}
+
+assert_unconditional_shell_gate() {
+  local block="$1" gate="$2" label="$3"
+  local run_line run_indent gate_line gate_indent pre_gate_command
+  read -r run_line run_indent < <(awk '
+    {line=$0; sub(/^[[:space:]]+/, "", line); sub(/[[:space:]]+$/, "", line)}
+    line == "run: |" {match($0, /[^ ]/); print NR, RSTART - 1; exit}
+  ' <<<"$block")
+  read -r gate_line gate_indent < <(awk -v expected="$gate" '
+    {line=$0; sub(/^[[:space:]]+/, "", line); sub(/[[:space:]]+$/, "", line)}
+    line == expected {match($0, /[^ ]/); print NR, RSTART - 1; exit}
+  ' <<<"$block")
+  pre_gate_command="$(awk -v expected="$gate" '
+    {line=$0; sub(/^[[:space:]]+/, "", line); sub(/[[:space:]]+$/, "", line)}
+    line == "run: |" {in_script=1; next}
+    !in_script {next}
+    line == expected {exit}
+    line == "" || line == "set -euo pipefail" || line ~ /^#/ {next}
+    {print line; exit}
+  ' <<<"$block")"
+  [[ -n "$run_line" && -n "$run_indent" && -n "$gate_line" && -n "$gate_indent" ]] ||
+    fail "$label is missing its executable freshness gate"
+  (( gate_indent == run_indent + 2 )) ||
+    fail "$label freshness gate is not unconditional"
+  [[ -z "$pre_gate_command" ]] ||
+    fail "$label freshness gate is not unconditional"
+}
+
+count_exact_command() {
+  local file="$1" expected="$2"
+  awk -v expected="$expected" '
+    {line=$0; sub(/^[[:space:]]+/, "", line); sub(/[[:space:]]+$/, "", line)}
+    line == expected {count++}
+    END {print count + 0}
+  ' "$file"
 }
 
 grep -qF 'name: Assemble manifest-bound deployment bundle' "$WORKFLOW" ||
@@ -76,16 +189,19 @@ share_install_block="$(sed -n '/name: Install share drop-in/,$p' "$SHARE_WORKFLO
 
 [[ "$(grep -cF 'name: Fresh exact-main release gate' "$WORKFLOW")" -eq 4 ]] ||
   fail "every release-delivery path must freshly gate its built SHA against origin/main"
-[[ "$(grep -cF 'bash scripts/require-fresh-main.sh "$BUILT_SHA"' "$WORKFLOW")" -eq 4 ]] ||
+[[ "$(count_exact_command "$WORKFLOW" 'run: bash scripts/require-fresh-main.sh "$BUILT_SHA"')" -eq 4 ]] ||
   fail "release delivery does not require fresh main to equal its built SHA"
-[[ "$(grep -cF 'bash scripts/require-fresh-main.sh "$EXPECTED_BUILD_COMMIT"' "$WORKFLOW")" -eq 2 ]] ||
+[[ "$(count_exact_command "$WORKFLOW" 'bash scripts/require-fresh-main.sh "$EXPECTED_BUILD_COMMIT"')" -eq 2 ]] ||
   fail "broker delivery does not freshly require origin/main to equal the built SHA"
+[[ "$(count_exact_command "$SHARE_WORKFLOW" 'bash scripts/require-fresh-main.sh "$GITHUB_SHA"')" -eq 2 ]] ||
+  fail "share delivery does not execute both fresh-main gates"
 
 for release_block in \
   "$linux_release_block" "$windows_release_block" \
   "$linux_client_release_block" "$macos_release_block"; do
+  assert_unconditional_release_step "$release_block" "release attachment"
   assert_command_before "$release_block" \
-    'bash scripts/require-fresh-main.sh "$BUILT_SHA"' \
+    'run: bash scripts/require-fresh-main.sh "$BUILT_SHA"' \
     'uses: softprops/action-gh-release@' \
     "release attachment"
 done
@@ -93,7 +209,15 @@ assert_command_before "$dev_block" \
   'bash scripts/require-fresh-main.sh "$EXPECTED_BUILD_COMMIT"' \
   'sudo -n /usr/local/sbin/disk-arcana-deploy-broker --deploy' \
   "staging broker delivery"
+assert_unconditional_shell_gate_before_delivery "$dev_block" \
+  'bash scripts/require-fresh-main.sh "$EXPECTED_BUILD_COMMIT"' \
+  'sudo -n /usr/local/sbin/disk-arcana-deploy-broker --deploy' \
+  "staging broker delivery"
 assert_command_before "$prod_block" \
+  'bash scripts/require-fresh-main.sh "$EXPECTED_BUILD_COMMIT"' \
+  'sudo -n /usr/local/sbin/disk-arcana-deploy-broker --deploy' \
+  "production broker delivery"
+assert_unconditional_shell_gate_before_delivery "$prod_block" \
   'bash scripts/require-fresh-main.sh "$EXPECTED_BUILD_COMMIT"' \
   'sudo -n /usr/local/sbin/disk-arcana-deploy-broker --deploy' \
   "production broker delivery"
@@ -101,9 +225,15 @@ assert_command_before "$share_diff_block" \
   'bash scripts/require-fresh-main.sh "$GITHUB_SHA"' \
   'bash deploy/linux/install-user-share-dropin.sh' \
   "share diff"
+assert_unconditional_shell_gate "$share_diff_block" \
+  'bash scripts/require-fresh-main.sh "$GITHUB_SHA"' \
+  "share diff"
 assert_command_before "$share_install_block" \
   'bash scripts/require-fresh-main.sh "$GITHUB_SHA"' \
-  'install-user-share-dropin.sh --install' \
+  'bash deploy/linux/install-user-share-dropin.sh --install' \
+  "share installation"
+assert_unconditional_shell_gate "$share_install_block" \
+  'bash scripts/require-fresh-main.sh "$GITHUB_SHA"' \
   "share installation"
 
 grep -qF 'default: arcana-prod' "$PROBE_WORKFLOW" || fail "INFRA-0389 default runner routing changed"
@@ -145,6 +275,76 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
   trap 'rm -rf -- "$fixture_root"' EXIT
   reordered_workflow="$fixture_root/release-reordered.yml"
   fixture_output="$fixture_root/output"
+
+  run_release_fixture() {
+    local workflow="$1" expected="$2" label="$3" fixture_rc
+    set +e
+    DISK_ARCANA_ORDER_FIXTURE_CHILD=1 \
+      WORKFLOW_OVERRIDE="$workflow" \
+      SHARE_WORKFLOW_OVERRIDE="$SHARE_WORKFLOW" \
+      PROBE_WORKFLOW_OVERRIDE="$PROBE_WORKFLOW" \
+      "$0" >"$fixture_output" 2>&1
+    fixture_rc=$?
+    set -e
+    [[ "$fixture_rc" -ne 0 ]] || fail "$label fixture passed"
+    grep -qF "$expected" "$fixture_output" || fail "$label fixture failed for an unintended reason"
+  }
+
+  disabled_release="$fixture_root/release-disabled-gate.yml"
+  awk '
+    {
+      line=$0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+    }
+    !mutated && line == "- name: Fresh exact-main release gate" {
+      print
+      match($0, /[^ ]/)
+      print substr($0, 1, RSTART - 1) "  if: false"
+      mutated=1
+      next
+    }
+    {print}
+  ' "$WORKFLOW" >"$disabled_release"
+  run_release_fixture "$disabled_release" \
+    'FAIL  release attachment freshness step is conditional or non-blocking' \
+    "disabled release freshness"
+  printf 'PASS  disabled release freshness step is rejected as non-load-bearing\n'
+
+  write_conditional_broker_fixture() {
+    local job="$1" output="$2"
+    awk -v target="$job" '
+      /^  [A-Za-z0-9_-]+:$/ {
+        line=$0
+        sub(/^[[:space:]]+/, "", line)
+        in_target=(line == target ":")
+      }
+      in_target && index($0, "bash scripts/require-fresh-main.sh \"$EXPECTED_BUILD_COMMIT\"") {
+        match($0, /[^ ]/)
+        prefix=substr($0, 1, RSTART - 1)
+        print prefix "if false; then"
+        print "  " $0
+        print prefix "fi"
+        next
+      }
+      {print}
+    ' "$WORKFLOW" >"$output"
+  }
+
+  conditional_stage="$fixture_root/release-conditional-stage-gate.yml"
+  write_conditional_broker_fixture deploy-stage "$conditional_stage"
+  run_release_fixture "$conditional_stage" \
+    'FAIL  staging broker delivery freshness gate is not unconditional or load-bearing' \
+    "conditional staging freshness"
+  printf 'PASS  branch-local staging freshness command is rejected as non-load-bearing\n'
+
+  conditional_prod="$fixture_root/release-conditional-prod-gate.yml"
+  write_conditional_broker_fixture deploy-prod "$conditional_prod"
+  run_release_fixture "$conditional_prod" \
+    'FAIL  production broker delivery freshness gate is not unconditional or load-bearing' \
+    "conditional production freshness"
+  printf 'PASS  branch-local production freshness command is rejected as non-load-bearing\n'
+
   sed \
     '/bash scripts\/require-fresh-main.sh "$EXPECTED_BUILD_COMMIT"/{h;d}; /"$BUNDLE" "$authorization_id"/G' \
     "$WORKFLOW" >"$reordered_workflow"
@@ -178,6 +378,96 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
   grep -qF 'FAIL  share installation runs before its freshness gate' "$fixture_output" ||
     fail "reordered share-delivery fixture failed for an unintended reason"
   printf 'PASS  reordered share-delivery fixture is rejected for freshness ordering\n'
+
+  conditional_share="$fixture_root/share-conditional-gate.yml"
+  sed '/name: Install share drop-in/,$ {
+    /bash scripts\/require-fresh-main.sh "$GITHUB_SHA"/{s/^/  /;h;d}
+    /if \[\[ "$(id -un)" == dev \]\]; then/G
+  }' "$SHARE_WORKFLOW" >"$conditional_share"
+  set +e
+  DISK_ARCANA_ORDER_FIXTURE_CHILD=1 \
+    WORKFLOW_OVERRIDE="$WORKFLOW" \
+    SHARE_WORKFLOW_OVERRIDE="$conditional_share" \
+    PROBE_WORKFLOW_OVERRIDE="$PROBE_WORKFLOW" \
+    "$0" >"$fixture_output" 2>&1
+  fixture_rc=$?
+  set -e
+  [[ "$fixture_rc" -ne 0 ]] || fail "conditional share freshness fixture passed"
+  grep -qF 'FAIL  share installation freshness gate is not unconditional' "$fixture_output" ||
+    fail "conditional share freshness fixture failed for an unintended reason"
+  printf 'PASS  branch-local share freshness command is rejected as a conditional gate\n'
+
+  short_circuit_share="$fixture_root/share-short-circuit-gate.yml"
+  awk '
+    index($0, "name: Install share drop-in") {install_step=1}
+    install_step && index($0, "bash scripts/require-fresh-main.sh") {
+      gate=$0
+      next
+    }
+    install_step && index($0, "if [[ \"$(id -un)\" == dev ]]; then") {
+      match($0, /[^ ]/)
+      print substr($0, 1, RSTART - 1) "[[ \"$(id -un)\" == dev ]] && {"
+      print gate
+      in_short_circuit=1
+      next
+    }
+    in_short_circuit {
+      line=$0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      if (line == "fi") {
+        sub(/fi[[:space:]]*$/, "}")
+        in_short_circuit=0
+      }
+    }
+    {print}
+  ' "$SHARE_WORKFLOW" >"$short_circuit_share"
+  set +e
+  DISK_ARCANA_ORDER_FIXTURE_CHILD=1 \
+    WORKFLOW_OVERRIDE="$WORKFLOW" \
+    SHARE_WORKFLOW_OVERRIDE="$short_circuit_share" \
+    PROBE_WORKFLOW_OVERRIDE="$PROBE_WORKFLOW" \
+    "$0" >"$fixture_output" 2>&1
+  fixture_rc=$?
+  set -e
+  [[ "$fixture_rc" -ne 0 ]] || fail "short-circuit share freshness fixture passed"
+  grep -qF 'FAIL  share installation freshness gate is not unconditional' "$fixture_output" ||
+    fail "short-circuit share freshness fixture failed for an unintended reason"
+  printf 'PASS  short-circuit share freshness command is rejected as a conditional gate\n'
+
+  inert_workflow="$fixture_root/release-inert-gates.yml"
+  sed \
+    -e 's#run: bash scripts/require-fresh-main#run: echo bash scripts/require-fresh-main#' \
+    -e 's#^\([[:space:]]*\)bash scripts/require-fresh-main#\1echo bash scripts/require-fresh-main#' \
+    "$WORKFLOW" >"$inert_workflow"
+  set +e
+  DISK_ARCANA_ORDER_FIXTURE_CHILD=1 \
+    WORKFLOW_OVERRIDE="$inert_workflow" \
+    SHARE_WORKFLOW_OVERRIDE="$SHARE_WORKFLOW" \
+    PROBE_WORKFLOW_OVERRIDE="$PROBE_WORKFLOW" \
+    "$0" >"$fixture_output" 2>&1
+  fixture_rc=$?
+  set -e
+  [[ "$fixture_rc" -ne 0 ]] || fail "inert release freshness fixture passed"
+  grep -qF 'FAIL  release delivery does not require fresh main to equal its built SHA' \
+    "$fixture_output" || fail "inert release freshness fixture failed for an unintended reason"
+  printf 'PASS  inert release freshness commands are rejected as non-executable gates\n'
+
+  inert_share="$fixture_root/share-inert-gates.yml"
+  sed 's#^\([[:space:]]*\)bash scripts/require-fresh-main#\1echo bash scripts/require-fresh-main#' \
+    "$SHARE_WORKFLOW" >"$inert_share"
+  set +e
+  DISK_ARCANA_ORDER_FIXTURE_CHILD=1 \
+    WORKFLOW_OVERRIDE="$WORKFLOW" \
+    SHARE_WORKFLOW_OVERRIDE="$inert_share" \
+    PROBE_WORKFLOW_OVERRIDE="$PROBE_WORKFLOW" \
+    "$0" >"$fixture_output" 2>&1
+  fixture_rc=$?
+  set -e
+  [[ "$fixture_rc" -ne 0 ]] || fail "inert share freshness fixture passed"
+  grep -qF 'FAIL  share delivery does not execute both fresh-main gates' "$fixture_output" ||
+    fail "inert share freshness fixture failed for an unintended reason"
+  printf 'PASS  inert share freshness commands are rejected as non-executable gates\n'
 fi
 
 printf 'PASS  release workflow deploys one manifest-bound artifact through staging then production\n'
