@@ -16,6 +16,15 @@ fail() {
   exit 1
 }
 
+assert_command_before() {
+  local block="$1" gate="$2" delivery="$3" label="$4" gate_line delivery_line
+  gate_line="$(awk -v needle="$gate" 'index($0, needle) {print NR; exit}' <<<"$block")"
+  delivery_line="$(awk -v needle="$delivery" 'index($0, needle) {print NR; exit}' <<<"$block")"
+  [[ -n "$gate_line" ]] || fail "$label is missing the freshness gate"
+  [[ -n "$delivery_line" ]] || fail "$label is missing its delivery command"
+  (( gate_line < delivery_line )) || fail "$label runs before its freshness gate"
+}
+
 grep -qF 'name: Assemble manifest-bound deployment bundle' "$WORKFLOW" ||
   fail "release build does not assemble the fixed deployment bundle"
 grep -qF 'bash deploy/linux/validate-deploy-bundle.sh create' "$WORKFLOW" ||
@@ -35,6 +44,12 @@ grep -qF 'install.sh is bootstrap-only' "$INSTALLER" ||
 dev_block="$(sed -n '/^  deploy-stage:/,/^  deploy-prod:/p' "$WORKFLOW")"
 prod_block="$(sed -n '/^  deploy-prod:/,$p' "$WORKFLOW")"
 share_block="$(sed -n '/^  deliver:/,$p' "$SHARE_WORKFLOW")"
+linux_release_block="$(sed -n '/^  attach-linux-release:/,/^  build-windows-client:/p' "$WORKFLOW")"
+windows_release_block="$(sed -n '/^  build-windows-client:/,/^  build-linux-client:/p' "$WORKFLOW")"
+linux_client_release_block="$(sed -n '/^  build-linux-client:/,/^  build-macos-client:/p' "$WORKFLOW")"
+macos_release_block="$(sed -n '/^  build-macos-client:/,/^  deploy-stage:/p' "$WORKFLOW")"
+share_diff_block="$(sed -n '/name: Diff share drop-in/,/name: Install share drop-in/p' "$SHARE_WORKFLOW")"
+share_install_block="$(sed -n '/name: Install share drop-in/,$p' "$SHARE_WORKFLOW")"
 [[ "$dev_block" == *"github.event.inputs.target == 'prod'"* ]] ||
   fail "production dispatch does not first run staging in the same workflow"
 [[ "$dev_block" == *"github.ref == 'refs/heads/main'"* ]] ||
@@ -65,6 +80,31 @@ share_block="$(sed -n '/^  deliver:/,$p' "$SHARE_WORKFLOW")"
   fail "release delivery does not require fresh main to equal its built SHA"
 [[ "$(grep -cF 'bash scripts/require-fresh-main.sh "$EXPECTED_BUILD_COMMIT"' "$WORKFLOW")" -eq 2 ]] ||
   fail "broker delivery does not freshly require origin/main to equal the built SHA"
+
+for release_block in \
+  "$linux_release_block" "$windows_release_block" \
+  "$linux_client_release_block" "$macos_release_block"; do
+  assert_command_before "$release_block" \
+    'bash scripts/require-fresh-main.sh "$BUILT_SHA"' \
+    'uses: softprops/action-gh-release@' \
+    "release attachment"
+done
+assert_command_before "$dev_block" \
+  'bash scripts/require-fresh-main.sh "$EXPECTED_BUILD_COMMIT"' \
+  'sudo -n /usr/local/sbin/disk-arcana-deploy-broker --deploy' \
+  "staging broker delivery"
+assert_command_before "$prod_block" \
+  'bash scripts/require-fresh-main.sh "$EXPECTED_BUILD_COMMIT"' \
+  'sudo -n /usr/local/sbin/disk-arcana-deploy-broker --deploy' \
+  "production broker delivery"
+assert_command_before "$share_diff_block" \
+  'bash scripts/require-fresh-main.sh "$GITHUB_SHA"' \
+  'bash deploy/linux/install-user-share-dropin.sh' \
+  "share diff"
+assert_command_before "$share_install_block" \
+  'bash scripts/require-fresh-main.sh "$GITHUB_SHA"' \
+  'install-user-share-dropin.sh --install' \
+  "share installation"
 
 grep -qF 'default: arcana-prod' "$PROBE_WORKFLOW" || fail "INFRA-0389 default runner routing changed"
 ! grep -qE '^[[:space:]]*-[[:space:]]*arcana-prod-ci[[:space:]]*$' "$PROBE_WORKFLOW" ||
@@ -98,6 +138,46 @@ if rg -q --glob '!test-release-deploy-contract.sh' --glob '!test-deploy-broker.s
     'disk-arcana-install-unit|install-systemd-unit\.sh' \
     "$ROOT/.github" "$ROOT/deploy/linux" "$ROOT/scripts"; then
   fail "retired unit-only release path is still reachable"
+fi
+
+if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
+  fixture_root="$(mktemp -d)"
+  trap 'rm -rf -- "$fixture_root"' EXIT
+  reordered_workflow="$fixture_root/release-reordered.yml"
+  fixture_output="$fixture_root/output"
+  sed \
+    '/bash scripts\/require-fresh-main.sh "$EXPECTED_BUILD_COMMIT"/{h;d}; /"$BUNDLE" "$authorization_id"/G' \
+    "$WORKFLOW" >"$reordered_workflow"
+  set +e
+  DISK_ARCANA_ORDER_FIXTURE_CHILD=1 \
+    WORKFLOW_OVERRIDE="$reordered_workflow" \
+    SHARE_WORKFLOW_OVERRIDE="$SHARE_WORKFLOW" \
+    PROBE_WORKFLOW_OVERRIDE="$PROBE_WORKFLOW" \
+    "$0" >"$fixture_output" 2>&1
+  fixture_rc=$?
+  set -e
+  [[ "$fixture_rc" -ne 0 ]] || fail "reordered-after-delivery fixture passed"
+  grep -qF 'FAIL  staging broker delivery runs before its freshness gate' "$fixture_output" ||
+    fail "reordered-after-delivery fixture failed for an unintended reason"
+  printf 'PASS  reordered broker-delivery fixture is rejected for freshness ordering\n'
+
+  reordered_share="$fixture_root/share-reordered.yml"
+  sed '/name: Install share drop-in/,$ {
+    /bash scripts\/require-fresh-main.sh "$GITHUB_SHA"/{h;d}
+    /bash deploy\/linux\/install-user-share-dropin.sh --install/G
+  }' "$SHARE_WORKFLOW" >"$reordered_share"
+  set +e
+  DISK_ARCANA_ORDER_FIXTURE_CHILD=1 \
+    WORKFLOW_OVERRIDE="$WORKFLOW" \
+    SHARE_WORKFLOW_OVERRIDE="$reordered_share" \
+    PROBE_WORKFLOW_OVERRIDE="$PROBE_WORKFLOW" \
+    "$0" >"$fixture_output" 2>&1
+  fixture_rc=$?
+  set -e
+  [[ "$fixture_rc" -ne 0 ]] || fail "reordered share-delivery fixture passed"
+  grep -qF 'FAIL  share installation runs before its freshness gate' "$fixture_output" ||
+    fail "reordered share-delivery fixture failed for an unintended reason"
+  printf 'PASS  reordered share-delivery fixture is rejected for freshness ordering\n'
 fi
 
 printf 'PASS  release workflow deploys one manifest-bound artifact through staging then production\n'

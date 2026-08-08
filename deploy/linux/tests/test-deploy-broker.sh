@@ -469,6 +469,22 @@ if [[ -f "$FAKE_ROOT/etc/sudoers.d/disk-arcana-deploy" ]]; then
 fi
 pass "bootstrap revocation is attempted independently when rollback restoration fails"
 
+current_journal="$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/provision-current"
+terminal_snapshot="$CASE_ROOT/failed-recovery-required.snapshot"
+cp -- "$current_journal" "$terminal_snapshot"
+before_terminal_retry="$(tree_digest "$FAKE_ROOT")"
+if run_provisioner DISK_ARCANA_PROVISION_TEST_FAIL_AT=ROLLBACK_RESTORE_TARGETS; then
+  fail "terminal FAILED_RECOVERY_REQUIRED retry returned success"
+fi
+grep -qF 'unfinished broker provisioning could not be recovered' "$OUTPUT" ||
+  fail "terminal retry did not fail at the recovery entry gate"
+cmp -s "$terminal_snapshot" "$current_journal" ||
+  fail "terminal retry rewrote FAILED_RECOVERY_REQUIRED evidence"
+[[ "$(tree_digest "$FAKE_ROOT")" == "$before_terminal_retry" ]] ||
+  fail "terminal retry reran recovery or an authority/mutation step"
+[[ ! -e "$BOOTSTRAP" ]] || fail "terminal retry recreated bootstrap authority"
+pass "FAILED_RECOVERY_REQUIRED retry is terminal, byte-identical, and mutation-free"
+
 for state in AUTHORITY_ISSUED BACKUP_WRITTEN INSTALLED NARROW_RULE_VERIFIED; do
   setup_case "crash-$state"
   if run_provisioner DISK_ARCANA_PROVISION_TEST_KILL_AFTER_STATE="$state"; then
