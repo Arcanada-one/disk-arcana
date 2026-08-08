@@ -40,6 +40,67 @@ jobs:
           id -un
           id -Gn
 
+      - name: Staging isolation capabilities
+        id: isolation
+        run: |
+          bool_command() {
+            if "$@" >/dev/null 2>&1; then printf true; else printf false; fi
+          }
+
+          subid_count() {
+            local count file="$1"
+            if count="$(awk -F: -v user="$(id -un)" '
+                $1 == user && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ {total += $3}
+                END {print total + 0}
+              ' "$file" 2>/dev/null)"; then
+              printf '%s' "$count"
+            else
+              printf unknown
+            fi
+          }
+
+          rootless_userns=false
+          if command -v unshare >/dev/null 2>&1; then
+            rootless_userns="$(bool_command unshare --user --map-root-user true)"
+          fi
+          subuid_count="$(subid_count /etc/subuid)"
+          subgid_count="$(subid_count /etc/subgid)"
+          subuid_ready=false
+          subgid_ready=false
+          if [[ "$subuid_count" =~ ^[0-9]+$ ]] && (( subuid_count >= 65536 )); then
+            subuid_ready=true
+          fi
+          if [[ "$subgid_count" =~ ^[0-9]+$ ]] && (( subgid_count >= 65536 )); then
+            subgid_ready=true
+          fi
+          user_systemd="$(bool_command systemctl --user show-environment)"
+          linger="$(loginctl show-user "$(id -u)" -p Linger --value 2>/dev/null || printf unknown)"
+          podman="$(bool_command command -v podman)"
+          docker="$(bool_command command -v docker)"
+          docker_socket_writable="$(bool_command test -w /var/run/docker.sock)"
+          runner_services=unknown
+          if measured_runner_services="$(systemctl list-units --type=service --all 'actions.runner.*' \
+              --no-legend --no-pager 2>/dev/null | awk 'END {print NR + 0}')"; then
+            runner_services="$measured_runner_services"
+          fi
+
+          {
+            echo "rootless_userns=$rootless_userns"
+            echo "subuid_count=$subuid_count"
+            echo "subgid_count=$subgid_count"
+            echo "subuid_ready=$subuid_ready"
+            echo "subgid_ready=$subgid_ready"
+            echo "user_systemd=$user_systemd"
+            echo "linger=$linger"
+            echo "podman=$podman"
+            echo "docker=$docker"
+            echo "docker_socket_writable=$docker_socket_writable"
+            echo "runner_services=$runner_services"
+          } >>"$GITHUB_OUTPUT"
+          printf 'rootless_userns=%s subuid_count=%s subgid_count=%s subuid_ready=%s subgid_ready=%s user_systemd=%s linger=%s podman=%s docker=%s docker_socket_writable=%s runner_services=%s\n' \
+            "$rootless_userns" "$subuid_count" "$subgid_count" "$subuid_ready" "$subgid_ready" "$user_systemd" "$linger" \
+            "$podman" "$docker" "$docker_socket_writable" "$runner_services"
+
       - name: systemd version
         run: systemd-analyze --version | head -1
 
@@ -114,6 +175,13 @@ jobs:
             echo "| StartLimitIntervalUSec | ${{ steps.policy.outputs.interval }} |"
             echo "| StartLimitBurst | ${{ steps.policy.outputs.burst }} |"
             echo "| health 9446 | ${{ steps.health.outputs.ok }} |"
+            echo "| rootless user namespace | ${{ steps.isolation.outputs.rootless_userns }} |"
+            echo "| subordinate uid/gid count | ${{ steps.isolation.outputs.subuid_count }}/${{ steps.isolation.outputs.subgid_count }} |"
+            echo "| subordinate uid/gid ready | ${{ steps.isolation.outputs.subuid_ready }}/${{ steps.isolation.outputs.subgid_ready }} |"
+            echo "| user systemd / linger | ${{ steps.isolation.outputs.user_systemd }}/${{ steps.isolation.outputs.linger }} |"
+            echo "| podman / docker | ${{ steps.isolation.outputs.podman }}/${{ steps.isolation.outputs.docker }} |"
+            echo "| writable Docker socket | ${{ steps.isolation.outputs.docker_socket_writable }} |"
+            echo "| actions runner services | ${{ steps.isolation.outputs.runner_services }} |"
           } >>"$GITHUB_STEP_SUMMARY"
 
           fail=0
