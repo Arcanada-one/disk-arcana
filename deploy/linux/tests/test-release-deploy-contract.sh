@@ -402,6 +402,18 @@ grep -qF 'http://127.0.0.1:9446/health' <<<"$stage_readiness_step" ||
 ! grep -qE 'printf[^\n]*(sudo_summary|sudo_command)|echo[^\n]*(sudo_summary|sudo_command)' \
     <<<"$stage_readiness_step" || fail "stage runner readiness probe prints sudo details"
 
+readiness_marker="printf 'stage_runner_readiness=ok runner_services=%s\\n' \"\$runner_services\""
+[[ "$(grep -cFx "          $readiness_marker" <<<"$stage_readiness_step")" -eq 1 ]] ||
+  fail "stage runner readiness probe does not have one exact final marker"
+readiness_marker_line="$(grep -nFx "          $readiness_marker" <<<"$stage_readiness_step" | cut -d: -f1)"
+stage_before_readiness_marker="$(sed -n "1,$((readiness_marker_line - 1))p" <<<"$stage_readiness_step")"
+stage_after_readiness_marker="$(sed -n "$((readiness_marker_line + 1)),\$p" <<<"$stage_readiness_step")"
+[[ -z "$stage_after_readiness_marker" ]] ||
+  fail "stage runner readiness marker is not the final command"
+! grep -qE '(^|[;&|({[:space:]-])(exit|return)([[:space:];)}]|$)' \
+    <<<"$stage_before_readiness_marker" ||
+  fail "stage runner readiness probe terminates successfully before its final marker"
+
 assert_stage_top_level_command "$stage_readiness_step" '[[ "$runner_uid" != 0 ]]' "root UID predicate"
 assert_stage_top_level_command "$stage_readiness_step" '[[ "$rootless_userns" == true ]]' "rootless-userns predicate"
 assert_stage_top_level_command "$stage_readiness_step" '(( subuid_count >= 65536 ))' "subordinate-UID predicate"
@@ -421,6 +433,7 @@ assert_stage_top_level_command "$stage_readiness_step" '[[ "$restart" == on-fail
 assert_stage_top_level_command "$stage_readiness_step" '[[ "$start_limit_interval" == 2min ]]' "start-limit-interval predicate"
 assert_stage_top_level_command "$stage_readiness_step" '[[ "$start_limit_burst" == 5 ]]' "start-limit-burst predicate"
 assert_stage_top_level_command "$stage_readiness_step" "curl --fail --silent --show-error --max-time 10 -o /dev/null \\" "health predicate"
+assert_stage_top_level_command "$stage_readiness_step" "$readiness_marker" "readiness marker"
 
 if grep -oE '(^|[[:space:]])of=[^[:space:]]+' <<<"$stage_readiness_step" |
     grep -qvE '(^|[[:space:]])of=/dev/null$'; then
@@ -673,6 +686,36 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
   run_stage_review_fixture "$stage_extra_sudo" \
     'FAIL  stage runner readiness probe exposes a raw or extra sudo listing' \
     "extra raw sudo listing"
+
+  stage_early_exit="$fixture_root/stage-probe-early-exit.yml"
+  awk '
+    /^      - name: Read-only staging readiness$/ {in_readiness=1}
+    in_readiness && !mutated && /^          set -euo pipefail$/ {
+      print
+      print "          exit 0"
+      mutated=1
+      next
+    }
+    {print}
+  ' "$STAGE_PROBE_WORKFLOW" >"$stage_early_exit"
+  run_stage_review_fixture "$stage_early_exit" \
+    'FAIL  stage runner readiness probe terminates successfully before its final marker' \
+    "early successful exit"
+
+  stage_early_return="$fixture_root/stage-probe-early-return.yml"
+  awk '
+    /^      - name: Read-only staging readiness$/ {in_readiness=1}
+    in_readiness && !mutated && /^          set -euo pipefail$/ {
+      print
+      print "          return 0"
+      mutated=1
+      next
+    }
+    {print}
+  ' "$STAGE_PROBE_WORKFLOW" >"$stage_early_return"
+  run_stage_review_fixture "$stage_early_return" \
+    'FAIL  stage runner readiness probe terminates successfully before its final marker' \
+    "early successful return"
 
   (( review_gap_failures == 0 )) ||
     fail "$review_gap_failures stage runner review-gap mutants were accepted"
