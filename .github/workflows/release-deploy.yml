@@ -121,7 +121,6 @@ jobs:
               return 1
             }
             readback="$(
-              cd /
               /usr/bin/timeout --signal=KILL 20s \
               /usr/bin/env \
                 -u GIT_DIR \
@@ -156,7 +155,7 @@ jobs:
                 GIT_TERMINAL_PROMPT=0 \
                 GIT_ASKPASS=/bin/false \
                 SSH_ASKPASS=/bin/false \
-                /usr/bin/git \
+                /usr/bin/git -C / \
                   -c credential.helper= \
                   -c core.askPass=/bin/false \
                   -c http.sslVerify=true \
