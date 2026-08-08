@@ -136,9 +136,9 @@ assert_direct_stage_command() {
     fail "group-scoped stage probe does not execute $label directly"
 }
 
-assert_stage_assertions_execute() {
-  local block="$1" script witness witness_output expected_markers actual_markers
-  script="$(awk '
+extract_stage_readiness_script() {
+  local block="$1"
+  awk '
     found && ($0 == "" || /^          /) {
       sub(/^          /, "")
       print
@@ -146,33 +146,14 @@ assert_stage_assertions_execute() {
     }
     found {exit}
     /^        run: \|$/ {found=1}
-  ' <<<"$block")"
-  witness="$(awk '
-    {
-      line=$0
-      sub(/^[[:space:]]+/, "", line)
-      sub(/[[:space:]]+$/, "", line)
-    }
-    line ~ /^\[\[/ || line ~ /^\(\(/ ||
-      line ~ /^grep -qF "\/\$\{runner_units\[0\]\}" \/proc\/self\/cgroup$/ {
-        marker++
-        printf "printf '\''STAGE_READINESS_ASSERTION_%d\\n'\''\n", marker
-        next
-      }
-    line ~ /^[a-zA-Z_][a-zA-Z0-9_]*\(\)[[:space:]]*\{$/ ||
-      line ~ /^(true|false)[[:space:]]*&&[[:space:]]*\{$/ ||
-      $0 == "}" || line ~ /^if .*; then$/ ||
-      line == "else" || line == "fi" {print line; next}
-    {print ":"}
-  ' <<<"$script")"
-  expected_markers="$(awk '/^printf '\''STAGE_READINESS_ASSERTION_[0-9]+/ {count++}
-    END {print count + 0}' <<<"$witness")"
-  witness_output="$(bash -s <<<"$witness")" ||
-    fail "group-scoped stage probe readiness execution witness is invalid"
-  actual_markers="$(awk '/^STAGE_READINESS_ASSERTION_[0-9]+$/ {count++}
-    END {print count + 0}' <<<"$witness_output")"
-  [[ "$expected_markers" -gt 0 && "$actual_markers" -eq "$expected_markers" ]] ||
-    fail "group-scoped stage probe readiness assertions are not execution-load-bearing"
+  ' <<<"$block"
+}
+
+assert_reviewed_stage_readiness_script() {
+  local block="$1" script_digest
+  script_digest="$(extract_stage_readiness_script "$block" | sha256sum | awk '{print $1}')"
+  [[ "$script_digest" == f911373d8525ff53a722e2bd2630edfd09c885899d4a7461efc9d962d2fbf9e4 ]] ||
+    fail "group-scoped stage probe readiness script differs from the reviewed executable contract"
 }
 
 count_exact_command() {
@@ -408,7 +389,6 @@ assert_direct_stage_command "$stage_readiness_step" '[[ "$(systemctl show disk-a
   fail "group-scoped stage probe does not capture the health body"
 assert_direct_stage_command "$stage_readiness_step" '[[ "$(printf '\''%s'\'' "$health_body" | tr -d '\''[:space:]'\'')" == *'\''"status":"ok"'\''* ]]' \
   "the canonical status=ok health verdict"
-assert_stage_assertions_execute "$stage_readiness_step"
 [[ "$(grep -cF 'curl --fail' <<<"$stage_probe_block")" -eq 1 ]] ||
   fail "group-scoped stage probe contains an additional network request"
 [[ "$(grep -cF 'http://127.0.0.1:9446/health' <<<"$stage_probe_block")" -eq 1 ]] ||
@@ -426,6 +406,7 @@ stage_probe_redirect_scan="$(sed -E \
   fail "group-scoped stage probe writes to a host path"
 ! grep -qE '(^|[[:space:]])(env|printenv|set)[[:space:]]*($|[|;&])|/etc/(shadow|sudoers|environment)|/proc/[0-9]+/environ' \
   <<<"$stage_probe_block" || fail "group-scoped stage probe reads protected process or credential state"
+assert_reviewed_stage_readiness_script "$stage_readiness_step"
 
 for block in "$dev_block" "$prod_block"; do
   [[ "$block" == *'/usr/local/sbin/disk-arcana-deploy-broker --deploy'* ]] ||
@@ -829,10 +810,40 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
     }
     {print}
   ' "$STAGE_PROBE_WORKFLOW" >"$inert_readiness_stage_probe"
+  inert_readiness_script="$(sed -n '/^      - name: Read-only readiness verdict$/,$p' \
+    "$inert_readiness_stage_probe")"
+  bash -n -s <<<"$(extract_stage_readiness_script "$inert_readiness_script")" ||
+    fail "inert readiness function fixture is not valid Bash"
   run_stage_probe_fixture "$inert_readiness_stage_probe" \
-    'FAIL  group-scoped stage probe readiness assertions are not execution-load-bearing' \
+    'FAIL  group-scoped stage probe readiness script differs from the reviewed executable contract' \
     "inert readiness function"
   printf 'PASS  inert readiness function is rejected for the intended reason\n'
+
+  short_circuit_readiness_stage_probe="$fixture_root/stage-probe-short-circuit-readiness.yml"
+  awk '
+    /^          \[\[ "\$rootless_userns" == true \]\]$/ && !mutated {
+      print "          false && { :"
+      print $0
+      in_assertions=1
+      mutated=1
+      next
+    }
+    in_assertions && index($0, "grep -qF \"/system.slice/${runner_units[0]}\" /proc/self/cgroup") {
+      print $0
+      print "          :; }"
+      in_assertions=0
+      next
+    }
+    {print}
+  ' "$STAGE_PROBE_WORKFLOW" >"$short_circuit_readiness_stage_probe"
+  short_circuit_readiness_script="$(sed -n '/^      - name: Read-only readiness verdict$/,$p' \
+    "$short_circuit_readiness_stage_probe")"
+  bash -n -s <<<"$(extract_stage_readiness_script "$short_circuit_readiness_script")" ||
+    fail "short-circuit readiness fixture is not valid Bash"
+  run_stage_probe_fixture "$short_circuit_readiness_stage_probe" \
+    'FAIL  group-scoped stage probe readiness script differs from the reviewed executable contract' \
+    "short-circuit readiness"
+  printf 'PASS  short-circuit readiness assertions are rejected for the intended reason\n'
 
   unbound_runner_stage_probe="$fixture_root/stage-probe-unbound-runner.yml"
   sed '/grep -qF "\/system.slice\/\${runner_units\[0\]}" \/proc\/self\/cgroup/d' \
