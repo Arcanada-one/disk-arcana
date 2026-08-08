@@ -1,4 +1,4 @@
-# DISK-RB-012 — updating the server on `arcana-agents` (canon Datarim KB host)
+# DISK-RB-014 — updating the server on `arcana-agents` (canon Datarim KB host)
 
 `arcana-agents` holds the canon `datarim-kb` share. It is **outside every
 automated delivery path in this repository**, so a fix merged to `main` does not
@@ -14,8 +14,8 @@ Measured on 2026-08-04, not inferred:
 
 | Path | Why it does not apply |
 |---|---|
-| `release-deploy.yml` → `deploy-dev` | Targets `arcana-devs` only; installs into `/usr/local/bin` and runs `systemctl restart` (system scope). |
-| `release-deploy.yml` → `deploy-prod` | Targets `arcana-prod`; same system-scope assumptions. |
+| `release-deploy.yml` → `deploy-stage` | Targets `arcana-devs` only through the system-service deployment broker. |
+| `release-deploy.yml` → `deploy-prod` | Targets `arcana-prod` through the same system-service deployment broker. |
 | `deploy-unit.yml` | Delivers unit files, not binaries. Its `arcana-agents` target (added in DISK-0070) covers the **share drop-in** only. |
 
 And the host itself differs from both deploy targets:
@@ -23,14 +23,14 @@ And the host itself differs from both deploy targets:
 - **A decoy system unit exists.** `/etc/systemd/system/disk-arcana-server.service`
   is present but `inactive` and `disabled`; the server actually runs from
   `/home/dev/.config/systemd/user/disk-arcana-server.service`. So
-  `systemctl restart disk-arcana-server` — exactly what `deploy-dev` runs —
+  `systemctl restart disk-arcana-server` — the system-service operation used by the broker —
   succeeds against the wrong, dormant unit and changes nothing, while the step
   reports success. Restarting the live server requires `systemctl --user` in
   `dev`'s session.
 - **The health check would pass against nothing.** `deploy-dev` probes
   `http://127.0.0.1:9446/health`, but this host serves health on
   `DISK_HEALTH_BIND_ADDR=100.108.24.109:9546`; nothing listens on `:9446`. A
-  naive copy of that job would therefore fail its probe, roll back, and report a
+  naive copy of that path would therefore fail its probe, roll back, and report a
   failure whose cause is the wrong port rather than the binary.
 - `/usr/local/bin/disk-arcana-server` is `root:root 0755`, and `/usr/local/bin`
   is **not writable** by `dev`;

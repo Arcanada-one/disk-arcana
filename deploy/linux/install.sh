@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# install.sh — Disk Arcana server install/update script for Linux.
+# install.sh — Disk Arcana server first-install bootstrap for Linux.
+#
+# This script is intentionally not a release-update path. Once either the live
+# binary or unit exists, use the manifest-bound deployment broker instead.
 #
 # Usage:
 #   sudo ./install.sh [--binary <path>] [--root <root>] [--no-systemd]
@@ -17,9 +20,6 @@
 #   4. Installs the systemd unit file to /etc/systemd/system/.
 #   5. Optionally reloads systemd and enables/starts the service.
 #
-# Rollback: the previous binary (if present) is preserved as
-#   /usr/local/bin/disk-arcana-server.prev
-
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,6 +45,13 @@ done
 
 # Strip trailing slash from ROOT (unless it's bare /).
 ROOT="${ROOT%/}"
+
+if [[ -e "${ROOT}/usr/local/bin/disk-arcana-server" ||
+      -e "${ROOT}/etc/systemd/system/disk-arcana-server.service" ]]; then
+    printf '%s\n' \
+        "ERROR: install.sh is bootstrap-only; use disk-arcana-deploy-broker for updates" >&2
+    exit 1
+fi
 
 # ---- Helpers ----
 log() { echo "[install] $*"; }
@@ -84,11 +91,6 @@ run chmod 750                     "${ROOT}/var/log/disk-arcana"
 # ---- 3. Binary ----
 BIN_DEST="${ROOT}/usr/local/bin/disk-arcana-server"
 run mkdir -p "${ROOT}/usr/local/bin"
-
-if [[ -f "$BIN_DEST" ]]; then
-    log "Preserving previous binary as ${BIN_DEST}.prev"
-    run cp "$BIN_DEST" "${BIN_DEST}.prev"
-fi
 
 log "Installing binary from ${BINARY_PATH}"
 if [[ ! -f "$BINARY_PATH" ]]; then

@@ -157,6 +157,12 @@ jobs:
         run: bash deploy/linux/tests/test-install-unit.sh
       - name: manifest-bound bundle preflight (INFRA-0370)
         run: bash deploy/linux/tests/test-bundle-manifest.sh
+      - name: crash-recoverable deployment state machine (INFRA-0370)
+        run: bash deploy/linux/tests/test-deploy-server.sh
+      - name: narrow deployment broker and bootstrap (INFRA-0370)
+        run: bash deploy/linux/tests/test-deploy-broker.sh
+      - name: staging-first release workflow contract (INFRA-0370)
+        run: bash deploy/linux/tests/test-release-deploy-contract.sh
 
   test:
     name: Test (linux)
