@@ -16,7 +16,7 @@ readonly -a MEMBERS=(
   install.sh
   provision-deploy-broker.sh
 )
-readonly -a TARGET_NAMES=(helper broker sudoers config lock)
+readonly -a TARGET_NAMES=(helper broker sudoers config lock legacy_broker legacy_sudoers)
 
 die() {
   printf 'ERROR: %s\n' "$1" >&2
@@ -57,9 +57,19 @@ readonly INBOX_ROOT="$DEPLOY_ROOT/inbox"
 readonly AUTHORIZATION_ROOT="$DEPLOY_ROOT/authorizations"
 readonly CONSUMED_AUTHORIZATION_ROOT="$AUTHORIZATION_ROOT/consumed"
 readonly LOCK_TARGET="$ROOT/run/lock/disk-arcana-deploy.lock"
+readonly LEGACY_BROKER_TARGET="$ROOT/usr/local/sbin/disk-arcana-install-unit"
+readonly LEGACY_SUDOERS_TARGET="$ROOT/etc/sudoers.d/disk-arcana-install-unit"
 readonly HELPER_BACKUP_ROOT="$DEPLOY_ROOT/backups"
 readonly HELPER_RECORD_ROOT="$STATE_ROOT/records"
-readonly -a TARGETS=("$HELPER_TARGET" "$BROKER_TARGET" "$SUDOERS_TARGET" "$CONFIG_TARGET" "$LOCK_TARGET")
+readonly -a TARGETS=(
+  "$HELPER_TARGET"
+  "$BROKER_TARGET"
+  "$SUDOERS_TARGET"
+  "$CONFIG_TARGET"
+  "$LOCK_TARGET"
+  "$LEGACY_BROKER_TARGET"
+  "$LEGACY_SUDOERS_TARGET"
+)
 readonly -a DIRECTORY_NAMES=(helper_parent broker_parent sudoers_parent config_parent inbox authorizations consumed_authorizations helper_backups helper_records)
 readonly -a DIRECTORY_PATHS=(
   "$(dirname "$HELPER_TARGET")"
@@ -301,6 +311,7 @@ installed_generation_ok() {
   [[ "$(sha "$BROKER_TARGET")" == "$TX_BROKER_SHA" ]] || return 1
   [[ "$(sha "$SUDOERS_TARGET")" == "$TX_SUDOERS_SHA" ]] || return 1
   [[ "$(sha "$CONFIG_TARGET")" == "$TX_CONFIG_SHA" ]] || return 1
+  [[ ! -e "$LEGACY_BROKER_TARGET" && ! -e "$LEGACY_SUDOERS_TARGET" ]] || return 1
   visudo -cf "$SUDOERS_TARGET" >/dev/null 2>&1
 }
 
@@ -475,7 +486,8 @@ done <"$AUTH"
 [[ "$BOOTSTRAP_ROOT" == "$DEPLOY_ROOT/bootstrap/$DEPLOYMENT_ID" ]] || die "bootstrap root is not canonical"
 assert_no_symlink_components "$BOOTSTRAP_ROOT" || die "bootstrap path has a symlink component"
 for privileged_path in "$STATE_ROOT" "$NONCE_ROOT" "$RECORD_ROOT" "$BACKUP_ROOT" \
-  "$HELPER_TARGET" "$BROKER_TARGET" "$SUDOERS_TARGET" "$CONFIG_TARGET" "$INBOX_ROOT" "$LOCK_TARGET"; do
+  "$HELPER_TARGET" "$BROKER_TARGET" "$SUDOERS_TARGET" "$CONFIG_TARGET" "$INBOX_ROOT" "$LOCK_TARGET" \
+  "$LEGACY_BROKER_TARGET" "$LEGACY_SUDOERS_TARGET"; do
   assert_no_symlink_components "$privileged_path" || die "privileged path has a symlink component"
 done
 [[ "$(realpath -e -- "$AUTH")" == "$(realpath -e -- "$BOOTSTRAP_ROOT")"/* ]] || die "authorization is outside bootstrap root"
@@ -525,7 +537,7 @@ validate_bundle || die "bundle validation failed"
 
 runner_groups="$(id -nG "$RUNNER_USER" 2>/dev/null || true)"
 while IFS= read -r policy; do
-  [[ "$policy" == "$SUDOERS_TARGET" ]] && continue
+  [[ "$policy" == "$SUDOERS_TARGET" || "$policy" == "$LEGACY_SUDOERS_TARGET" ]] && continue
   if awk -v user="$RUNNER_USER" -v configured_group="$RUNNER_GROUP" -v groups="$runner_groups" '
     BEGIN {
       count=split(groups, raw, /[[:space:]]+/)
@@ -628,6 +640,7 @@ mv -f -- "$tmp_broker" "$BROKER_TARGET" || rollback_failure
 mv -f -- "$tmp_sudoers" "$SUDOERS_TARGET" || rollback_failure
 mv -f -- "$tmp_config" "$CONFIG_TARGET" || rollback_failure
 mv -f -- "$tmp_lock" "$LOCK_TARGET" || rollback_failure
+rm -f -- "$LEGACY_BROKER_TARGET" "$LEGACY_SUDOERS_TARGET" || rollback_failure
 for parent in "$(dirname "$HELPER_TARGET")" "$(dirname "$BROKER_TARGET")" \
   "$(dirname "$SUDOERS_TARGET")" "$(dirname "$CONFIG_TARGET")" \
   "$(dirname "$LOCK_TARGET")"; do

@@ -88,6 +88,21 @@ grep -qF 'state=COMMITTED health=ok' "$OUTPUT" || fail "cold bootstrap did not c
 ! grep -qF 'bootstrap-secret-0370' "$OUTPUT" || fail "cold bootstrap leaked sentinel output"
 pass "cold bootstrap installs, enables, starts and health-checks without secret output"
 
+if ! run_installer; then
+  sed -n '1,80p' "$OUTPUT" >&2
+  fail "committed cold bootstrap did not verify idempotently"
+fi
+grep -qF 'state=COMMITTED recovered=true' "$OUTPUT" ||
+  fail "committed cold bootstrap was not read back"
+pass "committed cold bootstrap re-verifies hashes, active/enabled state and health"
+
+setup_case existing-group
+: >"$JOURNAL_DIR/test-group-exists"
+run_installer || { sed -n '1,80p' "$OUTPUT" >&2; fail "bootstrap with existing service group failed"; }
+[[ -f "$JOURNAL_DIR/test-group-exists" && -f "$JOURNAL_DIR/test-user-exists" ]] ||
+  fail "bootstrap did not preserve the existing group while creating the user"
+pass "cold bootstrap supports an existing service group without an existing user"
+
 setup_case rollback
 if run_installer DISK_ARCANA_INSTALL_TEST_FAIL_AT=HEALTH_VERIFIED; then
   fail "injected cold-bootstrap failure returned success"

@@ -188,9 +188,14 @@ service_group_exists() {
 
 create_service_account() {
   if (( TEST_MODE )); then
-    : >"$JOURNAL_DIR/test-group-exists"; : >"$JOURNAL_DIR/test-user-exists"
+    if [[ "$TX_GROUP_EXISTED" == 0 ]]; then
+      : >"$JOURNAL_DIR/test-group-exists"
+    fi
+    : >"$JOURNAL_DIR/test-user-exists"
   else
-    groupadd --system disk-arcana
+    if [[ "$TX_GROUP_EXISTED" == 0 ]]; then
+      groupadd --system disk-arcana
+    fi
     useradd --system --no-create-home --shell /usr/sbin/nologin --gid disk-arcana disk-arcana
     SERVICE_UID="$(id -u disk-arcana)"; SERVICE_GID="$(id -g disk-arcana)"
   fi
@@ -256,7 +261,12 @@ recover_unfinished() {
   recovered_state="$TX_STATE"
   if [[ "$TX_STATE" == COMMITTED ]]; then
     [[ -f "$LIVE_BINARY" && -f "$LIVE_UNIT" ]] || return 1
+    [[ "$(sha256sum -- "$LIVE_BINARY" | awk '{print $1}')" == "$(sha256sum -- "$BINARY_PATH" | awk '{print $1}')" ]] || return 1
+    [[ "$(sha256sum -- "$LIVE_UNIT" | awk '{print $1}')" == "$(sha256sum -- "$UNIT_PATH" | awk '{print $1}')" ]] || return 1
     systemctl is-active --quiet disk-arcana-server >/dev/null 2>&1 || return 1
+    systemctl is-enabled --quiet disk-arcana-server >/dev/null 2>&1 || return 1
+    health_body="$(curl --fail --silent --show-error --max-time 10 http://127.0.0.1:9446/health 2>/dev/null)" || return 1
+    [[ "$(printf '%s' "$health_body" | tr -d '[:space:]')" == *'"status":"ok"'* ]] || return 1
     printf 'state=COMMITTED recovered=true\n'
     return 2
   fi
@@ -266,6 +276,8 @@ recover_unfinished() {
   printf 'state=FAILED_RECOVERED recovered_from=%s\n' "$recovered_state"
   return 3
 }
+
+[[ "$(hostname 2>/dev/null)" == "$EXPECTED_HOSTNAME" ]] || die "hostname mismatch"
 
 set +e
 recover_unfinished
@@ -278,7 +290,6 @@ case "$recovery_rc" in
   *) die "unfinished cold bootstrap could not be recovered" ;;
 esac
 
-[[ "$(hostname 2>/dev/null)" == "$EXPECTED_HOSTNAME" ]] || die "hostname mismatch"
 for fixed_path in "$LIVE_BINARY" "$LIVE_UNIT" "$CONFIG_ROOT" "$DATA_ROOT" "$LOG_ROOT"; do
   assert_no_symlink_components "$fixed_path" || die "cold-bootstrap path has a symlink component"
 done

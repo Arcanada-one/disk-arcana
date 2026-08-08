@@ -48,7 +48,7 @@ prod_block="$(sed -n '/^  deploy-prod:/,$p' "$WORKFLOW")"
 for block in "$dev_block" "$prod_block"; do
   [[ "$block" == *'/usr/local/sbin/disk-arcana-deploy-broker --deploy'* ]] ||
     fail "deploy job bypasses the installed broker"
-  # shellcheck disable=SC2016 -- matching literal GitHub expression syntax.
+  # shellcheck disable=SC2016
   [[ "$block" == *'authorization_id="${GITHUB_RUN_ID}'* ]] ||
     fail "deploy job is not bound to a root-issued run authorization"
   [[ "$block" == *"artifact-ids: \${{ needs.build.outputs.artifact_id }}"* ]] ||
@@ -64,7 +64,8 @@ for block in "$dev_block" "$prod_block"; do
     fail "deploy job prints the raw health response"
 done
 
-if rg -q --glob '!test-release-deploy-contract.sh' \
+if rg -q --glob '!test-release-deploy-contract.sh' --glob '!test-deploy-broker.sh' \
+    --glob '!provision-deploy-broker.sh' \
     'disk-arcana-install-unit|install-systemd-unit\.sh' \
     "$ROOT/.github" "$ROOT/deploy/linux" "$ROOT/scripts"; then
   fail "retired unit-only release path is still reachable"

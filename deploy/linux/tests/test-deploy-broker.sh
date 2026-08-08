@@ -199,6 +199,11 @@ assert_not_provisioned() {
 [[ -f "$SUDOERS_SOURCE" ]] || fail "sudoers policy is missing: $SUDOERS_SOURCE"
 
 setup_case provision
+printf 'legacy unit broker\n' >"$FAKE_ROOT/usr/local/sbin/disk-arcana-install-unit"
+printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/disk-arcana-install-unit\n' "$RUNNER_USER" \
+  >"$FAKE_ROOT/etc/sudoers.d/disk-arcana-install-unit"
+chmod 0755 "$FAKE_ROOT/usr/local/sbin/disk-arcana-install-unit"
+chmod 0440 "$FAKE_ROOT/etc/sudoers.d/disk-arcana-install-unit"
 if ! run_provisioner; then
   sed -n '1,80p' "$OUTPUT" >&2
   fail "valid one-shot provisioning returned non-zero"
@@ -212,6 +217,8 @@ fi
 [[ "$(stat -c '%a' "$FAKE_ROOT/run/lock/disk-arcana-deploy.lock")" == 600 ]] || fail "deploy lock mode is not 0600"
 [[ -f "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/test-group-exists" ]] || fail "deploy group was not reconciled"
 [[ -f "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/test-member-exists" ]] || fail "runner membership was not reconciled"
+[[ ! -e "$FAKE_ROOT/usr/local/sbin/disk-arcana-install-unit" ]] || fail "legacy unit broker survived replacement"
+[[ ! -e "$FAKE_ROOT/etc/sudoers.d/disk-arcana-install-unit" ]] || fail "legacy unit sudoers rule survived replacement"
 grep -qF 'state=COMMITTED' "$OUTPUT" || fail "provisioner did not report COMMITTED"
 [[ ! -e "$BOOTSTRAP" ]] || fail "bootstrap authority path survived provisioning"
 pass "one-shot provision installs exact restricted broker boundary and revokes bootstrap path"
@@ -317,14 +324,21 @@ printf 'old helper\n' >"$FAKE_ROOT/usr/local/libexec/disk-arcana/deploy-server.s
 printf 'old broker\n' >"$FAKE_ROOT/usr/local/sbin/disk-arcana-deploy-broker"
 printf 'old sudoers\n' >"$FAKE_ROOT/etc/sudoers.d/disk-arcana-deploy"
 printf 'old config\n' >"$FAKE_ROOT/etc/disk-arcana/deploy.conf"
+printf 'old legacy broker\n' >"$FAKE_ROOT/usr/local/sbin/disk-arcana-install-unit"
+printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/disk-arcana-install-unit\n' "$RUNNER_USER" \
+  >"$FAKE_ROOT/etc/sudoers.d/disk-arcana-install-unit"
 chmod 0755 "$FAKE_ROOT/usr/local/libexec/disk-arcana/deploy-server.sh" \
-  "$FAKE_ROOT/usr/local/sbin/disk-arcana-deploy-broker"
+  "$FAKE_ROOT/usr/local/sbin/disk-arcana-deploy-broker" \
+  "$FAKE_ROOT/usr/local/sbin/disk-arcana-install-unit"
 chmod 0440 "$FAKE_ROOT/etc/sudoers.d/disk-arcana-deploy"
+chmod 0440 "$FAKE_ROOT/etc/sudoers.d/disk-arcana-install-unit"
 chmod 0600 "$FAKE_ROOT/etc/disk-arcana/deploy.conf"
 old_helper_sha="$(sha "$FAKE_ROOT/usr/local/libexec/disk-arcana/deploy-server.sh")"
 old_broker_sha="$(sha "$FAKE_ROOT/usr/local/sbin/disk-arcana-deploy-broker")"
 old_sudoers_sha="$(sha "$FAKE_ROOT/etc/sudoers.d/disk-arcana-deploy")"
 old_config_sha="$(sha "$FAKE_ROOT/etc/disk-arcana/deploy.conf")"
+old_legacy_broker_sha="$(sha "$FAKE_ROOT/usr/local/sbin/disk-arcana-install-unit")"
+old_legacy_sudoers_sha="$(sha "$FAKE_ROOT/etc/sudoers.d/disk-arcana-install-unit")"
 if run_provisioner DISK_ARCANA_PROVISION_TEST_FAIL_AT=NARROW_RULE_VERIFIED; then
   fail "injected post-install provision failure returned success"
 fi
@@ -332,6 +346,8 @@ fi
 [[ "$(sha "$FAKE_ROOT/usr/local/sbin/disk-arcana-deploy-broker")" == "$old_broker_sha" ]] || fail "rollback changed prior broker"
 [[ "$(sha "$FAKE_ROOT/etc/sudoers.d/disk-arcana-deploy")" == "$old_sudoers_sha" ]] || fail "rollback changed prior sudoers"
 [[ "$(sha "$FAKE_ROOT/etc/disk-arcana/deploy.conf")" == "$old_config_sha" ]] || fail "rollback changed prior config"
+[[ "$(sha "$FAKE_ROOT/usr/local/sbin/disk-arcana-install-unit")" == "$old_legacy_broker_sha" ]] || fail "rollback changed legacy broker"
+[[ "$(sha "$FAKE_ROOT/etc/sudoers.d/disk-arcana-install-unit")" == "$old_legacy_sudoers_sha" ]] || fail "rollback changed legacy sudoers"
 grep -RqsF 'state=FAILED_RECOVERED' "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions" ||
   fail "provision rollback did not leave a durable recovered record"
 [[ ! -e "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/test-group-exists" ]] || fail "rollback retained created deploy group"
