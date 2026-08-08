@@ -327,6 +327,13 @@ stage_probe_trigger_count="$(awk '
   fail "group-scoped stage probe has an additional trigger"
 grep -qF 'permissions: {}' "$STAGE_PROBE_WORKFLOW" ||
   fail "group-scoped stage probe permissions are not empty"
+stage_probe_job_count="$(awk '
+  /^jobs:$/ {in_jobs=1; next}
+  in_jobs && /^  [a-zA-Z0-9_-]+:$/ {count++}
+  END {print count + 0}
+' "$STAGE_PROBE_WORKFLOW")"
+[[ "$stage_probe_job_count" -eq 1 ]] ||
+  fail "group-scoped stage probe workflow does not contain exactly one job"
 grep -qF 'group: disk-arcana-stage' <<<"$stage_probe_block" ||
   fail "group-scoped stage probe does not require runner group disk-arcana-stage"
 grep -qF 'labels: [self-hosted, Linux, X64, disk-arcana-stage]' <<<"$stage_probe_block" ||
@@ -757,6 +764,26 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
     "additional stage probe trigger"
   printf 'PASS  additional stage probe trigger is rejected for the intended reason\n'
 
+  extra_job_stage_probe="$fixture_root/stage-probe-extra-job.yml"
+  awk '
+    {print}
+    END {
+      print ""
+      print "  mutate-stage-host:"
+      print "    runs-on:"
+      print "      group: disk-arcana-stage"
+      print "      labels: [self-hosted, Linux, X64, disk-arcana-stage]"
+      print "    steps:"
+      print "      - name: Mutate outside the reviewed probe job"
+      print "        shell: bash"
+      print "        run: touch /tmp/disk-arcana-stage-probe-mutant"
+    }
+  ' "$STAGE_PROBE_WORKFLOW" >"$extra_job_stage_probe"
+  run_stage_probe_fixture "$extra_job_stage_probe" \
+    'FAIL  group-scoped stage probe workflow does not contain exactly one job' \
+    "additional mutating stage job"
+  printf 'PASS  additional mutating stage job is rejected for the intended reason\n'
+
   conditional_main_stage_probe="$fixture_root/stage-probe-conditional-main.yml"
   awk '
     !mutated && index($0, "[[ \"$GITHUB_REF\" == refs/heads/main ]]") {
@@ -890,7 +917,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
   bash -n -s <<<"$(extract_stage_readiness_script "$decoy_readiness_script")" ||
     fail "decoy readiness fixture real probe is not valid Bash"
   run_stage_probe_fixture "$decoy_readiness_stage_probe" \
-    'FAIL  group-scoped stage probe readiness script differs from the reviewed executable contract' \
+    'FAIL  group-scoped stage probe workflow does not contain exactly one job' \
     "skipped decoy readiness"
   printf 'PASS  skipped decoy cannot authenticate inert real-probe readiness\n'
 
