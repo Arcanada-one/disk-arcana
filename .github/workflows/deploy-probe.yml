@@ -16,8 +16,9 @@ on:
         required: true
         default: arcana-prod
         options:
+          # INFRA-0389: this public repository uses the default-group runner;
+          # arcana-prod-ci remains private-only.
           - arcana-prod
-          - arcana-prod-ci
           - arcana-devs
 
 permissions: {}

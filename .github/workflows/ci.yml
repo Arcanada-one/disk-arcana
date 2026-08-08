@@ -130,6 +130,27 @@ jobs:
         run: bash scripts/check-actions-pinned.sh --verify-remote
       - name: actionlint (INFRA-0370)
         run: bash scripts/ci-ensure-actionlint.sh --run
+      - name: Public deploy runner routing contract (INFRA-0389)
+        run: |
+          set -euo pipefail
+          failures=0
+          for workflow in \
+            .github/workflows/deploy-probe.yml \
+            .github/workflows/deploy-unit.yml; do
+            if grep -nE '^[[:space:]]*-[[:space:]]*arcana-prod-ci[[:space:]]*$' "$workflow"; then
+              echo "::error file=${workflow}::public workflow offers private-only runner target arcana-prod-ci"
+              failures=1
+            fi
+            if ! grep -qE '^[[:space:]]*default:[[:space:]]*arcana-prod[[:space:]]*$' "$workflow"; then
+              echo "::error file=${workflow}::public workflow must default to arcana-prod"
+              failures=1
+            fi
+            if ! grep -qE '^[[:space:]]*-[[:space:]]*arcana-prod[[:space:]]*$' "$workflow"; then
+              echo "::error file=${workflow}::public workflow must offer arcana-prod"
+              failures=1
+            fi
+          done
+          exit "$failures"
       - name: systemd unit contract (INFRA-0370)
         run: bash deploy/linux/tests/test-unit-contract.sh
       - name: systemd unit installer (INFRA-0370)
