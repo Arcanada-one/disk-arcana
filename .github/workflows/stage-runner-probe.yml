@@ -58,8 +58,8 @@ jobs:
           linger="$(loginctl show-user "$(id -u)" -p Linger --value 2>/dev/null || printf unknown)"
           podman="$(bool_command command -v podman)"
           docker_socket_writable="$(bool_command test -w /var/run/docker.sock)"
-          runner_services="$(systemctl list-units --type=service --all 'actions.runner.*' \
-            --no-legend --no-pager 2>/dev/null | awk 'END {print NR + 0}')"
+          mapfile -t runner_units < <(systemctl list-units --type=service --all \
+            'actions.runner.*' --plain --no-legend --no-pager 2>/dev/null | awk '{print $1}')
 
           [[ "$rootless_userns" == true ]]
           (( subuid_count >= 65536 ))
@@ -68,7 +68,9 @@ jobs:
           [[ "$linger" == yes ]]
           [[ "$podman" == true ]]
           [[ "$docker_socket_writable" == false ]]
-          [[ "$runner_services" == 1 ]]
+          [[ "${#runner_units[@]}" -eq 1 ]]
+          [[ "${runner_units[0]}" == actions.runner.*."${RUNNER_NAME}".service ]]
+          grep -qF "/${runner_units[0]}" /proc/self/cgroup
 
           sudo_listing="$(LC_ALL=C sudo -n -l 2>/dev/null)"
           mapfile -t sudo_commands < <(printf '%s\n' "$sudo_listing" | awk '
@@ -86,15 +88,16 @@ jobs:
           [[ "$(systemctl show disk-arcana-server -p Restart --value 2>/dev/null)" == on-failure ]]
           [[ "$(systemctl show disk-arcana-server -p StartLimitIntervalUSec --value 2>/dev/null)" == 2min ]]
           [[ "$(systemctl show disk-arcana-server -p StartLimitBurst --value 2>/dev/null)" == 5 ]]
-          curl --fail --silent --show-error --max-time 10 -o /dev/null \
-            http://127.0.0.1:9446/health
+          health_body="$(curl --fail --silent --show-error --max-time 10 \
+            http://127.0.0.1:9446/health 2>/dev/null)"
+          [[ "$(printf '%s' "$health_body" | tr -d '[:space:]')" == *'"status":"ok"'* ]]
 
           hostname
           uname -r
           uname -m
           systemd-analyze --version | sed -n '1p'
-          printf 'runner=%s uid=%s rootless_userns=%s subuid_count=%s subgid_count=%s user_systemd=%s linger=%s podman=%s docker_socket_writable=%s runner_services=%s\n' \
+          printf 'runner=%s uid=%s rootless_userns=%s subuid_count=%s subgid_count=%s user_systemd=%s linger=%s podman=%s docker_socket_writable=%s runner_unit=%s\n' \
             "$RUNNER_NAME" "$(id -u)" "$rootless_userns" "$subuid_count" \
             "$subgid_count" "$user_systemd" "$linger" "$podman" \
-            "$docker_socket_writable" "$runner_services"
+            "$docker_socket_writable" "${runner_units[0]}"
           printf 'sudo_surface=exact-broker unit=present active=active UnitFileState=enabled Restart=on-failure StartLimitIntervalUSec=2min StartLimitBurst=5 health=ok\n'

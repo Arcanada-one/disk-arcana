@@ -130,6 +130,12 @@ assert_unconditional_shell_gate() {
     fail "$label freshness gate is not unconditional"
 }
 
+assert_direct_stage_command() {
+  local block="$1" expected="$2" label="$3"
+  grep -qFx "          $expected" <<<"$block" ||
+    fail "group-scoped stage probe does not execute $label directly"
+}
+
 count_exact_command() {
   local file="$1" expected="$2"
   awk -v expected="$expected" '
@@ -167,6 +173,8 @@ share_install_block="$(sed -n '/name: Install share drop-in/,$p' "$SHARE_WORKFLO
 isolation_step="$(sed -n '/^      - name: Staging isolation capabilities$/,/^      - name: systemd version$/p' "$PROBE_WORKFLOW")"
 [[ -f "$STAGE_PROBE_WORKFLOW" ]] || fail "group-scoped stage probe workflow is absent"
 stage_probe_block="$(sed -n '/^  probe:/,$p' "$STAGE_PROBE_WORKFLOW")"
+stage_readiness_step="$(sed -n '/^      - name: Read-only readiness verdict$/,$p' \
+  "$STAGE_PROBE_WORKFLOW")"
 [[ "$dev_block" == *"github.event.inputs.target == 'prod'"* ]] ||
   fail "production dispatch does not first run staging in the same workflow"
 [[ "$dev_block" == *"github.ref == 'refs/heads/main'"* ]] ||
@@ -317,45 +325,51 @@ grep -qFx '          [[ "$GITHUB_WORKFLOW_REF" == Arcanada-one/disk-arcana/.gith
   <<<"$stage_source_guard" ||
   fail "group-scoped stage probe does not execute its exact workflow-reference guard directly"
 
-[[ "$stage_probe_block" == *'[[ "$(id -u)" != 0 ]]'* ]] ||
-  fail "group-scoped stage probe does not reject root execution"
-[[ "$stage_probe_block" == *'[[ "$rootless_userns" == true ]]'* ]] ||
-  fail "group-scoped stage probe does not require a rootless user namespace"
-[[ "$stage_probe_block" == *'(( subuid_count >= 65536 ))'* ]] ||
-  fail "group-scoped stage probe does not require subordinate UIDs"
-[[ "$stage_probe_block" == *'(( subgid_count >= 65536 ))'* ]] ||
-  fail "group-scoped stage probe does not require subordinate GIDs"
-[[ "$stage_probe_block" == *'[[ "$user_systemd" == true ]]'* ]] ||
-  fail "group-scoped stage probe does not require user systemd"
-[[ "$stage_probe_block" == *'[[ "$linger" == yes ]]'* ]] ||
-  fail "group-scoped stage probe does not require linger"
-[[ "$stage_probe_block" == *'[[ "$podman" == true ]]'* ]] ||
-  fail "group-scoped stage probe does not require podman"
-[[ "$stage_probe_block" == *'[[ "$docker_socket_writable" == false ]]'* ]] ||
-  fail "group-scoped stage probe does not reject writable Docker"
-[[ "$stage_probe_block" == *'[[ "$runner_services" == 1 ]]'* ]] ||
-  fail "group-scoped stage probe does not require exactly one runner service"
-[[ "$stage_probe_block" == *'[[ " $(id -Gn) " == *" disk-arcana-deploy "* ]]'* ]] ||
-  fail "group-scoped stage probe does not require the deployment group"
-[[ "$stage_probe_block" == *'[[ "${#sudo_commands[@]}" -eq 1 ]]'* ]] ||
-  fail "group-scoped stage probe does not require one sudo command"
-[[ "$stage_probe_block" == *'[[ "${sudo_commands[0]}" == '\''/usr/local/sbin/disk-arcana-deploy-broker --deploy *'\'' ]]'* ]] ||
-  fail "group-scoped stage probe does not require the exact narrow sudo command"
-[[ "$stage_probe_block" == *'[[ -f /etc/systemd/system/disk-arcana-server.service ]]'* ]] ||
-  fail "group-scoped stage probe does not require the installed unit"
-[[ "$stage_probe_block" == *'[[ "$(systemctl is-active disk-arcana-server 2>/dev/null)" == active ]]'* ]] ||
-  fail "group-scoped stage probe does not require the active service"
-[[ "$stage_probe_block" == *'[[ "$(systemctl show disk-arcana-server -p UnitFileState --value 2>/dev/null)" == enabled ]]'* ]] ||
-  fail "group-scoped stage probe does not require exact UnitFileState=enabled"
-[[ "$stage_probe_block" == *'[[ "$(systemctl show disk-arcana-server -p Restart --value 2>/dev/null)" == on-failure ]]'* ]] ||
-  fail "group-scoped stage probe does not require Restart=on-failure"
-[[ "$stage_probe_block" == *'[[ "$(systemctl show disk-arcana-server -p StartLimitIntervalUSec --value 2>/dev/null)" == 2min ]]'* ]] ||
-  fail "group-scoped stage probe does not require StartLimitIntervalUSec=2min"
-[[ "$stage_probe_block" == *'[[ "$(systemctl show disk-arcana-server -p StartLimitBurst --value 2>/dev/null)" == 5 ]]'* ]] ||
-  fail "group-scoped stage probe does not require StartLimitBurst=5"
-[[ "$stage_probe_block" == *'curl --fail --silent --show-error --max-time 10 -o /dev/null'* ]] ||
-  fail "group-scoped stage probe does not require a body-suppressed health check"
-[[ "$(grep -cE '^[[:space:]]*curl[[:space:]]' <<<"$stage_probe_block")" -eq 1 ]] ||
+assert_direct_stage_command "$stage_readiness_step" '[[ "$(id -u)" != 0 ]]' \
+  "the non-root rejection"
+assert_direct_stage_command "$stage_readiness_step" '[[ " $(id -Gn) " == *" disk-arcana-deploy "* ]]' \
+  "the deployment-group requirement"
+assert_direct_stage_command "$stage_readiness_step" '[[ "$rootless_userns" == true ]]' \
+  "the rootless-userns requirement"
+assert_direct_stage_command "$stage_readiness_step" '(( subuid_count >= 65536 ))' \
+  "the subordinate-UID requirement"
+assert_direct_stage_command "$stage_readiness_step" '(( subgid_count >= 65536 ))' \
+  "the subordinate-GID requirement"
+assert_direct_stage_command "$stage_readiness_step" '[[ "$user_systemd" == true ]]' \
+  "the user-systemd requirement"
+assert_direct_stage_command "$stage_readiness_step" '[[ "$linger" == yes ]]' \
+  "the linger requirement"
+assert_direct_stage_command "$stage_readiness_step" '[[ "$podman" == true ]]' \
+  "the podman requirement"
+assert_direct_stage_command "$stage_readiness_step" '[[ "$docker_socket_writable" == false ]]' \
+  "the writable-Docker rejection"
+assert_direct_stage_command "$stage_readiness_step" '[[ "${#runner_units[@]}" -eq 1 ]]' \
+  "the single-runner-unit requirement"
+assert_direct_stage_command "$stage_readiness_step" '[[ "${runner_units[0]}" == actions.runner.*."${RUNNER_NAME}".service ]]' \
+  "the runner-name unit binding"
+assert_direct_stage_command "$stage_readiness_step" 'grep -qF "/${runner_units[0]}" /proc/self/cgroup' \
+  "the executing-cgroup runner binding"
+assert_direct_stage_command "$stage_readiness_step" '[[ "${#sudo_commands[@]}" -eq 1 ]]' \
+  "the single sudo-command requirement"
+assert_direct_stage_command "$stage_readiness_step" '[[ "${sudo_commands[0]}" == '\''/usr/local/sbin/disk-arcana-deploy-broker --deploy *'\'' ]]' \
+  "the exact narrow sudo command"
+assert_direct_stage_command "$stage_readiness_step" '[[ -f /etc/systemd/system/disk-arcana-server.service ]]' \
+  "the installed-unit requirement"
+assert_direct_stage_command "$stage_readiness_step" '[[ "$(systemctl is-active disk-arcana-server 2>/dev/null)" == active ]]' \
+  "the active-service requirement"
+assert_direct_stage_command "$stage_readiness_step" '[[ "$(systemctl show disk-arcana-server -p UnitFileState --value 2>/dev/null)" == enabled ]]' \
+  "the exact UnitFileState requirement"
+assert_direct_stage_command "$stage_readiness_step" '[[ "$(systemctl show disk-arcana-server -p Restart --value 2>/dev/null)" == on-failure ]]' \
+  "the Restart=on-failure requirement"
+assert_direct_stage_command "$stage_readiness_step" '[[ "$(systemctl show disk-arcana-server -p StartLimitIntervalUSec --value 2>/dev/null)" == 2min ]]' \
+  "the StartLimitIntervalUSec requirement"
+assert_direct_stage_command "$stage_readiness_step" '[[ "$(systemctl show disk-arcana-server -p StartLimitBurst --value 2>/dev/null)" == 5 ]]' \
+  "the StartLimitBurst requirement"
+[[ "$stage_readiness_step" == *'health_body="$(curl --fail --silent --show-error --max-time 10'* ]] ||
+  fail "group-scoped stage probe does not capture the health body"
+assert_direct_stage_command "$stage_readiness_step" '[[ "$(printf '\''%s'\'' "$health_body" | tr -d '\''[:space:]'\'')" == *'\''"status":"ok"'\''* ]]' \
+  "the canonical status=ok health verdict"
+[[ "$(grep -cF 'curl --fail' <<<"$stage_probe_block")" -eq 1 ]] ||
   fail "group-scoped stage probe contains an additional network request"
 [[ "$(grep -cF 'http://127.0.0.1:9446/health' <<<"$stage_probe_block")" -eq 1 ]] ||
   fail "group-scoped stage probe health request is not loopback-only"
@@ -758,6 +772,45 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
     "inert exact-main function"
   printf 'PASS  inert exact-main function is rejected for the intended reason\n'
 
+  inert_readiness_stage_probe="$fixture_root/stage-probe-inert-readiness-function.yml"
+  awk '
+    /^          \[\[ "\$\(id -u\)" != 0 \]\]$/ && !mutated {
+      print "          readiness_assertions() {"
+      print "  " $0
+      in_assertions=1
+      mutated=1
+      next
+    }
+    in_assertions && /^          \[\[ "\$\(printf / {
+      print "  " $0
+      print "          }"
+      in_assertions=0
+      next
+    }
+    in_assertions {print "  " $0; next}
+    {print}
+  ' "$STAGE_PROBE_WORKFLOW" >"$inert_readiness_stage_probe"
+  run_stage_probe_fixture "$inert_readiness_stage_probe" \
+    'FAIL  group-scoped stage probe does not execute the non-root rejection directly' \
+    "inert readiness function"
+  printf 'PASS  inert readiness function is rejected for the intended reason\n'
+
+  unbound_runner_stage_probe="$fixture_root/stage-probe-unbound-runner.yml"
+  sed '/grep -qF "\/\${runner_units\[0\]}" \/proc\/self\/cgroup/d' \
+    "$STAGE_PROBE_WORKFLOW" >"$unbound_runner_stage_probe"
+  run_stage_probe_fixture "$unbound_runner_stage_probe" \
+    'FAIL  group-scoped stage probe does not execute the executing-cgroup runner binding directly' \
+    "unbound runner service"
+  printf 'PASS  unbound runner service is rejected for the intended reason\n'
+
+  degraded_health_stage_probe="$fixture_root/stage-probe-degraded-health.yml"
+  sed 's/== \*'\''"status":"ok"'\''\* /== *'\''"status":"degraded"'\''* /' \
+    "$STAGE_PROBE_WORKFLOW" >"$degraded_health_stage_probe"
+  run_stage_probe_fixture "$degraded_health_stage_probe" \
+    'FAIL  group-scoped stage probe does not execute the canonical status=ok health verdict directly' \
+    "degraded health acceptance"
+  printf 'PASS  degraded health acceptance is rejected for the intended reason\n'
+
   mutating_stage_probe="$fixture_root/stage-probe-systemd-mutation.yml"
   sed '/rootless_userns=/a\          systemctl restart disk-arcana-server' \
     "$STAGE_PROBE_WORKFLOW" >"$mutating_stage_probe"
@@ -794,7 +847,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
   sed 's/\[\[ "$docker_socket_writable" == false \]\]/[[ "$docker_socket_writable" == true ]]/' \
     "$STAGE_PROBE_WORKFLOW" >"$docker_accept_stage_probe"
   run_stage_probe_fixture "$docker_accept_stage_probe" \
-    'FAIL  group-scoped stage probe does not reject writable Docker' \
+    'FAIL  group-scoped stage probe does not execute the writable-Docker rejection directly' \
     "writable Docker acceptance"
   printf 'PASS  writable Docker acceptance is rejected for the intended reason\n'
 
@@ -802,7 +855,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
   sed 's/\[\[ "$(id -u)" != 0 \]\]/[[ "$(id -u)" == 0 ]]/' \
     "$STAGE_PROBE_WORKFLOW" >"$root_accept_stage_probe"
   run_stage_probe_fixture "$root_accept_stage_probe" \
-    'FAIL  group-scoped stage probe does not reject root execution' \
+    'FAIL  group-scoped stage probe does not execute the non-root rejection directly' \
     "root UID acceptance"
   printf 'PASS  root UID acceptance is rejected for the intended reason\n'
 
@@ -810,7 +863,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
   sed "s#\[\[ \"\${sudo_commands\[0\]}\" == '/usr/local/sbin/disk-arcana-deploy-broker --deploy \*' \]\]#[[ \"\${sudo_commands[0]}\" == *NOPASSWD* ]]#" \
     "$STAGE_PROBE_WORKFLOW" >"$broad_sudo_stage_probe"
   run_stage_probe_fixture "$broad_sudo_stage_probe" \
-    'FAIL  group-scoped stage probe does not require the exact narrow sudo command' \
+    'FAIL  group-scoped stage probe does not execute the exact narrow sudo command directly' \
     "broad sudo acceptance"
   printf 'PASS  broad sudo acceptance is rejected for the intended reason\n'
 fi
