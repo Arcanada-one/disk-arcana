@@ -104,6 +104,34 @@ SHIM
   chmod 0755 "$shims"/*
 }
 
+write_mutation_spies() {
+  local case_root="$1" command
+  MUTATION_SPY_DIR="$case_root/mutation-spies"
+  install -d -m 0755 "$MUTATION_SPY_DIR"
+  cat >"$MUTATION_SPY_DIR/mutation-spy" <<'SHIM'
+#!/usr/bin/env bash
+printf '%s\n' "${0##*/}" >>"${DISK_TEST_MUTATION_LOG:?}"
+exit 99
+SHIM
+  chmod 0755 "$MUTATION_SPY_DIR/mutation-spy"
+  for command in chmod chown cp groupadd groupdel gpasswd install mkdir mv rm rmdir sync usermod; do
+    ln -s mutation-spy "$MUTATION_SPY_DIR/$command"
+  done
+}
+
+instrument_terminal_retry_helpers() {
+  local source="$1" target="$2" helper
+  cp -- "$source" "$target"
+  for helper in \
+    write_journal archive_journal transition restore_targets ensure_directories \
+    restore_directories revoke_bootstrap remove_uncommitted_nonce \
+    restore_privilege_state remove_uncommitted_backup create_group add_member; do
+    sed -i "/^${helper}() {$/a\\  printf '%s\\n' '${helper}' >>\"\${DISK_TEST_RECOVERY_CALL_LOG:?}\"" \
+      "$target"
+  done
+  chmod 0755 "$target"
+}
+
 setup_case() {
   local name="$1"
   CASE_ROOT="$TMP/$name"
@@ -473,13 +501,32 @@ current_journal="$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/provision-cu
 terminal_snapshot="$CASE_ROOT/failed-recovery-required.snapshot"
 cp -- "$current_journal" "$terminal_snapshot"
 before_terminal_retry="$(tree_digest "$FAKE_ROOT")"
-if run_provisioner DISK_ARCANA_PROVISION_TEST_FAIL_AT=ROLLBACK_RESTORE_TARGETS; then
+before_terminal_metadata="$(stat -c '%d:%i:%s:%y:%z:%a:%u:%g' "$current_journal")"
+mutation_log="$CASE_ROOT/terminal-retry-mutations.log"
+recovery_call_log="$CASE_ROOT/terminal-retry-helper-calls.log"
+terminal_retry_provisioner="$CASE_ROOT/provision-deploy-broker.probed.sh"
+write_mutation_spies "$CASE_ROOT"
+instrument_terminal_retry_helpers "$PROVISIONER" "$terminal_retry_provisioner"
+original_provisioner="$PROVISIONER"
+PROVISIONER="$terminal_retry_provisioner"
+if run_provisioner \
+    PATH="$MUTATION_SPY_DIR:$CASE_ROOT/shims:$PATH" \
+    DISK_TEST_MUTATION_LOG="$mutation_log" \
+    DISK_TEST_RECOVERY_CALL_LOG="$recovery_call_log" \
+    DISK_ARCANA_PROVISION_TEST_FAIL_AT=ROLLBACK_RESTORE_TARGETS; then
   fail "terminal FAILED_RECOVERY_REQUIRED retry returned success"
 fi
+PROVISIONER="$original_provisioner"
 grep -qF 'unfinished broker provisioning could not be recovered' "$OUTPUT" ||
   fail "terminal retry did not fail at the recovery entry gate"
+[[ ! -s "$recovery_call_log" ]] ||
+  fail "terminal retry entered a recovery or authority helper: $(tr '\n' ' ' <"$recovery_call_log")"
+[[ ! -s "$mutation_log" ]] ||
+  fail "terminal retry attempted a recovery, authority, or mutation command: $(tr '\n' ' ' <"$mutation_log")"
 cmp -s "$terminal_snapshot" "$current_journal" ||
   fail "terminal retry rewrote FAILED_RECOVERY_REQUIRED evidence"
+[[ "$(stat -c '%d:%i:%s:%y:%z:%a:%u:%g' "$current_journal")" == "$before_terminal_metadata" ]] ||
+  fail "terminal retry replaced or rewrote byte-identical terminal evidence"
 [[ "$(tree_digest "$FAKE_ROOT")" == "$before_terminal_retry" ]] ||
   fail "terminal retry reran recovery or an authority/mutation step"
 [[ ! -e "$BOOTSTRAP" ]] || fail "terminal retry recreated bootstrap authority"
