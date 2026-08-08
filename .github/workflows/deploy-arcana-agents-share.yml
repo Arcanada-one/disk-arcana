@@ -1,0 +1,56 @@
+# DISK-0070: deliver only the user-scope share drop-in on arcana-agents.
+# System-service binary and unit updates belong exclusively to the
+# manifest-bound release-deploy.yml broker path (INFRA-0370).
+
+name: Deploy arcana-agents share drop-in
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: dry-run diffs only; install writes the drop-in and restarts the user unit
+        type: choice
+        required: true
+        default: dry-run
+        options:
+          - dry-run
+          - install
+
+permissions:
+  contents: read
+
+jobs:
+  deliver:
+    name: ${{ inputs.mode }} share drop-in on arcana-agents
+    runs-on: [self-hosted, Linux, X64, arcana-agents]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Share drop-in contract
+        run: bash deploy/linux/tests/test-user-share-dropin.sh
+
+      - name: Diff share drop-in against installed copy
+        env:
+          DISK_UNIT_OWNER: dev
+        run: bash deploy/linux/install-user-share-dropin.sh
+
+      - name: Install share drop-in and restart the user unit
+        if: inputs.mode == 'install'
+        env:
+          DISK_UNIT_OWNER: dev
+        run: |
+          set -euo pipefail
+          if [[ "$(id -un)" == dev ]]; then
+            bash deploy/linux/install-user-share-dropin.sh --install
+            bash deploy/linux/install-user-share-dropin.sh --verify
+            exit 0
+          fi
+          if sudo -n -u dev true 2>/dev/null; then
+            sudo -n -u dev --preserve-env=DISK_UNIT_OWNER \
+              bash "$PWD/deploy/linux/install-user-share-dropin.sh" --install
+            sudo -n -u dev --preserve-env=DISK_UNIT_OWNER \
+              bash "$PWD/deploy/linux/install-user-share-dropin.sh" --verify
+            exit 0
+          fi
+          printf 'install must run as dev; runner user %s cannot switch to it.\n' "$(id -un)" >&2
+          exit 1

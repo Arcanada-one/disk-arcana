@@ -19,12 +19,11 @@ on:
           # arcana-devs — a side effect nobody asked for when all you need is the
           # artifact.
           - build-only
-          - dev
+          - stage
           - prod
 
 permissions:
-  contents: write    # upload release artifacts
-  packages: read
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -50,6 +49,10 @@ jobs:
     runs-on: [self-hosted, Linux, X64, ci-general]
     outputs:
       artifact_name: ${{ steps.meta.outputs.artifact_name }}
+      artifact_id: ${{ steps.artifact.outputs.artifact-id }}
+      artifact_digest: ${{ steps.artifact.outputs.artifact-digest }}
+      manifest_sha: ${{ steps.bundle.outputs.manifest_sha }}
+      build_commit: ${{ steps.bundle.outputs.build_commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
@@ -98,22 +101,62 @@ jobs:
           NAME="${{ env.BINARY_NAME }}-${TAG}-${{ env.BUILD_TARGET }}"
           echo "artifact_name=${NAME}" >> "$GITHUB_OUTPUT"
 
+      - name: Assemble manifest-bound deployment bundle
+        id: bundle
+        run: |
+          set -euo pipefail
+          BUNDLE="${RUNNER_TEMP}/disk-deploy-bundle"
+          [[ ! -e "$BUNDLE" ]] || {
+            echo "::error::deployment bundle path already exists"
+            exit 1
+          }
+          install -d -m 0755 "$BUNDLE"
+          install -m 0755 \
+            "target/${{ env.BUILD_TARGET }}/release/${{ env.BINARY_NAME }}" \
+            "$BUNDLE/disk-arcana-server"
+          install -m 0644 deploy/linux/disk-arcana-server.service \
+            "$BUNDLE/disk-arcana-server.service"
+          install -m 0755 deploy/linux/deploy-server.sh "$BUNDLE/deploy-server.sh"
+          install -m 0755 deploy/linux/deploy-server-broker.sh \
+            "$BUNDLE/deploy-server-broker.sh"
+          install -m 0755 deploy/linux/provision-deploy-broker.sh \
+            "$BUNDLE/provision-deploy-broker.sh"
+          install -m 0440 deploy/linux/disk-arcana-deploy.sudoers \
+            "$BUNDLE/disk-arcana-deploy.sudoers"
+          install -m 0755 deploy/linux/install.sh "$BUNDLE/install.sh"
+          printf '%s\n' "$GITHUB_SHA" >"$BUNDLE/commit"
+          bash deploy/linux/validate-deploy-bundle.sh create \
+            --root "$BUNDLE" --commit "$GITHUB_SHA"
+          bash deploy/linux/validate-deploy-bundle.sh verify \
+            --root "$BUNDLE" --expected-commit "$GITHUB_SHA"
+          echo "manifest_sha=$(sha256sum "$BUNDLE/manifest.sha256" | awk '{print $1}')" >>"$GITHUB_OUTPUT"
+          echo "build_commit=$GITHUB_SHA" >>"$GITHUB_OUTPUT"
+
       - name: Upload artifact
+        id: artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: ${{ steps.meta.outputs.artifact_name }}
-          path: target/${{ env.BUILD_TARGET }}/release/${{ env.BINARY_NAME }}
+          path: ${{ runner.temp }}/disk-deploy-bundle
           retention-days: 7
 
-      # Attach the built binary to the GitHub Release on a tag push.
-      # Uses softprops/action-gh-release (does not depend on the `gh` CLI being
-      # installed on the self-hosted runner — `gh release upload` previously
-      # failed with `gh: command not found`).
-      - name: Attach to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+  attach-linux-release:
+    name: Attach Linux server to GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: [self-hosted, Linux, X64]
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: ${{ runner.temp }}/disk-deploy-bundle
+      - name: Attach exact bundled binary
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3.0.2
         with:
-          files: target/${{ env.BUILD_TARGET }}/release/${{ env.BINARY_NAME }}
+          files: ${{ runner.temp }}/disk-deploy-bundle/disk-arcana-server
           fail_on_unmatched_files: true
 
   # ──────────────────────────────────────────────────────────────────────────
@@ -124,6 +167,8 @@ jobs:
     name: Build Windows client (portable zip)
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
@@ -168,6 +213,8 @@ jobs:
     # Also uses `cross`; same host-toolchain requirement as `build` above —
     # pinned to ci-general for the same reason (see the note on that job).
     runs-on: [self-hosted, Linux, X64, ci-general]
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -226,6 +273,8 @@ jobs:
     name: Build macOS client (signed disk)
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: macos-14
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -297,59 +346,67 @@ jobs:
           fail_on_unmatched_files: true
 
   # ──────────────────────────────────────────────────────────────────────────
-  # 2. Deploy to arcana-devs — explicit workflow_dispatch target=dev ONLY.
+  # 2. Deploy through the dedicated Disk staging runner. A production
+  #    dispatch must prove this exact build artifact on staging first.
   #    A tag push builds + attaches the release artifact but does NOT auto-deploy
   #    anywhere: deploys (dev or prod) are always an explicit operator action so
-  #    a tag never lands code on a host on its own. (Auto-deploy on tag was also
-  #    unreachable — the dev runner carries the canonical `arcana-devs` label.
+  #    a tag never lands code on a host on its own. The unique runner label is
+  #    part of the least-privilege boundary and must not be shared.
   # ──────────────────────────────────────────────────────────────────────────
-  deploy-dev:
-    name: Deploy (arcana-devs)
+  deploy-stage:
+    name: Deploy (dedicated staging)
     needs: build
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'dev'
-    runs-on: [self-hosted, Linux, X64, arcana-devs]
-    environment: dev
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event.inputs.target == 'stage' || github.event.inputs.target == 'prod')
+    runs-on:
+      group: disk-arcana-stage
+      labels: [self-hosted, Linux, X64, disk-arcana-stage]
+    environment: staging
+    permissions:
+      actions: read
+      contents: read
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
-          name: ${{ needs.build.outputs.artifact_name }}
-          path: /tmp/disk-release
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: ${{ runner.temp }}/disk-deploy-bundle
 
-      - name: Install binary
+      - name: Deploy exact bundle through installed broker
+        env:
+          EXPECTED_ARTIFACT_ID: ${{ needs.build.outputs.artifact_id }}
+          EXPECTED_ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact_digest }}
+          EXPECTED_MANIFEST_SHA: ${{ needs.build.outputs.manifest_sha }}
+          EXPECTED_BUILD_COMMIT: ${{ needs.build.outputs.build_commit }}
         run: |
-          chmod +x /tmp/disk-release/${{ env.BINARY_NAME }}
-          # Keep previous binary for rollback.
-          if [[ -f /usr/local/bin/${{ env.BINARY_NAME }} ]]; then
-            cp /usr/local/bin/${{ env.BINARY_NAME }} /usr/local/bin/${{ env.BINARY_NAME }}.prev
-          fi
-          cp /tmp/disk-release/${{ env.BINARY_NAME }} /usr/local/bin/${{ env.BINARY_NAME }}
-          chmod 755 /usr/local/bin/${{ env.BINARY_NAME }}
-
-      - name: Restart service
-        run: systemctl restart disk-arcana-server
-
-      - name: Health check
-        run: |
-          echo "Waiting for server to start..."
-          for i in $(seq 1 12); do
-            if curl -sf "http://127.0.0.1:9446/health" > /tmp/health_resp.json 2>&1; then
-              cat /tmp/health_resp.json
-              echo
-              STATUS=$(jq -r '.status' /tmp/health_resp.json)
-              if [[ "$STATUS" == "ok" ]]; then
-                echo "Health check passed."
-                exit 0
-              fi
-            fi
-            echo "Attempt $i/12 failed, waiting 5s..."
-            sleep 5
-          done
-          echo "Health check failed after 60s — rolling back"
-          if [[ -f /usr/local/bin/${{ env.BINARY_NAME }}.prev ]]; then
-            cp /usr/local/bin/${{ env.BINARY_NAME }}.prev /usr/local/bin/${{ env.BINARY_NAME }}
-            systemctl restart disk-arcana-server
-          fi
-          exit 1
+          set -euo pipefail
+          BUNDLE="${RUNNER_TEMP}/disk-deploy-bundle"
+          [[ "$(id -u)" -ne 0 ]]
+          printf 'runner_user=%s runner_name=%s\n' "$(id -un)" "$RUNNER_NAME"
+          systemctl is-active --quiet disk-arcana-server
+          systemctl is-enabled --quiet disk-arcana-server
+          [[ "$EXPECTED_ARTIFACT_ID" =~ ^[0-9]+$ ]]
+          [[ "$EXPECTED_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$EXPECTED_MANIFEST_SHA" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$EXPECTED_BUILD_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$(sha256sum "$BUNDLE/manifest.sha256" | awk '{print $1}')" == "$EXPECTED_MANIFEST_SHA" ]]
+          [[ "$(<"$BUNDLE/commit")" == "$EXPECTED_BUILD_COMMIT" ]]
+          printf 'artifact_id=%s artifact_digest=%s manifest_sha=%s commit=%s\n' \
+            "$EXPECTED_ARTIFACT_ID" "$EXPECTED_ARTIFACT_DIGEST" \
+            "$EXPECTED_MANIFEST_SHA" "$EXPECTED_BUILD_COMMIT"
+          authorization_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-staging"
+          sudo -n /usr/local/sbin/disk-arcana-deploy-broker --deploy \
+            "$BUNDLE" "$authorization_id"
+          sha256sum /usr/local/bin/disk-arcana-server \
+            /etc/systemd/system/disk-arcana-server.service
+          systemctl show disk-arcana-server \
+            -p ActiveState -p UnitFileState -p Restart \
+            -p StartLimitIntervalUSec -p StartLimitBurst
+          health_body="$(curl --fail --silent --show-error --max-time 10 \
+            http://127.0.0.1:9446/health)"
+          [[ "$(printf '%s' "$health_body" | tr -d '[:space:]')" == *'"status":"ok"'* ]]
+          printf 'health=ok\n'
 
   # ──────────────────────────────────────────────────────────────────────────
   # 3. Deploy to arcana-prod (hard-gated: only on tag push via explicit
@@ -358,47 +415,53 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────────
   deploy-prod:
     name: Deploy (arcana-prod) [HARD-GATED]
-    needs: build
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'prod'
-    runs-on: [self-hosted, Linux, X64, arcana-prod]
+    needs: [build, deploy-stage]
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.event.inputs.target == 'prod'
+    runs-on: [self-hosted, Linux, X64, disk-arcana-prod]
     environment: production
+    permissions:
+      actions: read
+      contents: read
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
-          name: ${{ needs.build.outputs.artifact_name }}
-          path: /tmp/disk-release
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: ${{ runner.temp }}/disk-deploy-bundle
 
-      - name: Install binary
+      - name: Deploy staged exact bundle through installed broker
+        env:
+          EXPECTED_ARTIFACT_ID: ${{ needs.build.outputs.artifact_id }}
+          EXPECTED_ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact_digest }}
+          EXPECTED_MANIFEST_SHA: ${{ needs.build.outputs.manifest_sha }}
+          EXPECTED_BUILD_COMMIT: ${{ needs.build.outputs.build_commit }}
         run: |
-          chmod +x /tmp/disk-release/${{ env.BINARY_NAME }}
-          if [[ -f /usr/local/bin/${{ env.BINARY_NAME }} ]]; then
-            cp /usr/local/bin/${{ env.BINARY_NAME }} /usr/local/bin/${{ env.BINARY_NAME }}.prev
-          fi
-          cp /tmp/disk-release/${{ env.BINARY_NAME }} /usr/local/bin/${{ env.BINARY_NAME }}
-          chmod 755 /usr/local/bin/${{ env.BINARY_NAME }}
-
-      - name: Restart service
-        run: systemctl restart disk-arcana-server
-
-      - name: Health check (prod via Tailscale)
-        run: |
-          echo "Waiting for server to start..."
-          for i in $(seq 1 12); do
-            if curl -sf "http://127.0.0.1:9446/health" > /tmp/health_resp.json 2>&1; then
-              cat /tmp/health_resp.json
-              echo
-              STATUS=$(jq -r '.status' /tmp/health_resp.json)
-              if [[ "$STATUS" == "ok" ]]; then
-                echo "Health check passed."
-                exit 0
-              fi
-            fi
-            echo "Attempt $i/12 failed, waiting 5s..."
-            sleep 5
-          done
-          echo "Health check failed after 60s — rolling back"
-          if [[ -f /usr/local/bin/${{ env.BINARY_NAME }}.prev ]]; then
-            cp /usr/local/bin/${{ env.BINARY_NAME }}.prev /usr/local/bin/${{ env.BINARY_NAME }}
-            systemctl restart disk-arcana-server
-          fi
-          exit 1
+          set -euo pipefail
+          BUNDLE="${RUNNER_TEMP}/disk-deploy-bundle"
+          [[ "$(id -u)" -ne 0 ]]
+          printf 'runner_user=%s runner_name=%s\n' "$(id -un)" "$RUNNER_NAME"
+          systemctl is-active --quiet disk-arcana-server
+          systemctl is-enabled --quiet disk-arcana-server
+          [[ "$EXPECTED_ARTIFACT_ID" =~ ^[0-9]+$ ]]
+          [[ "$EXPECTED_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$EXPECTED_MANIFEST_SHA" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$EXPECTED_BUILD_COMMIT" == "$GITHUB_SHA" ]]
+          [[ "$(sha256sum "$BUNDLE/manifest.sha256" | awk '{print $1}')" == "$EXPECTED_MANIFEST_SHA" ]]
+          [[ "$(<"$BUNDLE/commit")" == "$EXPECTED_BUILD_COMMIT" ]]
+          printf 'artifact_id=%s artifact_digest=%s manifest_sha=%s commit=%s\n' \
+            "$EXPECTED_ARTIFACT_ID" "$EXPECTED_ARTIFACT_DIGEST" \
+            "$EXPECTED_MANIFEST_SHA" "$EXPECTED_BUILD_COMMIT"
+          authorization_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-production"
+          sudo -n /usr/local/sbin/disk-arcana-deploy-broker --deploy \
+            "$BUNDLE" "$authorization_id"
+          sha256sum /usr/local/bin/disk-arcana-server \
+            /etc/systemd/system/disk-arcana-server.service
+          systemctl show disk-arcana-server \
+            -p ActiveState -p UnitFileState -p Restart \
+            -p StartLimitIntervalUSec -p StartLimitBurst
+          health_body="$(curl --fail --silent --show-error --max-time 10 \
+            http://127.0.0.1:9446/health)"
+          [[ "$(printf '%s' "$health_body" | tr -d '[:space:]')" == *'"status":"ok"'* ]]
+          printf 'health=ok\n'
