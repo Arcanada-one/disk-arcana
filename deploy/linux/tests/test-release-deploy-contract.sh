@@ -18,11 +18,26 @@ fail() {
 
 assert_command_before() {
   local block="$1" gate="$2" delivery="$3" label="$4" gate_line delivery_line
-  gate_line="$(awk -v needle="$gate" 'index($0, needle) {print NR; exit}' <<<"$block")"
-  delivery_line="$(awk -v needle="$delivery" 'index($0, needle) {print NR; exit}' <<<"$block")"
+  gate_line="$(awk -v expected="$gate" '
+    {line=$0; sub(/^[[:space:]]+/, "", line); sub(/[[:space:]]+$/, "", line)}
+    line == expected {print NR; exit}
+  ' <<<"$block")"
+  delivery_line="$(awk -v prefix="$delivery" '
+    {line=$0; sub(/^[[:space:]]+/, "", line); sub(/[[:space:]]+$/, "", line)}
+    index(line, prefix) == 1 {print NR; exit}
+  ' <<<"$block")"
   [[ -n "$gate_line" ]] || fail "$label is missing the freshness gate"
   [[ -n "$delivery_line" ]] || fail "$label is missing its delivery command"
   (( gate_line < delivery_line )) || fail "$label runs before its freshness gate"
+}
+
+count_exact_command() {
+  local file="$1" expected="$2"
+  awk -v expected="$expected" '
+    {line=$0; sub(/^[[:space:]]+/, "", line); sub(/[[:space:]]+$/, "", line)}
+    line == expected {count++}
+    END {print count + 0}
+  ' "$file"
 }
 
 grep -qF 'name: Assemble manifest-bound deployment bundle' "$WORKFLOW" ||
@@ -76,16 +91,18 @@ share_install_block="$(sed -n '/name: Install share drop-in/,$p' "$SHARE_WORKFLO
 
 [[ "$(grep -cF 'name: Fresh exact-main release gate' "$WORKFLOW")" -eq 4 ]] ||
   fail "every release-delivery path must freshly gate its built SHA against origin/main"
-[[ "$(grep -cF 'bash scripts/require-fresh-main.sh "$BUILT_SHA"' "$WORKFLOW")" -eq 4 ]] ||
+[[ "$(count_exact_command "$WORKFLOW" 'run: bash scripts/require-fresh-main.sh "$BUILT_SHA"')" -eq 4 ]] ||
   fail "release delivery does not require fresh main to equal its built SHA"
-[[ "$(grep -cF 'bash scripts/require-fresh-main.sh "$EXPECTED_BUILD_COMMIT"' "$WORKFLOW")" -eq 2 ]] ||
+[[ "$(count_exact_command "$WORKFLOW" 'bash scripts/require-fresh-main.sh "$EXPECTED_BUILD_COMMIT"')" -eq 2 ]] ||
   fail "broker delivery does not freshly require origin/main to equal the built SHA"
+[[ "$(count_exact_command "$SHARE_WORKFLOW" 'bash scripts/require-fresh-main.sh "$GITHUB_SHA"')" -eq 2 ]] ||
+  fail "share delivery does not execute both fresh-main gates"
 
 for release_block in \
   "$linux_release_block" "$windows_release_block" \
   "$linux_client_release_block" "$macos_release_block"; do
   assert_command_before "$release_block" \
-    'bash scripts/require-fresh-main.sh "$BUILT_SHA"' \
+    'run: bash scripts/require-fresh-main.sh "$BUILT_SHA"' \
     'uses: softprops/action-gh-release@' \
     "release attachment"
 done
@@ -103,7 +120,7 @@ assert_command_before "$share_diff_block" \
   "share diff"
 assert_command_before "$share_install_block" \
   'bash scripts/require-fresh-main.sh "$GITHUB_SHA"' \
-  'install-user-share-dropin.sh --install' \
+  'bash deploy/linux/install-user-share-dropin.sh --install' \
   "share installation"
 
 grep -qF 'default: arcana-prod' "$PROBE_WORKFLOW" || fail "INFRA-0389 default runner routing changed"
@@ -178,6 +195,40 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
   grep -qF 'FAIL  share installation runs before its freshness gate' "$fixture_output" ||
     fail "reordered share-delivery fixture failed for an unintended reason"
   printf 'PASS  reordered share-delivery fixture is rejected for freshness ordering\n'
+
+  inert_workflow="$fixture_root/release-inert-gates.yml"
+  sed \
+    -e 's#run: bash scripts/require-fresh-main#run: echo bash scripts/require-fresh-main#' \
+    -e 's#^\([[:space:]]*\)bash scripts/require-fresh-main#\1echo bash scripts/require-fresh-main#' \
+    "$WORKFLOW" >"$inert_workflow"
+  set +e
+  DISK_ARCANA_ORDER_FIXTURE_CHILD=1 \
+    WORKFLOW_OVERRIDE="$inert_workflow" \
+    SHARE_WORKFLOW_OVERRIDE="$SHARE_WORKFLOW" \
+    PROBE_WORKFLOW_OVERRIDE="$PROBE_WORKFLOW" \
+    "$0" >"$fixture_output" 2>&1
+  fixture_rc=$?
+  set -e
+  [[ "$fixture_rc" -ne 0 ]] || fail "inert release freshness fixture passed"
+  grep -qF 'FAIL  release delivery does not require fresh main to equal its built SHA' \
+    "$fixture_output" || fail "inert release freshness fixture failed for an unintended reason"
+  printf 'PASS  inert release freshness commands are rejected as non-executable gates\n'
+
+  inert_share="$fixture_root/share-inert-gates.yml"
+  sed 's#^\([[:space:]]*\)bash scripts/require-fresh-main#\1echo bash scripts/require-fresh-main#' \
+    "$SHARE_WORKFLOW" >"$inert_share"
+  set +e
+  DISK_ARCANA_ORDER_FIXTURE_CHILD=1 \
+    WORKFLOW_OVERRIDE="$WORKFLOW" \
+    SHARE_WORKFLOW_OVERRIDE="$inert_share" \
+    PROBE_WORKFLOW_OVERRIDE="$PROBE_WORKFLOW" \
+    "$0" >"$fixture_output" 2>&1
+  fixture_rc=$?
+  set -e
+  [[ "$fixture_rc" -ne 0 ]] || fail "inert share freshness fixture passed"
+  grep -qF 'FAIL  share delivery does not execute both fresh-main gates' "$fixture_output" ||
+    fail "inert share freshness fixture failed for an unintended reason"
+  printf 'PASS  inert share freshness commands are rejected as non-executable gates\n'
 fi
 
 printf 'PASS  release workflow deploys one manifest-bound artifact through staging then production\n'
