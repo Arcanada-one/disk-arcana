@@ -152,7 +152,7 @@ extract_stage_readiness_script() {
 assert_reviewed_stage_readiness_script() {
   local block="$1" script_digest
   script_digest="$(extract_stage_readiness_script "$block" | sha256sum | awk '{print $1}')"
-  [[ "$script_digest" == 86100429b4e43449ce94c816902b8d573fe05fbb2ce2b0f7b168d40873aecca8 ]] ||
+  [[ "$script_digest" == a9fdde576221a8806d93a6f8bf48b1e2c339589fec96022926ef22987727eb2a ]] ||
     fail "group-scoped stage probe readiness script differs from the reviewed executable contract"
 }
 
@@ -429,8 +429,9 @@ assert_direct_stage_command "$stage_readiness_step" '[[ "${#runner_units[@]}" -e
   "the single-runner-unit requirement"
 assert_direct_stage_command "$stage_readiness_step" '[[ "${runner_units[0]}" == actions.runner.*."${RUNNER_NAME}".service ]]' \
   "the runner-name unit binding"
-assert_direct_stage_command "$stage_readiness_step" 'grep -qF "/system.slice/${runner_units[0]}" /proc/self/cgroup' \
-  "the executing-cgroup runner binding"
+assert_direct_stage_command "$stage_readiness_step" \
+  'assert_active_runner_binding "${runner_units[0]}" /proc/self/cgroup' \
+  "the active runner/cgroup binding"
 assert_direct_stage_command "$stage_readiness_step" '[[ "${#installed_runner_units[@]}" -eq 1 ]]' \
   "the single installed runner-unit requirement"
 assert_direct_stage_command "$stage_readiness_step" '[[ "${installed_runner_units[0]}" == "${runner_units[0]}" ]]' \
@@ -503,6 +504,57 @@ set -e
 [[ "$sudo_policy_broad_rc" -ne 0 ]] ||
   fail "group-scoped stage probe accepts an additional PASSWD sudo command specification"
 printf 'PASS  exact broker plus PASSWD sudo-policy fixture is rejected for the intended reason\n'
+
+runner_binding_function="$(extract_stage_shell_function "$stage_readiness_script" assert_active_runner_binding)"
+[[ -n "$runner_binding_function" ]] ||
+  fail "group-scoped stage probe does not define the active runner/cgroup binding"
+grep -qFx '  [[ "$(systemctl is-active "$unit" 2>/dev/null)" == active ]]' \
+  <<<"$runner_binding_function" ||
+  fail "group-scoped stage probe does not require the runner unit to be active"
+grep -qF 'path == expected || index(path, expected "/") == 1' \
+  <<<"$runner_binding_function" ||
+  fail "group-scoped stage probe does not enforce the exact runner cgroup boundary"
+
+runner_binding_fixture() {
+  local state="$1" cgroup_file="$2"
+  MOCK_RUNNER_STATE="$state" MOCK_RUNNER_UNIT="$runner_binding_unit" bash -c \
+    "set -euo pipefail
+systemctl() {
+  [[ \"\$#\" -eq 2 && \"\$1\" == is-active && \"\$2\" == \"\$MOCK_RUNNER_UNIT\" ]]
+  printf '%s\\n' \"\$MOCK_RUNNER_STATE\"
+}
+$runner_binding_function
+assert_active_runner_binding \"\$MOCK_RUNNER_UNIT\" \"\$1\"" _ "$cgroup_file"
+}
+
+runner_binding_unit='actions.runner.Arcanada-one-disk-arcana.stage.service'
+runner_binding_fixture_root="$(mktemp -d)"
+trap 'rm -rf -- "$runner_binding_fixture_root"' EXIT
+runner_cgroup_exact="$runner_binding_fixture_root/exact"
+runner_cgroup_descendant="$runner_binding_fixture_root/descendant"
+runner_cgroup_collision="$runner_binding_fixture_root/collision"
+printf '0::/system.slice/%s\n' "$runner_binding_unit" >"$runner_cgroup_exact"
+printf '0::/system.slice/%s/runner-worker.scope\n' "$runner_binding_unit" >"$runner_cgroup_descendant"
+printf '0::/system.slice/%s.attacker.scope\n' "$runner_binding_unit" >"$runner_cgroup_collision"
+
+runner_binding_fixture active "$runner_cgroup_exact" >/dev/null 2>&1 ||
+  fail "group-scoped stage probe rejects the exact active runner cgroup fixture"
+runner_binding_fixture active "$runner_cgroup_descendant" >/dev/null 2>&1 ||
+  fail "group-scoped stage probe rejects the active runner cgroup descendant fixture"
+set +e
+runner_binding_fixture inactive "$runner_cgroup_exact" >/dev/null 2>&1
+inactive_runner_rc=$?
+runner_binding_fixture active "$runner_cgroup_collision" >/dev/null 2>&1
+runner_cgroup_collision_rc=$?
+set -e
+[[ "$inactive_runner_rc" -ne 0 ]] ||
+  fail "group-scoped stage probe accepts an inactive runner service"
+[[ "$runner_cgroup_collision_rc" -ne 0 ]] ||
+  fail "group-scoped stage probe accepts a runner cgroup prefix collision"
+printf 'PASS  inactive runner service is rejected for the intended reason\n'
+printf 'PASS  runner .service.attacker.scope cgroup collision is rejected for the intended reason\n'
+rm -rf -- "$runner_binding_fixture_root"
+trap - EXIT
 assert_reviewed_stage_readiness_script "$stage_readiness_step"
 
 for block in "$dev_block" "$prod_block"; do
@@ -1004,7 +1056,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
       mutated=1
       next
     }
-    in_assertions && index($0, "grep -qF \"/system.slice/${runner_units[0]}\" /proc/self/cgroup") {
+    in_assertions && index($0, "assert_active_runner_binding \"${runner_units[0]}\" /proc/self/cgroup") {
       print $0
       print "          }"
       in_assertions=0
@@ -1030,7 +1082,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
       mutated=1
       next
     }
-    in_assertions && index($0, "grep -qF \"/system.slice/${runner_units[0]}\" /proc/self/cgroup") {
+    in_assertions && index($0, "assert_active_runner_binding \"${runner_units[0]}\" /proc/self/cgroup") {
       print $0
       print "          :; }"
       in_assertions=0
@@ -1065,7 +1117,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
           mutated=1
           continue
         }
-        if (in_assertions && index(line, "grep -qF \"/system.slice/${runner_units[0]}\" /proc/self/cgroup")) {
+        if (in_assertions && index(line, "assert_active_runner_binding \"${runner_units[0]}\" /proc/self/cgroup")) {
           print line
           print "          :; }"
           in_assertions=0
@@ -1090,18 +1142,18 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
   printf 'PASS  skipped decoy cannot authenticate inert real-probe readiness\n'
 
   unbound_runner_stage_probe="$fixture_root/stage-probe-unbound-runner.yml"
-  sed '/grep -qF "\/system.slice\/\${runner_units\[0\]}" \/proc\/self\/cgroup/d' \
+  sed '/assert_active_runner_binding "${runner_units\[0\]}" \/proc\/self\/cgroup/d' \
     "$STAGE_PROBE_WORKFLOW" >"$unbound_runner_stage_probe"
   run_stage_probe_fixture "$unbound_runner_stage_probe" \
-    'FAIL  group-scoped stage probe does not execute the executing-cgroup runner binding directly' \
+    'FAIL  group-scoped stage probe does not execute the active runner/cgroup binding directly' \
     "unbound runner service"
   printf 'PASS  unbound runner service is rejected for the intended reason\n'
 
   user_scope_runner_stage_probe="$fixture_root/stage-probe-user-scope-runner.yml"
-  sed 's#grep -qF "/system.slice/${runner_units\[0\]}" /proc/self/cgroup#grep -qF "/${runner_units[0]}" /proc/self/cgroup#' \
+  sed 's#assert_active_runner_binding "${runner_units\[0\]}" /proc/self/cgroup#assert_active_runner_binding "${runner_units[0]}" /proc/self/cgroup-user#' \
     "$STAGE_PROBE_WORKFLOW" >"$user_scope_runner_stage_probe"
   run_stage_probe_fixture "$user_scope_runner_stage_probe" \
-    'FAIL  group-scoped stage probe does not execute the executing-cgroup runner binding directly' \
+    'FAIL  group-scoped stage probe does not execute the active runner/cgroup binding directly' \
     "user-scope runner cgroup"
   printf 'PASS  user-scope runner cgroup is rejected for the intended reason\n'
 

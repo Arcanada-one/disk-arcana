@@ -66,6 +66,18 @@ jobs:
             [[ "${sudo_specs[0]}" == '(root) NOPASSWD: /usr/local/sbin/disk-arcana-deploy-broker --deploy *' ]]
           }
 
+          assert_active_runner_binding() {
+            local unit="$1" cgroup_file="$2"
+            [[ "$(systemctl is-active "$unit" 2>/dev/null)" == active ]]
+            awk -F: -v expected="/system.slice/$unit" '
+              {
+                path=$3
+                if (path == expected || index(path, expected "/") == 1) found=1
+              }
+              END {exit found ? 0 : 1}
+            ' "$cgroup_file"
+          }
+
           [[ "$(id -u)" != 0 ]]
           [[ " $(id -Gn) " == *" disk-arcana-deploy "* ]]
 
@@ -93,7 +105,7 @@ jobs:
           [[ "$docker_socket_writable" == false ]]
           [[ "${#runner_units[@]}" -eq 1 ]]
           [[ "${runner_units[0]}" == actions.runner.*."${RUNNER_NAME}".service ]]
-          grep -qF "/system.slice/${runner_units[0]}" /proc/self/cgroup
+          assert_active_runner_binding "${runner_units[0]}" /proc/self/cgroup
           [[ "${#installed_runner_units[@]}" -eq 1 ]]
           [[ "${installed_runner_units[0]}" == "${runner_units[0]}" ]]
 
