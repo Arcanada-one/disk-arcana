@@ -163,6 +163,7 @@ linux_client_release_block="$(sed -n '/^  build-linux-client:/,/^  build-macos-c
 macos_release_block="$(sed -n '/^  build-macos-client:/,/^  deploy-stage:/p' "$WORKFLOW")"
 share_diff_block="$(sed -n '/name: Diff share drop-in/,/name: Install share drop-in/p' "$SHARE_WORKFLOW")"
 share_install_block="$(sed -n '/name: Install share drop-in/,$p' "$SHARE_WORKFLOW")"
+isolation_step="$(sed -n '/^      - name: Staging isolation capabilities$/,/^      - name: systemd version$/p' "$PROBE_WORKFLOW")"
 [[ "$dev_block" == *"github.event.inputs.target == 'prod'"* ]] ||
   fail "production dispatch does not first run staging in the same workflow"
 [[ "$dev_block" == *"github.ref == 'refs/heads/main'"* ]] ||
@@ -241,6 +242,37 @@ grep -qF 'default: arcana-prod' "$PROBE_WORKFLOW" || fail "INFRA-0389 default ru
   fail "INFRA-0389 private-only runner leaked into the public probe"
 grep -qF '[[ "${{ steps.state.outputs.unit_file_state }}" == "enabled" ]]' "$PROBE_WORKFLOW" ||
   fail "deploy probe does not require exact UnitFileState=enabled"
+[[ "$isolation_step" == *'name: Staging isolation capabilities'* ]] ||
+  fail "deploy probe does not collect staging isolation capabilities"
+! grep -qE '^        (if|continue-on-error):' <<<"$isolation_step" ||
+  fail "staging isolation capability step is conditional or non-blocking"
+grep -qF 'rootless_userns="$(bool_command unshare --user --map-root-user true)"' <<<"$isolation_step" ||
+  fail "deploy probe does not test an ephemeral rootless user namespace"
+grep -qF 'subuid_count="$(subid_count /etc/subuid)"' <<<"$isolation_step" ||
+  fail "deploy probe does not count numeric subordinate-UID allocation"
+grep -qF 'subgid_count="$(subid_count /etc/subgid)"' <<<"$isolation_step" ||
+  fail "deploy probe does not count numeric subordinate-GID allocation"
+grep -qF '$1 == user && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ {total += $3}' <<<"$isolation_step" ||
+  fail "deploy probe does not validate numeric subordinate-ID records"
+grep -qF '(( subuid_count >= 65536 ))' <<<"$isolation_step" ||
+  fail "deploy probe does not require a usable subordinate-UID range"
+grep -qF '(( subgid_count >= 65536 ))' <<<"$isolation_step" ||
+  fail "deploy probe does not require a usable subordinate-GID range"
+grep -qF 'user_systemd="$(bool_command systemctl --user show-environment)"' <<<"$isolation_step" ||
+  fail "deploy probe does not check user-systemd availability"
+grep -qF 'docker_socket_writable="$(bool_command test -w /var/run/docker.sock)"' <<<"$isolation_step" ||
+  fail "deploy probe does not report host-root-equivalent Docker socket access"
+grep -qF 'runner_services=unknown' <<<"$isolation_step" ||
+  fail "deploy probe does not tolerate an unavailable system runner inventory"
+! grep -qE '(^|[;&|])[[:space:]]*(sudo|rm|mv|cp|install|touch|mkdir|chmod|chown|setfacl|tee|truncate|mount|umount|kill|pkill|reboot|shutdown|apt|apt-get|dnf|yum|pacman|snap)[[:space:]]|systemctl[[:space:]]+(--user[[:space:]]+)?(enable|disable|start|stop|restart|reload|daemon-reload|mask|unmask|edit|link|preset)|loginctl[[:space:]]+(enable-linger|disable-linger)|(^|[;&|])[[:space:]]*(podman|docker)[[:space:]]+(run|create|start|stop|restart|rm|build|pull|push|exec)' \
+    <<<"$isolation_step" || fail "read-only deploy probe contains a staging mutation"
+probe_redirect_scan="$(sed -E \
+  -e 's#>>"\$GITHUB_OUTPUT"([[:space:];|&)]|$)#\1#g' \
+  -e 's#2?>/dev/null([[:space:];|&)]|$)#\1#g' \
+  -e 's#2>&1([[:space:];|&)]|$)#\1#g' \
+  <<<"$isolation_step")"
+! grep -qE '<>|(^|[^<])>{1,2}([^=]|$)' <<<"$probe_redirect_scan" ||
+  fail "read-only deploy probe writes outside its GitHub output"
 
 for block in "$dev_block" "$prod_block"; do
   [[ "$block" == *'/usr/local/sbin/disk-arcana-deploy-broker --deploy'* ]] ||
@@ -283,6 +315,20 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
       WORKFLOW_OVERRIDE="$workflow" \
       SHARE_WORKFLOW_OVERRIDE="$SHARE_WORKFLOW" \
       PROBE_WORKFLOW_OVERRIDE="$PROBE_WORKFLOW" \
+      "$0" >"$fixture_output" 2>&1
+    fixture_rc=$?
+    set -e
+    [[ "$fixture_rc" -ne 0 ]] || fail "$label fixture passed"
+    grep -qF "$expected" "$fixture_output" || fail "$label fixture failed for an unintended reason"
+  }
+
+  run_probe_fixture() {
+    local probe="$1" expected="$2" label="$3" fixture_rc
+    set +e
+    DISK_ARCANA_ORDER_FIXTURE_CHILD=1 \
+      WORKFLOW_OVERRIDE="$WORKFLOW" \
+      SHARE_WORKFLOW_OVERRIDE="$SHARE_WORKFLOW" \
+      PROBE_WORKFLOW_OVERRIDE="$probe" \
       "$0" >"$fixture_output" 2>&1
     fixture_rc=$?
     set -e
@@ -468,6 +514,60 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
   grep -qF 'FAIL  share delivery does not execute both fresh-main gates' "$fixture_output" ||
     fail "inert share freshness fixture failed for an unintended reason"
   printf 'PASS  inert share freshness commands are rejected as non-executable gates\n'
+
+  disabled_probe="$fixture_root/probe-disabled-isolation.yml"
+  awk '
+    !mutated && /^      - name: Staging isolation capabilities$/ {
+      print
+      print "        if: false"
+      mutated=1
+      next
+    }
+    {print}
+  ' "$PROBE_WORKFLOW" >"$disabled_probe"
+  run_probe_fixture "$disabled_probe" \
+    'FAIL  staging isolation capability step is conditional or non-blocking' \
+    "disabled staging capability"
+  printf 'PASS  disabled staging capability step is rejected as non-load-bearing\n'
+
+  missing_subgid="$fixture_root/probe-missing-subgid.yml"
+  sed '/subgid_count="$(subid_count \/etc\/subgid)"/d' "$PROBE_WORKFLOW" >"$missing_subgid"
+  run_probe_fixture "$missing_subgid" \
+    'FAIL  deploy probe does not count numeric subordinate-GID allocation' \
+    "missing subordinate-GID probe"
+  printf 'PASS  missing subordinate-GID probe is rejected for the intended reason\n'
+
+  mutating_probe="$fixture_root/probe-systemd-mutation.yml"
+  sed '/user_systemd="$(bool_command systemctl --user show-environment)"/a\          systemctl restart disk-arcana-stage.service' \
+    "$PROBE_WORKFLOW" >"$mutating_probe"
+  run_probe_fixture "$mutating_probe" \
+    'FAIL  read-only deploy probe contains a staging mutation' \
+    "system-systemd mutation"
+  printf 'PASS  system-systemd mutation is rejected for the intended reason\n'
+
+  writing_probe="$fixture_root/probe-host-write.yml"
+  sed '/user_systemd="$(bool_command systemctl --user show-environment)"/a\          true >/dev/null; printf mutated >disk-arcana-stage-probe-mutant' \
+    "$PROBE_WORKFLOW" >"$writing_probe"
+  run_probe_fixture "$writing_probe" \
+    'FAIL  read-only deploy probe writes outside its GitHub output' \
+    "host write"
+  printf 'PASS  host-write mutation is rejected for the intended reason\n'
+
+  read_write_probe="$fixture_root/probe-read-write-redirection.yml"
+  sed '/user_systemd="$(bool_command systemctl --user show-environment)"/a\          exec 3<>disk-arcana-stage-probe-mutant' \
+    "$PROBE_WORKFLOW" >"$read_write_probe"
+  run_probe_fixture "$read_write_probe" \
+    'FAIL  read-only deploy probe writes outside its GitHub output' \
+    "read-write redirection"
+  printf 'PASS  read-write redirection is rejected for the intended reason\n'
+
+  suffix_write_probe="$fixture_root/probe-output-suffix-write.yml"
+  sed '/user_systemd="$(bool_command systemctl --user show-environment)"/a\          printf mutated >>"$GITHUB_OUTPUT".bak' \
+    "$PROBE_WORKFLOW" >"$suffix_write_probe"
+  run_probe_fixture "$suffix_write_probe" \
+    'FAIL  read-only deploy probe writes outside its GitHub output' \
+    "GitHub-output suffix write"
+  printf 'PASS  GitHub-output suffix write is rejected for the intended reason\n'
 fi
 
 printf 'PASS  release workflow deploys one manifest-bound artifact through staging then production\n'
