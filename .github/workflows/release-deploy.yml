@@ -55,6 +55,9 @@ jobs:
           [[ "$GITHUB_REF" == refs/heads/main ]]
           [[ "$GITHUB_REPOSITORY" == Arcanada-one/disk-arcana ]]
           [[ "$GITHUB_WORKFLOW_REF" == Arcanada-one/disk-arcana/.github/workflows/release-deploy.yml@refs/heads/main ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_SHA" == "$GITHUB_WORKFLOW_SHA" ]]
 
       - name: Read-only readiness verdict
         shell: bash
@@ -106,6 +109,59 @@ jobs:
             ' "$cgroup_file"
           }
 
+          assert_fresh_protected_main() {
+            local query_output row live_main
+            local tab=$'\t'
+            local -a rows=()
+
+            if ! query_output="$(
+              env -i \
+                HOME=/nonexistent \
+                PATH=/usr/bin:/bin \
+                LC_ALL=C \
+                GIT_CONFIG_NOSYSTEM=1 \
+                GIT_CONFIG_GLOBAL=/dev/null \
+                GIT_CONFIG_SYSTEM=/dev/null \
+                GIT_CONFIG_COUNT=0 \
+                GIT_TERMINAL_PROMPT=0 \
+                GIT_ASKPASS=/bin/false \
+                SSH_ASKPASS=/bin/false \
+                GIT_CEILING_DIRECTORIES=/ \
+                timeout --signal=TERM --kill-after=2s 10s \
+                git -C / \
+                  -c http.sslVerify=true \
+                  -c http.followRedirects=false \
+                  -c credential.helper= \
+                  -c core.askPass= \
+                  ls-remote --quiet --exit-code --refs \
+                  https://github.com/Arcanada-one/disk-arcana.git \
+                  refs/heads/main 2>/dev/null
+            )"; then
+              printf 'freshness=fail reason=query\n'
+              return 1
+            fi
+
+            mapfile -t rows <<<"$query_output"
+            if [[ "${#rows[@]}" -ne 1 ]]; then
+              printf 'freshness=fail reason=row-count\n'
+              return 1
+            fi
+            row="${rows[0]}"
+            if [[ ! "$row" =~ ^([0-9a-f]{40})"${tab}"refs/heads/main$ ]]; then
+              printf 'freshness=fail reason=row-shape\n'
+              return 1
+            fi
+            live_main="${BASH_REMATCH[1]}"
+            [[ "$live_main" == "$GITHUB_SHA" ]] || {
+              printf 'freshness=fail reason=stale-main\n'
+              return 1
+            }
+            [[ "$live_main" == "$GITHUB_WORKFLOW_SHA" ]] || {
+              printf 'freshness=fail reason=workflow-sha\n'
+              return 1
+            }
+          }
+
           [[ "$(id -u)" != 0 ]]
           [[ " $(id -Gn) " == *" disk-arcana-deploy "* ]]
 
@@ -147,6 +203,7 @@ jobs:
           [[ "$(systemctl show disk-arcana-server -p StartLimitBurst --value 2>/dev/null)" == 5 ]]
           curl --fail --silent --show-error --max-time 10 -o /dev/null http://127.0.0.1:9446/health
 
+          assert_fresh_protected_main
           printf 'readiness=ok active_runner_units=%s installed_runner_units=%s sudo_specs=1\n' \
             "${#runner_units[@]}" "${#installed_runner_units[@]}"
   # ──────────────────────────────────────────────────────────────────────────

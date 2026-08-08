@@ -152,14 +152,14 @@ extract_stage_readiness_script() {
 assert_reviewed_stage_readiness_script() {
   local block="$1" script_digest
   script_digest="$(extract_stage_readiness_script "$block" | sha256sum | awk '{print $1}')"
-  [[ "$script_digest" == a9fdde576221a8806d93a6f8bf48b1e2c339589fec96022926ef22987727eb2a ]] ||
+  [[ "$script_digest" == c1ae34d01a980b498311acb6513aac92ca1be4f5bdaa38b3f08eb0ceb3d66c6f ]] ||
     fail "group-scoped stage probe readiness script differs from the reviewed executable contract"
 }
 
 assert_reviewed_stage_source_script() {
   local block="$1" script_digest
   script_digest="$(extract_stage_readiness_script "$block" | sha256sum | awk '{print $1}')"
-  [[ "$script_digest" == f411d31f603f47b3c9c204013732631481b57fc1a54272b2e99ba1c1006ef2ad ]] ||
+  [[ "$script_digest" == 2cf7df97c58725bfe0ff47ad3dad945c511132a1da4075ffb763d3945fb3b2f0 ]] ||
     fail "group-scoped stage probe exact-main source script differs from the reviewed executable contract"
 }
 
@@ -457,6 +457,12 @@ grep -qFx '          [[ "$GITHUB_REPOSITORY" == Arcanada-one/disk-arcana ]]' \
 grep -qFx '          [[ "$GITHUB_WORKFLOW_REF" == Arcanada-one/disk-arcana/.github/workflows/release-deploy.yml@refs/heads/main ]]' \
   <<<"$stage_source_guard" ||
   fail "group-scoped stage probe does not execute its exact workflow-reference guard directly"
+grep -qFx '          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]' <<<"$stage_source_guard" ||
+  fail "group-scoped stage probe does not validate GITHUB_SHA as lowercase 40-hex"
+grep -qFx '          [[ "$GITHUB_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]' <<<"$stage_source_guard" ||
+  fail "group-scoped stage probe does not validate GITHUB_WORKFLOW_SHA as lowercase 40-hex"
+grep -qFx '          [[ "$GITHUB_SHA" == "$GITHUB_WORKFLOW_SHA" ]]' <<<"$stage_source_guard" ||
+  fail "group-scoped stage probe does not bind event and workflow SHAs"
 assert_reviewed_stage_source_script "$stage_source_guard"
 stage_probe_shell_scripts="${stage_source_script}"$'\n'"${stage_readiness_script}"
 
@@ -532,6 +538,55 @@ stage_probe_redirect_scan="$(sed -E \
   <<<"$stage_readiness_script" || fail "group-scoped stage probe logs host identity or platform details"
 ! grep -qE 'runner=|runner_unit=' <<<"$stage_readiness_script" ||
   fail "group-scoped stage probe logs runner identity"
+fresh_main_function="$(extract_stage_shell_function "$stage_readiness_script" assert_fresh_protected_main)"
+[[ -n "$fresh_main_function" ]] ||
+  fail "group-scoped stage probe lacks the verdict-time protected-main verifier"
+for required_freshness_token in \
+  'env -i' \
+  'HOME=/nonexistent' \
+  'PATH=/usr/bin:/bin' \
+  'GIT_CONFIG_NOSYSTEM=1' \
+  'GIT_CONFIG_GLOBAL=/dev/null' \
+  'GIT_CONFIG_SYSTEM=/dev/null' \
+  'GIT_CONFIG_COUNT=0' \
+  'GIT_TERMINAL_PROMPT=0' \
+  'GIT_ASKPASS=/bin/false' \
+  'SSH_ASKPASS=/bin/false' \
+  'GIT_CEILING_DIRECTORIES=/' \
+  'timeout --signal=TERM --kill-after=2s 10s' \
+  'git -C /' \
+  '-c http.sslVerify=true' \
+  '-c http.followRedirects=false' \
+  '-c credential.helper=' \
+  '-c core.askPass=' \
+  'ls-remote --quiet --exit-code --refs' \
+  'https://github.com/Arcanada-one/disk-arcana.git' \
+  'refs/heads/main 2>/dev/null'; do
+  grep -qF -- "$required_freshness_token" <<<"$fresh_main_function" ||
+    fail "group-scoped stage probe freshness verifier lacks: $required_freshness_token"
+done
+[[ "$(grep -cF 'ls-remote --quiet --exit-code --refs' <<<"$fresh_main_function")" -eq 1 ]] ||
+  fail "group-scoped stage probe freshness verifier does not issue exactly one remote query"
+[[ "$(grep -cE '^[[:space:]]*git[[:space:]]' <<<"$fresh_main_function")" -eq 1 ]] ||
+  fail "group-scoped stage probe freshness verifier does not issue exactly one Git command"
+[[ "$(grep -cF 'https://github.com/Arcanada-one/disk-arcana.git' <<<"$fresh_main_function")" -eq 1 ]] ||
+  fail "group-scoped stage probe freshness verifier does not use exactly one literal public URL"
+[[ "$(grep -cF 'refs/heads/main 2>/dev/null' <<<"$fresh_main_function")" -eq 1 ]] ||
+  fail "group-scoped stage probe freshness verifier does not use exactly one literal main ref"
+grep -qF '[[ ! "$row" =~ ^([0-9a-f]{40})"${tab}"refs/heads/main$ ]]' <<<"$fresh_main_function" ||
+  fail "group-scoped stage probe does not require one exact lowercase main row"
+grep -qF '[[ "$live_main" == "$GITHUB_SHA" ]]' <<<"$fresh_main_function" ||
+  fail "group-scoped stage probe does not compare live main to GITHUB_SHA"
+grep -qF '[[ "$live_main" == "$GITHUB_WORKFLOW_SHA" ]]' <<<"$fresh_main_function" ||
+  fail "group-scoped stage probe does not compare live main to GITHUB_WORKFLOW_SHA"
+grep -qF 'assert_fresh_protected_main' <<<"$stage_readiness_script" ||
+  fail "group-scoped stage probe does not execute the verdict-time main verifier"
+readiness_tail="$(awk '
+  /^assert_fresh_protected_main$/ {seen=1}
+  seen && NF && $0 !~ /^#/ {print}
+' <<<"$stage_readiness_script")"
+[[ "$(printf '%s\n' "$readiness_tail" | sha256sum | awk '{print $1}')" == dac35c53c7890000ba0ef7663166625ea403d67130c968fd2fdcf564b01cd65f ]] ||
+  fail "group-scoped stage probe freshness verifier is not immediately load-bearing on readiness"
 grep -qF "printf 'readiness=ok active_runner_units=%s installed_runner_units=%s sudo_specs=1\\n'" \
   <<<"$stage_readiness_script" || fail "group-scoped stage probe lacks the bounded readiness marker"
 
@@ -644,6 +699,168 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
   reordered_workflow="$fixture_root/release-reordered.yml"
   fixture_output="$fixture_root/output"
 
+  run_source_guard_fixture() {
+    local event_sha="$1" workflow_sha="$2" expected_rc="$3" actual_rc
+    set +e
+    GITHUB_REF=refs/heads/main \
+      GITHUB_REPOSITORY=Arcanada-one/disk-arcana \
+      GITHUB_WORKFLOW_REF=Arcanada-one/disk-arcana/.github/workflows/release-deploy.yml@refs/heads/main \
+      GITHUB_SHA="$event_sha" \
+      GITHUB_WORKFLOW_SHA="$workflow_sha" \
+      bash -c "set -euo pipefail
+$stage_source_script" >/dev/null 2>&1
+    actual_rc=$?
+    set -e
+    [[ "$actual_rc" -eq "$expected_rc" ]] ||
+      fail "exact-main source SHA fixture returned $actual_rc instead of $expected_rc"
+  }
+
+  source_guard_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  run_source_guard_fixture "$source_guard_sha" "$source_guard_sha" 0
+  run_source_guard_fixture AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA "$source_guard_sha" 1
+  run_source_guard_fixture aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa "$source_guard_sha" 1
+  run_source_guard_fixture "$source_guard_sha" AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA 1
+  run_source_guard_fixture "$source_guard_sha" bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 1
+  printf 'PASS  exact-main source guard rejects malformed and mismatched SHAs\n'
+
+  freshness_fixture_bin="$fixture_root/freshness-bin"
+  freshness_fixture_mode="$fixture_root/freshness-mode"
+  mkdir -p "$freshness_fixture_bin"
+  ln -s /usr/bin/timeout "$freshness_fixture_bin/timeout"
+  read -r -d '' freshness_fake_git <<'FAKE_GIT' || true
+#!/usr/bin/env bash
+set -euo pipefail
+
+expected_args=(
+  -C /
+  -c http.sslVerify=true
+  -c http.followRedirects=false
+  -c credential.helper=
+  -c core.askPass=
+  ls-remote --quiet --exit-code --refs
+  https://github.com/Arcanada-one/disk-arcana.git
+  refs/heads/main
+)
+[[ "$#" -eq "${#expected_args[@]}" ]] || {
+  printf 'FAKE_GIT_ARGUMENT_CANARY\n' >&2
+  exit 90
+}
+for ((argument_index = 0; argument_index < ${#expected_args[@]}; argument_index++)); do
+  argument_position=$((argument_index + 1))
+  [[ "${!argument_position}" == "${expected_args[argument_index]}" ]] || {
+    printf 'FAKE_GIT_ARGUMENT_CANARY\n' >&2
+    exit 90
+  }
+done
+[[ "$HOME" == /nonexistent ]]
+[[ "$LC_ALL" == C ]]
+[[ "$GIT_CONFIG_NOSYSTEM" == 1 ]]
+[[ "$GIT_CONFIG_GLOBAL" == /dev/null ]]
+[[ "$GIT_CONFIG_SYSTEM" == /dev/null ]]
+[[ "$GIT_CONFIG_COUNT" == 0 ]]
+[[ "$GIT_TERMINAL_PROMPT" == 0 ]]
+[[ "$GIT_ASKPASS" == /bin/false ]]
+[[ "$SSH_ASKPASS" == /bin/false ]]
+[[ "$GIT_CEILING_DIRECTORIES" == / ]]
+for forbidden_name in \
+  GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_CONFIG_PARAMETERS \
+  GIT_SSL_NO_VERIFY GIT_SSL_CAINFO GIT_EXEC_PATH GIT_CURL_VERBOSE \
+  GIT_TRACE GIT_TRACE2; do
+  [[ -z "${!forbidden_name+x}" ]] || {
+    printf 'FAKE_GIT_ENVIRONMENT_CANARY\n' >&2
+    exit 91
+  }
+done
+
+case "$(<__MODE_FILE__)" in
+  success)
+    printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/heads/main\n'
+    ;;
+  stale)
+    printf 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\trefs/heads/main\n'
+    ;;
+  empty)
+    ;;
+  multiple)
+    printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/heads/main\n'
+    printf 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\trefs/heads/main\n'
+    ;;
+  malformed)
+    printf 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\trefs/heads/main\n'
+    ;;
+  wrong-ref)
+    printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/heads/not-main\n'
+    ;;
+  failure)
+    printf 'FAKE_QUERY_STDOUT_CANARY\n'
+    printf 'FAKE_QUERY_STDERR_CANARY\n' >&2
+    exit 92
+    ;;
+  timeout)
+    sleep 2
+    printf 'FAKE_QUERY_TIMEOUT_CANARY\n'
+    ;;
+  *)
+    exit 93
+    ;;
+esac
+FAKE_GIT
+  printf '%s\n' "$freshness_fake_git" >"$freshness_fixture_bin/git"
+  sed -i "s#__MODE_FILE__#$freshness_fixture_mode#" "$freshness_fixture_bin/git"
+  chmod 0700 "$freshness_fixture_bin/git"
+  fresh_main_fixture_function="$(
+    sed \
+      -e "s#PATH=/usr/bin:/bin#PATH=$freshness_fixture_bin:/usr/bin:/bin#" \
+      -e 's#timeout --signal=TERM --kill-after=2s 10s#timeout --signal=TERM --kill-after=0.1s 0.2s#' \
+      <<<"$fresh_main_function"
+  )"
+
+  run_freshness_fixture() {
+    local mode="$1" event_sha="$2" workflow_sha="$3" expected_rc="$4" expected_output="$5"
+    local actual_output actual_rc
+    printf '%s\n' "$mode" >"$freshness_fixture_mode"
+    set +e
+    actual_output="$(
+      GITHUB_SHA="$event_sha" \
+      GITHUB_WORKFLOW_SHA="$workflow_sha" \
+      GIT_DIR=EVENT_GIT_DIR_CANARY \
+      GIT_WORK_TREE=EVENT_GIT_WORK_TREE_CANARY \
+      GIT_CONFIG_PARAMETERS=EVENT_GIT_CONFIG_CANARY \
+      GIT_SSL_NO_VERIFY=EVENT_GIT_SSL_CANARY \
+      GIT_TRACE=EVENT_GIT_TRACE_CANARY \
+      bash -c "set -euo pipefail
+$fresh_main_fixture_function
+assert_fresh_protected_main" 2>&1
+    )"
+    actual_rc=$?
+    set -e
+    [[ "$actual_rc" -eq "$expected_rc" ]] ||
+      fail "verdict-time main fixture $mode returned $actual_rc instead of $expected_rc"
+    [[ "$actual_output" == "$expected_output" ]] ||
+      fail "verdict-time main fixture $mode emitted an unbounded or incorrect verdict"
+  }
+
+  freshness_live_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  freshness_other_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  run_freshness_fixture success "$freshness_live_sha" "$freshness_live_sha" 0 ''
+  run_freshness_fixture stale "$freshness_live_sha" "$freshness_live_sha" 1 \
+    'freshness=fail reason=stale-main'
+  run_freshness_fixture success "$freshness_live_sha" "$freshness_other_sha" 1 \
+    'freshness=fail reason=workflow-sha'
+  run_freshness_fixture empty "$freshness_live_sha" "$freshness_live_sha" 1 \
+    'freshness=fail reason=row-shape'
+  run_freshness_fixture multiple "$freshness_live_sha" "$freshness_live_sha" 1 \
+    'freshness=fail reason=row-count'
+  run_freshness_fixture malformed "$freshness_live_sha" "$freshness_live_sha" 1 \
+    'freshness=fail reason=row-shape'
+  run_freshness_fixture wrong-ref "$freshness_live_sha" "$freshness_live_sha" 1 \
+    'freshness=fail reason=row-shape'
+  run_freshness_fixture failure "$freshness_live_sha" "$freshness_live_sha" 1 \
+    'freshness=fail reason=query'
+  run_freshness_fixture timeout "$freshness_live_sha" "$freshness_live_sha" 1 \
+    'freshness=fail reason=query'
+  printf 'PASS  verdict-time main verifier fails closed with isolated bounded output\n'
+
   run_release_fixture() {
     local workflow="$1" expected="$2" label="$3" fixture_rc
     set +e
@@ -685,6 +902,87 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
     [[ "$fixture_rc" -ne 0 ]] || fail "$label fixture passed"
     grep -qF "$expected" "$fixture_output" || fail "$label fixture failed for an unintended reason"
   }
+
+  missing_event_sha_guard="$fixture_root/stage-probe-missing-event-sha-guard.yml"
+  grep -vF '          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]' \
+    "$WORKFLOW" >"$missing_event_sha_guard"
+  run_stage_probe_fixture "$missing_event_sha_guard" \
+    'FAIL  group-scoped stage probe does not validate GITHUB_SHA as lowercase 40-hex' \
+    "missing event SHA format guard"
+  printf 'PASS  missing event SHA format guard is rejected for the intended reason\n'
+
+  missing_workflow_sha_guard="$fixture_root/stage-probe-missing-workflow-sha-guard.yml"
+  grep -vF '          [[ "$GITHUB_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]]' \
+    "$WORKFLOW" >"$missing_workflow_sha_guard"
+  run_stage_probe_fixture "$missing_workflow_sha_guard" \
+    'FAIL  group-scoped stage probe does not validate GITHUB_WORKFLOW_SHA as lowercase 40-hex' \
+    "missing workflow SHA format guard"
+  printf 'PASS  missing workflow SHA format guard is rejected for the intended reason\n'
+
+  missing_sha_binding="$fixture_root/stage-probe-missing-sha-binding.yml"
+  grep -vF '          [[ "$GITHUB_SHA" == "$GITHUB_WORKFLOW_SHA" ]]' \
+    "$WORKFLOW" >"$missing_sha_binding"
+  run_stage_probe_fixture "$missing_sha_binding" \
+    'FAIL  group-scoped stage probe does not bind event and workflow SHAs' \
+    "missing event/workflow SHA binding"
+  printf 'PASS  missing event/workflow SHA binding is rejected for the intended reason\n'
+
+  missing_environment_isolation="$fixture_root/stage-probe-missing-config-isolation.yml"
+  grep -vF "                GIT_CONFIG_NOSYSTEM=1 \\" \
+    "$WORKFLOW" >"$missing_environment_isolation"
+  run_stage_probe_fixture "$missing_environment_isolation" \
+    'FAIL  group-scoped stage probe freshness verifier lacks: GIT_CONFIG_NOSYSTEM=1' \
+    "missing Git system-config isolation"
+  printf 'PASS  missing Git system-config isolation is rejected for the intended reason\n'
+
+  second_remote_query="$fixture_root/stage-probe-second-remote-query.yml"
+  awk '
+    !mutated && /^              env -i \\$/ {
+      print "              git ls-remote https://example.invalid refs/heads/main"
+      mutated=1
+    }
+    {print}
+  ' "$WORKFLOW" >"$second_remote_query"
+  run_stage_probe_fixture "$second_remote_query" \
+    'FAIL  group-scoped stage probe freshness verifier does not issue exactly one Git command' \
+    "additional off-host Git query"
+  printf 'PASS  additional off-host Git query is rejected for the intended reason\n'
+
+  inert_freshness_call="$fixture_root/stage-probe-inert-freshness-call.yml"
+  awk '
+    !mutated && /^          assert_fresh_protected_main$/ {
+      print "          if false; then"
+      print "            assert_fresh_protected_main"
+      print "          fi"
+      mutated=1
+      next
+    }
+    {print}
+  ' "$WORKFLOW" >"$inert_freshness_call"
+  run_stage_probe_fixture "$inert_freshness_call" \
+    'FAIL  group-scoped stage probe freshness verifier is not immediately load-bearing on readiness' \
+    "inert verdict-time freshness call"
+  printf 'PASS  inert verdict-time freshness call is rejected for the intended reason\n'
+
+  reordered_freshness_call="$fixture_root/stage-probe-reordered-freshness-call.yml"
+  awk '
+    !mutated && /^          assert_fresh_protected_main$/ {
+      held=$0
+      mutated=1
+      next
+    }
+    mutated && !inserted && /^            "\$\{#runner_units\[@\]\}"/ {
+      print
+      print held
+      inserted=1
+      next
+    }
+    {print}
+  ' "$WORKFLOW" >"$reordered_freshness_call"
+  run_stage_probe_fixture "$reordered_freshness_call" \
+    'FAIL  group-scoped stage probe freshness verifier is not immediately load-bearing on readiness' \
+    "freshness call after readiness marker"
+  printf 'PASS  post-readiness freshness call is rejected for the intended reason\n'
 
   write_probe_reachable_job_fixture() {
     local job="$1" output="$2"
