@@ -45,6 +45,27 @@ jobs:
             ' "$file" 2>/dev/null
           }
 
+          assert_exact_sudo_policy() {
+            local -a sudo_specs=()
+            mapfile -t sudo_specs < <(awk '
+              / may run the following commands on .*:$/ {in_specs=1; next}
+              !in_specs {next}
+              {
+                spec=$0
+                sub(/^[[:space:]]+/, "", spec)
+                sub(/[[:space:]]+$/, "", spec)
+                if (spec !~ /^\([^)]*\)([[:space:]]|$)/) next
+                gsub(/[[:space:]]+/, " ", spec)
+                gsub(/\([[:space:]]+/, "(", spec)
+                gsub(/[[:space:]]+\)/, ")", spec)
+                sub(/[[:space:]]*:[[:space:]]*/, ": ", spec)
+                print spec
+              }
+            ')
+            [[ "${#sudo_specs[@]}" -eq 1 ]]
+            [[ "${sudo_specs[0]}" == '(root) NOPASSWD: /usr/local/sbin/disk-arcana-deploy-broker --deploy *' ]]
+          }
+
           [[ "$(id -u)" != 0 ]]
           [[ " $(id -Gn) " == *" disk-arcana-deploy "* ]]
 
@@ -60,6 +81,8 @@ jobs:
           docker_socket_writable="$(bool_command test -w /var/run/docker.sock)"
           mapfile -t runner_units < <(systemctl list-units --type=service --all \
             'actions.runner.*' --plain --no-legend --no-pager 2>/dev/null | awk '{print $1}')
+          mapfile -t installed_runner_units < <(systemctl list-unit-files --type=service \
+            'actions.runner.*' --no-legend --no-pager 2>/dev/null | awk '{print $1}')
 
           [[ "$rootless_userns" == true ]]
           (( subuid_count >= 65536 ))
@@ -71,16 +94,10 @@ jobs:
           [[ "${#runner_units[@]}" -eq 1 ]]
           [[ "${runner_units[0]}" == actions.runner.*."${RUNNER_NAME}".service ]]
           grep -qF "/system.slice/${runner_units[0]}" /proc/self/cgroup
+          [[ "${#installed_runner_units[@]}" -eq 1 ]]
+          [[ "${installed_runner_units[0]}" == "${runner_units[0]}" ]]
 
-          sudo_listing="$(LC_ALL=C sudo -n -l 2>/dev/null)"
-          mapfile -t sudo_commands < <(printf '%s\n' "$sudo_listing" | awk '
-            /NOPASSWD:/ {
-              sub(/^[[:space:]]*\([^)]*\)[[:space:]]*NOPASSWD:[[:space:]]*/, "")
-              print
-            }
-          ')
-          [[ "${#sudo_commands[@]}" -eq 1 ]]
-          [[ "${sudo_commands[0]}" == '/usr/local/sbin/disk-arcana-deploy-broker --deploy *' ]]
+          LC_ALL=C sudo -n -l 2>/dev/null | assert_exact_sudo_policy
 
           [[ -f /etc/systemd/system/disk-arcana-server.service ]]
           [[ "$(systemctl is-active disk-arcana-server 2>/dev/null)" == active ]]
@@ -88,16 +105,7 @@ jobs:
           [[ "$(systemctl show disk-arcana-server -p Restart --value 2>/dev/null)" == on-failure ]]
           [[ "$(systemctl show disk-arcana-server -p StartLimitIntervalUSec --value 2>/dev/null)" == 2min ]]
           [[ "$(systemctl show disk-arcana-server -p StartLimitBurst --value 2>/dev/null)" == 5 ]]
-          health_body="$(curl --fail --silent --show-error --max-time 10 \
-            http://127.0.0.1:9446/health 2>/dev/null)"
-          [[ "$(printf '%s' "$health_body" | tr -d '[:space:]')" == *'"status":"ok"'* ]]
+          curl --fail --silent --show-error --max-time 10 -o /dev/null http://127.0.0.1:9446/health
 
-          hostname
-          uname -r
-          uname -m
-          systemd-analyze --version | sed -n '1p'
-          printf 'runner=%s uid=%s rootless_userns=%s subuid_count=%s subgid_count=%s user_systemd=%s linger=%s podman=%s docker_socket_writable=%s runner_unit=%s\n' \
-            "$RUNNER_NAME" "$(id -u)" "$rootless_userns" "$subuid_count" \
-            "$subgid_count" "$user_systemd" "$linger" "$podman" \
-            "$docker_socket_writable" "${runner_units[0]}"
-          printf 'sudo_surface=exact-broker unit=present active=active UnitFileState=enabled Restart=on-failure StartLimitIntervalUSec=2min StartLimitBurst=5 health=ok\n'
+          printf 'readiness=ok active_runner_units=%s installed_runner_units=%s sudo_specs=1\n' \
+            "${#runner_units[@]}" "${#installed_runner_units[@]}"
