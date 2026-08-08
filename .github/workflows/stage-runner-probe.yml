@@ -1,0 +1,96 @@
+name: Stage runner probe (read-only)
+
+on:
+  workflow_dispatch:
+permissions: {}
+
+jobs:
+  readiness:
+    name: Dedicated staging runner readiness
+    environment: staging
+    runs-on:
+      group: disk-arcana-stage
+      labels: [self-hosted, Linux, X64, disk-arcana-stage]
+    steps:
+      - name: Require exact main source
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/main" ]]
+          [[ "$GITHUB_REPOSITORY" == "Arcanada-one/disk-arcana" ]]
+          [[ "$GITHUB_WORKFLOW_REF" == "Arcanada-one/disk-arcana/.github/workflows/stage-runner-probe.yml@refs/heads/main" ]]
+
+      - name: Read-only staging readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          bool_command() {
+            if "$@" >/dev/null 2>&1; then printf true; else printf false; fi
+          }
+
+          subid_count() {
+            local file="$1"
+            awk -F: -v user="$runner_user" '
+              $1 == user && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ {total += $3}
+              END {print total + 0}
+            ' "$file"
+          }
+
+          runner_user="$(id -un)"
+          runner_uid="$(id -u)"
+          [[ "$runner_uid" != 0 ]]
+
+          rootless_userns="$(bool_command unshare --user --map-root-user true)"
+          [[ "$rootless_userns" == true ]]
+
+          subuid_count="$(subid_count /etc/subuid)"
+          subgid_count="$(subid_count /etc/subgid)"
+          (( subuid_count >= 65536 ))
+          (( subgid_count >= 65536 ))
+
+          user_systemd="$(bool_command systemctl --user show-environment)"
+          [[ "$user_systemd" == true ]]
+          linger="$(loginctl show-user "$runner_uid" -p Linger --value 2>/dev/null)"
+          [[ "$linger" == yes ]]
+          podman="$(bool_command command -v podman)"
+          [[ "$podman" == true ]]
+          docker_socket_writable="$(bool_command test -w /var/run/docker.sock)"
+          [[ "$docker_socket_writable" == false ]]
+
+          runner_services="$(
+            systemctl list-units --type=service --all 'actions.runner.*' \
+              --no-legend --no-pager 2>/dev/null | awk 'NF {count++} END {print count + 0}'
+          )"
+          [[ "$runner_services" -eq 1 ]]
+          id -nG "$runner_user" | tr ' ' '\n' | grep -qxF disk-arcana-deploy
+
+          sudo_summary="$(
+            sudo -n -l 2>/dev/null | awk '
+              /NOPASSWD:/ {
+                line=$0
+                sub(/^[[:space:]]*\([^)]*\)[[:space:]]*NOPASSWD:[[:space:]]*/, "", line)
+                count++
+                command=line
+              }
+              END {printf "%d\t%s\n", count + 0, count == 1 ? command : ""}
+            '
+          )"
+          IFS=$'\t' read -r sudo_command_count sudo_command <<<"$sudo_summary"
+          [[ "$sudo_command_count" -eq 1 ]]
+          [[ "$sudo_command" == '/usr/local/sbin/disk-arcana-deploy-broker --deploy *' ]]
+
+          unit=/etc/systemd/system/disk-arcana-server.service
+          [[ -f "$unit" ]]
+          systemctl is-active --quiet disk-arcana-server
+          [[ "$(systemctl is-enabled disk-arcana-server)" == enabled ]]
+          restart="$(systemctl show disk-arcana-server -p Restart --value)"
+          start_limit_interval="$(systemctl show disk-arcana-server -p StartLimitIntervalUSec --value)"
+          start_limit_burst="$(systemctl show disk-arcana-server -p StartLimitBurst --value)"
+          [[ "$restart" == on-failure ]]
+          [[ "$start_limit_interval" == 2min ]]
+          [[ "$start_limit_burst" == 5 ]]
+
+          curl --fail --silent --show-error --max-time 10 -o /dev/null \
+            http://127.0.0.1:9446/health
+          printf 'stage_runner_readiness=ok runner_services=%s\n' "$runner_services"
