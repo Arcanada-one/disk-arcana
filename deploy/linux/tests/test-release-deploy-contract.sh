@@ -327,12 +327,11 @@ stage_probe_trigger_count="$(awk '
   fail "group-scoped stage probe has an additional trigger"
 grep -qF 'permissions: {}' "$STAGE_PROBE_WORKFLOW" ||
   fail "group-scoped stage probe permissions are not empty"
-stage_probe_job_count="$(awk '
+mapfile -t stage_probe_job_keys < <(awk '
   /^jobs:$/ {in_jobs=1; next}
-  in_jobs && /^  [a-zA-Z0-9_-]+:$/ {count++}
-  END {print count + 0}
-' "$STAGE_PROBE_WORKFLOW")"
-[[ "$stage_probe_job_count" -eq 1 ]] ||
+  in_jobs && /^  [^[:space:]#]/ {print}
+' "$STAGE_PROBE_WORKFLOW")
+[[ "${#stage_probe_job_keys[@]}" -eq 1 && "${stage_probe_job_keys[0]}" == "  probe:" ]] ||
   fail "group-scoped stage probe workflow does not contain exactly one job"
 grep -qF 'group: disk-arcana-stage' <<<"$stage_probe_block" ||
   fail "group-scoped stage probe does not require runner group disk-arcana-stage"
@@ -783,6 +782,25 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
     'FAIL  group-scoped stage probe workflow does not contain exactly one job' \
     "additional mutating stage job"
   printf 'PASS  additional mutating stage job is rejected for the intended reason\n'
+
+  quoted_job_stage_probe="$fixture_root/stage-probe-quoted-extra-job.yml"
+  awk '
+    /^  probe:$/ && !inserted {
+      print "  \"mutate-stage-host\":"
+      print "    runs-on:"
+      print "      group: disk-arcana-stage"
+      print "      labels: [self-hosted, Linux, X64, disk-arcana-stage]"
+      print "    steps:"
+      print "      - shell: bash"
+      print "        run: touch /tmp/disk-arcana-stage-probe-mutant"
+      inserted=1
+    }
+    {print}
+  ' "$STAGE_PROBE_WORKFLOW" >"$quoted_job_stage_probe"
+  run_stage_probe_fixture "$quoted_job_stage_probe" \
+    'FAIL  group-scoped stage probe workflow does not contain exactly one job' \
+    "quoted additional mutating stage job"
+  printf 'PASS  quoted additional mutating stage job is rejected for the intended reason\n'
 
   conditional_main_stage_probe="$fixture_root/stage-probe-conditional-main.yml"
   awk '
