@@ -455,6 +455,10 @@ if run_provisioner DISK_ARCANA_PROVISION_TEST_FAIL_AT=ROLLBACK_RESTORE_TARGETS; 
   fail "injected rollback-before-revocation failure returned success"
 fi
 [[ ! -e "$BOOTSTRAP" ]] || fail "rollback failure prevented bootstrap revocation"
+[[ ! -e "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/test-member-exists" ]] ||
+  fail "rollback failure skipped later membership restoration"
+[[ ! -e "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/test-group-exists" ]] ||
+  fail "rollback failure skipped later group restoration"
 grep -qF 'state=FAILED_RECOVERY_REQUIRED' \
   "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/provision-current" ||
   fail "rollback failure did not retain terminal recovery evidence"
@@ -482,6 +486,22 @@ for state in AUTHORITY_ISSUED BACKUP_WRITTEN INSTALLED NARROW_RULE_VERIFIED; do
     fail "recovery after $state did not persist FAILED_RECOVERED"
   pass "fresh invocation restores prior generation and revokes authority after $state crash"
 done
+
+setup_case legacy-journal-without-nonce
+if run_provisioner DISK_ARCANA_PROVISION_TEST_KILL_AFTER_STATE=BACKUP_WRITTEN; then
+  fail "legacy-journal crash setup returned success"
+fi
+current_journal="$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/provision-current"
+sed -i '/^nonce=/d' "$current_journal"
+if run_provisioner; then
+  fail "recovery reused authority from a pre-nonce journal"
+fi
+assert_not_provisioned
+[[ ! -e "$BOOTSTRAP" ]] || fail "pre-nonce journal recovery retained bootstrap authority"
+grep -RqsF 'state=FAILED_RECOVERED' \
+  "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/provision-records" ||
+  fail "pre-nonce journal recovery did not persist recovered evidence"
+pass "pre-nonce journal recovery restores the prior generation and revokes authority"
 
 setup_case crash-then-symlink
 if run_provisioner DISK_ARCANA_PROVISION_TEST_KILL_AFTER_STATE=BACKUP_WRITTEN; then

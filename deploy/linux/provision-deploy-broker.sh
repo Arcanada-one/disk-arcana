@@ -296,6 +296,10 @@ revoke_bootstrap() {
 
 remove_uncommitted_nonce() {
   local nonce_path="$NONCE_ROOT/$TX_NONCE"
+  # Journals written by the previously landed provisioner did not record the
+  # nonce. Preserve an unknown consumed marker fail-closed while still
+  # restoring the remaining transaction state and revoking bootstrap access.
+  [[ -n "$TX_NONCE" ]] || return 0
   [[ "$TX_NONCE" =~ ^[A-Za-z0-9._-]{20,120}$ ]] || return 1
   assert_no_symlink_components "$nonce_path" || return 1
   [[ ! -L "$nonce_path" ]] || return 1
@@ -336,7 +340,9 @@ load_journal() {
   TX_GROUP_EXISTED="$(journal_get group_existed)" || return 1
   TX_MEMBER_EXISTED="$(journal_get member_existed)" || return 1
   TX_RUNNER_USER="$(journal_get runner_user)" || return 1
-  TX_NONCE="$(journal_get nonce)" || return 1
+  if ! TX_NONCE="$(journal_get nonce)"; then
+    TX_NONCE=""
+  fi
   local i name
   for ((i = 0; i < ${#DIRECTORY_NAMES[@]}; i++)); do
     name="${DIRECTORY_NAMES[i]}"
@@ -362,7 +368,7 @@ load_journal() {
   fi
   [[ "$TX_GROUP_EXISTED" =~ ^[01]$ && "$TX_MEMBER_EXISTED" =~ ^[01]$ ]] || return 1
   [[ "$TX_RUNNER_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ && "$TX_RUNNER_USER" != root ]] || return 1
-  [[ "$TX_NONCE" =~ ^[A-Za-z0-9._-]{20,120}$ ]] || return 1
+  [[ -z "$TX_NONCE" || "$TX_NONCE" =~ ^[A-Za-z0-9._-]{20,120}$ ]] || return 1
   RUNNER_USER="$TX_RUNNER_USER"
   if [[ "$TX_STATE" != AUTHORITY_ISSUED ]]; then
     [[ -d "$TX_BACKUP" && ! -L "$TX_BACKUP" ]] || return 1
@@ -483,10 +489,10 @@ recover_unfinished() {
       printf 'state=COMMITTED recovered_from=%s\n' "$recovered_state"
       ;;
     AUTHORITY_ISSUED)
-      remove_uncommitted_backup || rollback_status=1
-      (( rollback_status == 0 )) && remove_uncommitted_nonce || rollback_status=1
-      (( rollback_status == 0 )) && restore_directories || rollback_status=1
-      revoke_bootstrap || rollback_status=1
+      if ! remove_uncommitted_backup; then rollback_status=1; fi
+      if ! remove_uncommitted_nonce; then rollback_status=1; fi
+      if ! restore_directories; then rollback_status=1; fi
+      if ! revoke_bootstrap; then rollback_status=1; fi
       (( rollback_status == 0 )) || return 1
       TX_STATE=FAILED_RECOVERED
       write_journal || return 1
@@ -497,10 +503,10 @@ recover_unfinished() {
       if should_fail_at ROLLBACK_RESTORE_TARGETS || ! restore_targets; then
         rollback_status=1
       fi
-      (( rollback_status == 0 )) && restore_privilege_state || rollback_status=1
-      (( rollback_status == 0 )) && remove_uncommitted_nonce || rollback_status=1
-      (( rollback_status == 0 )) && restore_directories || rollback_status=1
-      revoke_bootstrap || rollback_status=1
+      if ! restore_privilege_state; then rollback_status=1; fi
+      if ! remove_uncommitted_nonce; then rollback_status=1; fi
+      if ! restore_directories; then rollback_status=1; fi
+      if ! revoke_bootstrap; then rollback_status=1; fi
       (( rollback_status == 0 )) || return 1
       TX_STATE=FAILED_RECOVERED
       write_journal || return 1
