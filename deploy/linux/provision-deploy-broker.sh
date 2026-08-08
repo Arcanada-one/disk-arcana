@@ -121,13 +121,15 @@ TX_CONFIG_SHA=""
 TX_GROUP_EXISTED=""
 TX_MEMBER_EXISTED=""
 TX_RUNNER_USER=""
+TX_NONCE=""
 declare -a TX_DIRECTORY_EXISTED=()
 declare -a TX_DIRECTORY_MODE=()
 declare -a TX_DIRECTORY_UID=()
 declare -a TX_DIRECTORY_GID=()
 
 write_journal() {
-  local tmp="$STATE_ROOT/.provision-current.$$"
+  local tmp="$STATE_ROOT/.provision-current.$$" timestamp
+  timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)" || return 1
   {
     printf 'state=%s\n' "$TX_STATE"
     printf 'deployment_id=%s\n' "$TX_DEPLOYMENT"
@@ -141,6 +143,7 @@ write_journal() {
     printf 'group_existed=%s\n' "$TX_GROUP_EXISTED"
     printf 'member_existed=%s\n' "$TX_MEMBER_EXISTED"
     printf 'runner_user=%s\n' "$TX_RUNNER_USER"
+    printf 'nonce=%s\n' "$TX_NONCE"
     local i
     for ((i = 0; i < ${#DIRECTORY_NAMES[@]}; i++)); do
       printf 'dir_%s_existed=%s\n' "${DIRECTORY_NAMES[i]}" "${TX_DIRECTORY_EXISTED[i]}"
@@ -148,9 +151,9 @@ write_journal() {
       printf 'dir_%s_uid=%s\n' "${DIRECTORY_NAMES[i]}" "${TX_DIRECTORY_UID[i]}"
       printf 'dir_%s_gid=%s\n' "${DIRECTORY_NAMES[i]}" "${TX_DIRECTORY_GID[i]}"
     done
-    printf 'timestamp=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  } >"$tmp"
-  chmod 0600 "$tmp"
+    printf 'timestamp=%s\n' "$timestamp"
+  } >"$tmp" || return 1
+  chmod 0600 "$tmp" || return 1
   fsync_path "$tmp" || return 1
   mv -f -- "$tmp" "$JOURNAL" || return 1
   fsync_path "$STATE_ROOT"
@@ -165,8 +168,9 @@ transition() {
 }
 
 archive_journal() {
-  local suffix="$1" record
-  record="$RECORD_ROOT/$(date -u +%Y%m%dT%H%M%SZ)-$$-$suffix"
+  local suffix="$1" record timestamp
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)" || return 1
+  record="$RECORD_ROOT/$timestamp-$$-$suffix"
   mv -f -- "$JOURNAL" "$record" || return 1
   fsync_path "$RECORD_ROOT" || return 1
   fsync_path "$STATE_ROOT"
@@ -290,6 +294,15 @@ revoke_bootstrap() {
   fsync_path "$(dirname "$TX_BOOTSTRAP")"
 }
 
+remove_uncommitted_nonce() {
+  local nonce_path="$NONCE_ROOT/$TX_NONCE"
+  [[ "$TX_NONCE" =~ ^[A-Za-z0-9._-]{20,120}$ ]] || return 1
+  assert_no_symlink_components "$nonce_path" || return 1
+  [[ ! -L "$nonce_path" ]] || return 1
+  rm -f -- "$nonce_path" || return 1
+  fsync_path "$NONCE_ROOT"
+}
+
 installed_generation_ok() {
   [[ -f "$HELPER_TARGET" && ! -L "$HELPER_TARGET" && "$(stat -c '%a' "$HELPER_TARGET")" == 755 ]] || return 1
   [[ -f "$BROKER_TARGET" && ! -L "$BROKER_TARGET" && "$(stat -c '%a' "$BROKER_TARGET")" == 755 ]] || return 1
@@ -323,6 +336,7 @@ load_journal() {
   TX_GROUP_EXISTED="$(journal_get group_existed)" || return 1
   TX_MEMBER_EXISTED="$(journal_get member_existed)" || return 1
   TX_RUNNER_USER="$(journal_get runner_user)" || return 1
+  TX_NONCE="$(journal_get nonce)" || return 1
   local i name
   for ((i = 0; i < ${#DIRECTORY_NAMES[@]}; i++)); do
     name="${DIRECTORY_NAMES[i]}"
@@ -348,6 +362,7 @@ load_journal() {
   fi
   [[ "$TX_GROUP_EXISTED" =~ ^[01]$ && "$TX_MEMBER_EXISTED" =~ ^[01]$ ]] || return 1
   [[ "$TX_RUNNER_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ && "$TX_RUNNER_USER" != root ]] || return 1
+  [[ "$TX_NONCE" =~ ^[A-Za-z0-9._-]{20,120}$ ]] || return 1
   RUNNER_USER="$TX_RUNNER_USER"
   if [[ "$TX_STATE" != AUTHORITY_ISSUED ]]; then
     [[ -d "$TX_BACKUP" && ! -L "$TX_BACKUP" ]] || return 1
@@ -450,11 +465,11 @@ remove_uncommitted_backup() {
 }
 
 recover_unfinished() {
-  local recovered_state
+  local recovered_state rollback_status=0
   [[ -f "$JOURNAL" && ! -L "$JOURNAL" ]] || return 0
   load_journal || return 1
   assert_no_symlink_components "$TX_BOOTSTRAP" || return 1
-  if [[ "$TX_STATE" != BOOTSTRAP_REVOKED && "$TX_STATE" != COMMITTED ]]; then
+  if [[ "$TX_STATE" != BOOTSTRAP_REVOKED && "$TX_STATE" != COMMITTED && -e "$TX_BOOTSTRAP" ]]; then
     [[ -d "$TX_BOOTSTRAP" && ! -L "$TX_BOOTSTRAP" ]] || return 1
     [[ "$(stat -c '%a:%u:%g' "$TX_BOOTSTRAP")" == "700:$EXPECT_UID:$EXPECT_GID" ]] || return 1
   fi
@@ -468,19 +483,25 @@ recover_unfinished() {
       printf 'state=COMMITTED recovered_from=%s\n' "$recovered_state"
       ;;
     AUTHORITY_ISSUED)
-      remove_uncommitted_backup || return 1
-      restore_directories || return 1
-      revoke_bootstrap || return 1
+      remove_uncommitted_backup || rollback_status=1
+      (( rollback_status == 0 )) && remove_uncommitted_nonce || rollback_status=1
+      (( rollback_status == 0 )) && restore_directories || rollback_status=1
+      revoke_bootstrap || rollback_status=1
+      (( rollback_status == 0 )) || return 1
       TX_STATE=FAILED_RECOVERED
       write_journal || return 1
       archive_journal authority-revoked || return 1
       printf 'state=FAILED_RECOVERED recovered_from=%s\n' "$recovered_state"
       ;;
     BACKUP_WRITTEN|INSTALLED|NARROW_RULE_VERIFIED)
-      restore_targets || return 1
-      restore_privilege_state || return 1
-      restore_directories || return 1
-      revoke_bootstrap || return 1
+      if should_fail_at ROLLBACK_RESTORE_TARGETS || ! restore_targets; then
+        rollback_status=1
+      fi
+      (( rollback_status == 0 )) && restore_privilege_state || rollback_status=1
+      (( rollback_status == 0 )) && remove_uncommitted_nonce || rollback_status=1
+      (( rollback_status == 0 )) && restore_directories || rollback_status=1
+      revoke_bootstrap || rollback_status=1
+      (( rollback_status == 0 )) || return 1
       TX_STATE=FAILED_RECOVERED
       write_journal || return 1
       archive_journal failed-recovered || return 1
@@ -493,9 +514,10 @@ recover_unfinished() {
 rollback_failure() {
   local message="${1:-broker provisioning failed after authority issuance}"
   printf 'ERROR: %s\n' "$message" >&2
-  if recover_unfinished; then
+  if [[ -f "$JOURNAL" ]] && recover_unfinished; then
     exit 1
   fi
+  revoke_bootstrap || true
   TX_STATE=FAILED_RECOVERY_REQUIRED
   write_journal || true
   exit 1
@@ -619,16 +641,17 @@ if (( ! TEST_MODE )); then
   id -u "$RUNNER_USER" >/dev/null 2>&1 || die "runner user does not exist"
 fi
 
-TX_STATE=AUTHORITY_ISSUED
 TX_DEPLOYMENT="$DEPLOYMENT_ID"
 TX_COMMIT="$COMMIT"
 TX_BOOTSTRAP="$BOOTSTRAP_ROOT"
 TX_RUNNER_USER="$RUNNER_USER"
+TX_NONCE="$NONCE"
 if group_exists; then TX_GROUP_EXISTED=1; else TX_GROUP_EXISTED=0; fi
 if member_exists; then TX_MEMBER_EXISTED=1; else TX_MEMBER_EXISTED=0; fi
-TX_BACKUP="$BACKUP_ROOT/$(date -u +%Y%m%dT%H%M%SZ)-$$"
+backup_timestamp="$(date -u +%Y%m%dT%H%M%SZ)" || die "could not timestamp transaction backup"
+TX_BACKUP="$BACKUP_ROOT/$backup_timestamp-$$"
 inventory_directories || die "privileged directory inventory failed"
-transition AUTHORITY_ISSUED || die "could not persist issued bootstrap authority"
+transition AUTHORITY_ISSUED || rollback_failure "could not persist issued bootstrap authority"
 
 should_fail_at PREPARE_DIRECTORIES && rollback_failure "injected directory preparation failure"
 ensure_directories || rollback_failure "could not prepare privileged directories"
@@ -655,10 +678,11 @@ visudo -cf "$tmp_sudoers" >/dev/null 2>&1 || rollback_failure "sudoers policy va
 for staged in "$tmp_helper" "$tmp_broker" "$tmp_sudoers" "$tmp_config" "$tmp_lock"; do
   fsync_path "$staged" || rollback_failure "could not fsync staged broker file"
 done
-TX_HELPER_SHA="$(sha "$tmp_helper")"
-TX_BROKER_SHA="$(sha "$tmp_broker")"
-TX_SUDOERS_SHA="$(sha "$tmp_sudoers")"
-TX_CONFIG_SHA="$(sha "$tmp_config")"
+should_fail_at HASH_STAGED && rollback_failure "injected staged hash failure"
+TX_HELPER_SHA="$(sha "$tmp_helper")" || rollback_failure "could not hash staged helper"
+TX_BROKER_SHA="$(sha "$tmp_broker")" || rollback_failure "could not hash staged broker"
+TX_SUDOERS_SHA="$(sha "$tmp_sudoers")" || rollback_failure "could not hash staged sudoers"
+TX_CONFIG_SHA="$(sha "$tmp_config")" || rollback_failure "could not hash staged configuration"
 fsync_path "$TX_BACKUP" || rollback_failure "could not fsync broker backup directory"
 fsync_path "$BACKUP_ROOT" || rollback_failure "could not fsync broker backup root"
 
@@ -701,14 +725,21 @@ transition NARROW_RULE_VERIFIED || rollback_failure
 if (( TEST_MODE )) && [[ "${DISK_ARCANA_PROVISION_TEST_FAIL_AT:-}" == NARROW_RULE_VERIFIED ]]; then
   rollback_failure
 fi
+if should_fail_at ROLLBACK_RESTORE_TARGETS; then
+  rollback_failure "injected rollback restoration failure"
+fi
 
-: >"$NONCE_ROOT/$NONCE"
-chmod 0600 "$NONCE_ROOT/$NONCE"
+if should_fail_at WRITE_NONCE || ! : >"$NONCE_ROOT/$NONCE"; then
+  rollback_failure "could not persist consumed authorization nonce"
+fi
+if should_fail_at CHMOD_NONCE || ! chmod 0600 "$NONCE_ROOT/$NONCE"; then
+  rollback_failure "could not secure consumed authorization nonce"
+fi
 fsync_path "$NONCE_ROOT/$NONCE" || rollback_failure
 fsync_path "$NONCE_ROOT" || rollback_failure
 
 revoke_bootstrap || rollback_failure
 transition BOOTSTRAP_REVOKED || rollback_failure
 transition COMMITTED || rollback_failure
-archive_journal committed || die "could not archive committed broker transaction"
+archive_journal committed || rollback_failure "could not archive committed broker transaction"
 printf 'state=COMMITTED deployment_id=%s commit=%s\n' "$DEPLOYMENT_ID" "$COMMIT"

@@ -284,17 +284,27 @@ should_fail_at() {
   (( TEST_MODE )) && [[ "${DISK_ARCANA_INSTALL_TEST_FAIL_AT:-}" == "$1" ]]
 }
 
+unit_is_exactly_enabled() {
+  local state
+  state="$(systemctl show disk-arcana-server -p UnitFileState --value 2>/dev/null)" || return 1
+  [[ "$state" == enabled ]]
+}
+
 recover_unfinished() {
   local recovered_state
   [[ -f "$JOURNAL" && ! -L "$JOURNAL" ]] || return 0
   load_journal || return 1
   recovered_state="$TX_STATE"
+  if [[ "$TX_STATE" == FAILED_RECOVERY_REQUIRED ]]; then
+    printf 'state=FAILED_RECOVERY_REQUIRED manual_recovery_required=true\n' >&2
+    return 1
+  fi
   if [[ "$TX_STATE" == COMMITTED ]]; then
     [[ -f "$LIVE_BINARY" && -f "$LIVE_UNIT" ]] || return 1
     [[ "$(sha256sum -- "$LIVE_BINARY" | awk '{print $1}')" == "$(sha256sum -- "$BINARY_PATH" | awk '{print $1}')" ]] || return 1
     [[ "$(sha256sum -- "$LIVE_UNIT" | awk '{print $1}')" == "$(sha256sum -- "$UNIT_PATH" | awk '{print $1}')" ]] || return 1
     systemctl is-active --quiet disk-arcana-server >/dev/null 2>&1 || return 1
-    systemctl is-enabled --quiet disk-arcana-server >/dev/null 2>&1 || return 1
+    unit_is_exactly_enabled || return 1
     health_body="$(curl --fail --silent --show-error --max-time 10 http://127.0.0.1:9446/health 2>/dev/null)" || return 1
     [[ "$(printf '%s' "$health_body" | tr -d '[:space:]')" == *'"status":"ok"'* ]] || return 1
     printf 'state=COMMITTED recovered=true\n'
@@ -386,7 +396,7 @@ health_body="$(curl --fail --silent --show-error --max-time 10 http://127.0.0.1:
   fail_after_inventory "cold service health failed"
 }
 systemctl is-active --quiet disk-arcana-server >/dev/null 2>&1 || fail_after_inventory "cold service is not active"
-systemctl is-enabled --quiet disk-arcana-server >/dev/null 2>&1 || fail_after_inventory "cold service is not enabled"
+unit_is_exactly_enabled || fail_after_inventory "cold service is not exactly enabled"
 transition HEALTH_VERIFIED || fail_after_inventory "could not persist verified state"
 
 if (( TEST_MODE )) && [[ "${DISK_ARCANA_INSTALL_TEST_FAIL_AT:-}" == HEALTH_VERIFIED ]]; then

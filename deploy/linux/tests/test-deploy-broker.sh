@@ -5,8 +5,8 @@ set -euo pipefail
 IFS=$'\n\t'
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BROKER="$REPO_ROOT/deploy/linux/deploy-server-broker.sh"
-PROVISIONER="$REPO_ROOT/deploy/linux/provision-deploy-broker.sh"
+BROKER="${BROKER_OVERRIDE:-$REPO_ROOT/deploy/linux/deploy-server-broker.sh}"
+PROVISIONER="${PROVISIONER_OVERRIDE:-$REPO_ROOT/deploy/linux/provision-deploy-broker.sh}"
 HELPER="$REPO_ROOT/deploy/linux/deploy-server.sh"
 VALIDATOR="$REPO_ROOT/deploy/linux/validate-deploy-bundle.sh"
 UNIT_SOURCE="$REPO_ROOT/deploy/linux/disk-arcana-server.service"
@@ -69,6 +69,20 @@ SHIM
 #!/usr/bin/env bash
 set -euo pipefail
 [[ "${1:-}" == verify && -f "${2:-}" ]]
+SHIM
+  cat >"$shims/sync" <<'SHIM'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ -n "${DISK_TEST_TAMPER_INBOX:-}" && "${2:-}" == */var/lib/disk-arcana-deploy/inbox ]]; then
+  while IFS= read -r inbox; do
+    case "$DISK_TEST_TAMPER_INBOX" in
+      manifest) printf 'tampered after import\n' >>"$inbox/manifest.sha256" ;;
+      metadata) chmod 0644 "$inbox/disk-arcana-server" ;;
+      *) exit 2 ;;
+    esac
+  done < <(find "${2}" -mindepth 1 -maxdepth 1 -type d -print)
+fi
+exit 0
 SHIM
   cat >"$shims/sudo" <<'SHIM'
 #!/usr/bin/env bash
@@ -202,6 +216,7 @@ run_broker() {
     DISK_ARCANA_BROKER_TEST_ROOT="$FAKE_ROOT" \
     DISK_ARCANA_BROKER_TEST_CALLER="$caller" \
     DISK_ARCANA_BROKER_TEST_HELPER_LOG="$HELPER_LOG" \
+    DISK_TEST_TAMPER_INBOX="${DISK_TEST_TAMPER_INBOX:-}" \
     DISK_TEST_HOSTNAME="$EXPECTED_HOST" \
     "$FAKE_ROOT/usr/local/sbin/disk-arcana-deploy-broker" \
       --deploy "$bundle" "$authorization_id" >"$OUTPUT" 2>&1
@@ -270,6 +285,24 @@ grep -qF -- "--bundle $FAKE_ROOT/var/lib/disk-arcana-deploy/inbox/" "$HELPER_LOG
 grep -qF -- "--expected-commit $EXPECTED_COMMIT" "$HELPER_LOG" || fail "broker dropped expected commit"
 grep -qF -- "--expected-hostname $EXPECTED_HOST" "$HELPER_LOG" || fail "broker dropped expected hostname"
 pass "broker imports validated bundle and invokes only installed helper"
+
+make_runner_bundle
+authorize_bundle
+rm -f "$HELPER_LOG"
+if DISK_TEST_TAMPER_INBOX=manifest run_broker; then
+  fail "post-copy inbox tampering reached the privileged helper"
+fi
+[[ ! -e "$HELPER_LOG" ]] || fail "helper ran after post-copy inbox tampering"
+pass "broker revalidates the root inbox and authorized manifest immediately before helper"
+
+make_runner_bundle
+authorize_bundle
+rm -f "$HELPER_LOG"
+if DISK_TEST_TAMPER_INBOX=metadata run_broker; then
+  fail "unsafe copied-inbox metadata reached the privileged helper"
+fi
+[[ ! -e "$HELPER_LOG" ]] || fail "helper ran with unsafe copied-inbox metadata"
+pass "broker requires exact root-owned inbox member metadata immediately before helper"
 
 if run_broker; then
   fail "consumed routine deployment authorization was replayed"
@@ -403,6 +436,34 @@ for failure_point in PREPARE_DIRECTORIES STAGE_HELPER BACKUP_TARGET; do
     fail "$failure_point failure did not persist recovered evidence"
   pass "synchronous $failure_point failure revokes authority and restores the baseline"
 done
+
+for failure_point in HASH_STAGED WRITE_NONCE CHMOD_NONCE; do
+  setup_case "sync-${failure_point,,}"
+  if run_provisioner DISK_ARCANA_PROVISION_TEST_FAIL_AT="$failure_point"; then
+    fail "injected $failure_point post-authority failure returned success"
+  fi
+  assert_not_provisioned
+  [[ ! -e "$BOOTSTRAP" ]] || fail "$failure_point failure retained bootstrap authority"
+  grep -RqsF 'state=FAILED_RECOVERED' \
+    "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/provision-records" ||
+    fail "$failure_point failure did not persist recovered evidence"
+  pass "post-authority $failure_point failure rolls back and revokes bootstrap authority"
+done
+
+setup_case rollback-fails-before-revocation
+if run_provisioner DISK_ARCANA_PROVISION_TEST_FAIL_AT=ROLLBACK_RESTORE_TARGETS; then
+  fail "injected rollback-before-revocation failure returned success"
+fi
+[[ ! -e "$BOOTSTRAP" ]] || fail "rollback failure prevented bootstrap revocation"
+grep -qF 'state=FAILED_RECOVERY_REQUIRED' \
+  "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/provision-current" ||
+  fail "rollback failure did not retain terminal recovery evidence"
+if [[ -f "$FAKE_ROOT/etc/sudoers.d/disk-arcana-deploy" ]]; then
+  grep -qF '/usr/local/sbin/disk-arcana-deploy-broker --deploy *' \
+    "$FAKE_ROOT/etc/sudoers.d/disk-arcana-deploy" ||
+    fail "rollback failure left a broadened sudo policy"
+fi
+pass "bootstrap revocation is attempted independently when rollback restoration fails"
 
 for state in AUTHORITY_ISSUED BACKUP_WRITTEN INSTALLED NARROW_RULE_VERIFIED; do
   setup_case "crash-$state"

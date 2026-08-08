@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # INFRA-0370: static contract for one-build, staging-first, broker-only deploys.
+# shellcheck disable=SC2016
 
 set -euo pipefail
+# Literals below intentionally match unexpanded workflow expressions.
 
 ROOT="$(git rev-parse --show-toplevel)"
-WORKFLOW="$ROOT/.github/workflows/release-deploy.yml"
+WORKFLOW="${WORKFLOW_OVERRIDE:-$ROOT/.github/workflows/release-deploy.yml}"
+SHARE_WORKFLOW="${SHARE_WORKFLOW_OVERRIDE:-$ROOT/.github/workflows/deploy-arcana-agents-share.yml}"
+PROBE_WORKFLOW="${PROBE_WORKFLOW_OVERRIDE:-$ROOT/.github/workflows/deploy-probe.yml}"
 INSTALLER="$ROOT/deploy/linux/install.sh"
 
 fail() {
@@ -30,6 +34,7 @@ grep -qF 'install.sh is bootstrap-only' "$INSTALLER" ||
 
 dev_block="$(sed -n '/^  deploy-stage:/,/^  deploy-prod:/p' "$WORKFLOW")"
 prod_block="$(sed -n '/^  deploy-prod:/,$p' "$WORKFLOW")"
+share_block="$(sed -n '/^  deliver:/,$p' "$SHARE_WORKFLOW")"
 [[ "$dev_block" == *"github.event.inputs.target == 'prod'"* ]] ||
   fail "production dispatch does not first run staging in the same workflow"
 [[ "$dev_block" == *"github.ref == 'refs/heads/main'"* ]] ||
@@ -47,6 +52,26 @@ prod_block="$(sed -n '/^  deploy-prod:/,$p' "$WORKFLOW")"
 [[ "$prod_block" == *'runs-on: [self-hosted, Linux, X64, disk-arcana-prod]'* ]] ||
   fail "production deploy does not require the dedicated runner label"
 
+[[ "$share_block" == *"github.ref == 'refs/heads/main'"* ]] ||
+  fail "arcana-agents share delivery is not gated to main"
+[[ "$share_block" == *'environment: production'* ]] ||
+  fail "arcana-agents share delivery does not use a protected environment"
+[[ "$share_block" == *'bash scripts/require-fresh-main.sh "$GITHUB_SHA"'* ]] ||
+  fail "arcana-agents share delivery does not freshly read origin/main"
+
+[[ "$(grep -cF 'name: Fresh exact-main release gate' "$WORKFLOW")" -eq 4 ]] ||
+  fail "every release-delivery path must freshly gate its built SHA against origin/main"
+[[ "$(grep -cF 'bash scripts/require-fresh-main.sh "$BUILT_SHA"' "$WORKFLOW")" -eq 4 ]] ||
+  fail "release delivery does not require fresh main to equal its built SHA"
+[[ "$(grep -cF 'bash scripts/require-fresh-main.sh "$EXPECTED_BUILD_COMMIT"' "$WORKFLOW")" -eq 2 ]] ||
+  fail "broker delivery does not freshly require origin/main to equal the built SHA"
+
+grep -qF 'default: arcana-prod' "$PROBE_WORKFLOW" || fail "INFRA-0389 default runner routing changed"
+! grep -qE '^[[:space:]]*-[[:space:]]*arcana-prod-ci[[:space:]]*$' "$PROBE_WORKFLOW" ||
+  fail "INFRA-0389 private-only runner leaked into the public probe"
+grep -qF '[[ "${{ steps.state.outputs.unit_file_state }}" == "enabled" ]]' "$PROBE_WORKFLOW" ||
+  fail "deploy probe does not require exact UnitFileState=enabled"
+
 for block in "$dev_block" "$prod_block"; do
   [[ "$block" == *'/usr/local/sbin/disk-arcana-deploy-broker --deploy'* ]] ||
     fail "deploy job bypasses the installed broker"
@@ -62,6 +87,8 @@ for block in "$dev_block" "$prod_block"; do
     fail "deploy job retains direct service restart"
   [[ "$block" == *"printf 'health=ok\\n'"* ]] ||
     fail "deploy job does not emit a bounded health result"
+  [[ "$block" == *'[[ "$(systemctl show disk-arcana-server -p UnitFileState --value)" == enabled ]]'* ]] ||
+    fail "deploy job does not require exact UnitFileState=enabled"
   [[ "$block" != *$'http://127.0.0.1:9446/health\n'* ]] ||
     fail "deploy job prints the raw health response"
 done
