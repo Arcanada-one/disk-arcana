@@ -152,7 +152,7 @@ extract_stage_readiness_script() {
 assert_reviewed_stage_readiness_script() {
   local block="$1" script_digest
   script_digest="$(extract_stage_readiness_script "$block" | sha256sum | awk '{print $1}')"
-  [[ "$script_digest" == fffa2089ad286cc10206b9f001ce65518fe54dfad900da7a6427dec62ef10d82 ]] ||
+  [[ "$script_digest" == 4526dcac59b57dbbc548883c738e00864d12719a3abf3f2d2d851f5808ab12a7 ]] ||
     fail "group-scoped stage probe readiness script differs from the reviewed executable contract"
 }
 
@@ -493,7 +493,7 @@ stub_reject() {
 }
 
 [[ "${STUB_TIMEOUT_ACTIVE:-}" == 1 ]] || stub_reject timeout
-[[ "$PWD" == / ]] || stub_reject no-repository-cwd
+[[ "${1:-}" == -C && "${2:-}" == / ]] || stub_reject no-repository-cwd
 [[ -z "${GIT_DIR+x}${GIT_WORK_TREE+x}${GIT_COMMON_DIR+x}" ]] || stub_reject repository-env
 [[ -z "${GIT_CONFIG_PARAMETERS+x}" ]] || stub_reject environment-config
 [[ "${GIT_CONFIG_NOSYSTEM:-}" == 1 && "${GIT_CONFIG_SYSTEM:-}" == /dev/null ]] ||
@@ -547,6 +547,7 @@ if ! has_arg https://github.com/Arcanada-one/disk-arcana.git "$@" ||
   stub_reject literal-target
 fi
 expected_args=(
+  -C /
   -c credential.helper=
   -c core.askPass=/bin/false
   -c http.sslVerify=true
@@ -627,8 +628,8 @@ CANARY_SCRIPT
 
   stage_source_current_sha=1111111111111111111111111111111111111111
   stage_source_stale_sha=2222222222222222222222222222222222222222
-  stage_source_exact_git_call='argc=14'
-  stage_source_exact_git_argv='-c credential.helper= -c core.askPass=/bin/false -c http.sslVerify=true -c http.followRedirects=false ls-remote --quiet --exit-code --refs https://github.com/Arcanada-one/disk-arcana.git refs/heads/main'
+  stage_source_exact_git_call='argc=16'
+  stage_source_exact_git_argv='-C / -c credential.helper= -c core.askPass=/bin/false -c http.sslVerify=true -c http.followRedirects=false ls-remote --quiet --exit-code --refs https://github.com/Arcanada-one/disk-arcana.git refs/heads/main'
   stage_source_exact_timeout_call="--signal=KILL 20s /usr/bin/env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_CONFIG_PARAMETERS -u GIT_SSL_NO_VERIFY -u GIT_SSL_CAINFO -u GIT_SSL_CAPATH -u CURL_CA_BUNDLE -u SSL_CERT_FILE -u SSL_CERT_DIR -u GIT_TRACE -u GIT_TRACE2 -u GIT_TRACE2_EVENT -u GIT_TRACE2_PERF -u GIT_TRACE_PACKET -u GIT_TRACE_CURL -u GIT_TRACE_CURL_NO_DATA -u GIT_TRACE_SETUP -u GIT_TRACE_PERFORMANCE -u GIT_TRACE_REDACT -u GIT_TRACE_SHALLOW -u GIT_TRACE_FSMONITOR -u GIT_TRACE_PACK_ACCESS -u GIT_CURL_VERBOSE -u GIT_EXEC_PATH GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_COUNT=0 GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false $stage_source_stub_dir/git "
   stage_source_exact_timeout_call+="$stage_source_exact_git_argv"
 
@@ -674,6 +675,7 @@ CANARY_SCRIPT
     local git_exit="$9" timeout_exit="${10:-}" git_stderr="${11:-}"
     local expected_stub_reject="${12:-none}"
     local expected_path_poison="${13:-none}"
+    local shell_prelude="${14:-:}"
     local function_under_test="${FRESH_MAIN_FUNCTION_OVERRIDE:-$fresh_main_function}"
     local fixture_log="$stage_source_fixture_root/${fixture_name}.git.log"
     local timeout_log="$stage_source_fixture_root/${fixture_name}.timeout.log"
@@ -728,8 +730,11 @@ CANARY_SCRIPT
       EXPECTED_SHA="$expected_sha" \
       WORKFLOW_SHA="$workflow_sha" \
       /bin/bash -c "set -euo pipefail
+$shell_prelude
 $function_under_test
-assert_fresh_main \"\$EXPECTED_SHA\" \"\$WORKFLOW_SHA\"" >"$fixture_output" 2>&1
+assert_fresh_main \"\$EXPECTED_SHA\" \"\$WORKFLOW_SHA\"
+printf 'readiness=ok active_runner_units=1 installed_runner_units=1 sudo_specs=1\\n'" \
+      >"$fixture_output" 2>&1
     fixture_rc=$?
     set -e
 
@@ -741,6 +746,8 @@ assert_fresh_main \"\$EXPECTED_SHA\" \"\$WORKFLOW_SHA\"" >"$fixture_output" 2>&1
       reject)
         [[ "$fixture_rc" -ne 0 ]] ||
           fail "group-scoped stage probe accepts the $fixture_name fresh-main readback fixture"
+        ! grep -qF 'readiness=ok' "$fixture_output" ||
+          fail "group-scoped stage probe $fixture_name negative reaches the readiness PASS marker"
         ;;
       *) fail "invalid fresh-main readback fixture verdict" ;;
     esac
@@ -839,9 +846,16 @@ assert_fresh_main \"\$EXPECTED_SHA\" \"\$WORKFLOW_SHA\"" >"$fixture_output" 2>&1
   run_fresh_main_fixture stale-github-sha reject fresh-main=stale 1 1 \
     "$stage_source_stale_sha" "$stage_source_stale_sha" \
     "${stage_source_current_sha}"$'\trefs/heads/main\n' 0
-  run_fresh_main_fixture matching-current-sha accept '' 1 1 \
+  readiness_fixture_marker='readiness=ok active_runner_units=1 installed_runner_units=1 sudo_specs=1'
+  run_fresh_main_fixture matching-current-sha accept "$readiness_fixture_marker" 1 1 \
     "$stage_source_current_sha" "$stage_source_current_sha" \
     "${stage_source_current_sha}"$'\trefs/heads/main\n' 0
+  shadowed_cd_prelude=$'cd() { return 0; }\nexport -f cd'
+  run_fresh_main_fixture exported-cd-shadow accept "$readiness_fixture_marker" 1 1 \
+    "$stage_source_current_sha" "$stage_source_current_sha" \
+    "${stage_source_current_sha}"$'\trefs/heads/main\n' 0 '' '' none none \
+    "$shadowed_cd_prelude"
+  printf 'PASS  exported cd function cannot bypass no-repository Git cwd isolation\n'
   printf 'PASS  hardened query leaves credential and askpass canary outputs absent\n'
 
   run_hardening_mutant() {
@@ -879,7 +893,7 @@ assert_fresh_main \"\$EXPECTED_SHA\" \"\$WORKFLOW_SHA\"" >"$fixture_output" 2>&1
   run_hardening_mutant missing-credential-helper-block credential-blocking 1 \
     "        -c credential.helper= \\" ''
   run_hardening_mutant missing-no-repository-cwd no-repository-cwd 1 \
-    '    cd /' ''
+    '-C / ' ''
   run_hardening_mutant missing-repository-env-isolation repository-env 1 \
     "      -u GIT_DIR \\" ''
   run_hardening_mutant missing-environment-config-isolation environment-config 1 \
@@ -936,6 +950,7 @@ assert_fresh_main \"\$EXPECTED_SHA\" \"\$WORKFLOW_SHA\"" >"$fixture_output" 2>&1
     '/usr/bin/env' env 1 env
   run_path_substitution_mutant missing-git-executable-path \
     '/usr/bin/git' git 1 git
+  printf 'PASS  every fresh-main negative suppresses the production readiness marker\n'
 
   harness_invalid_log="$stage_source_fixture_root/harness-invalid.validation.log"
   harness_invalid_git_log="$stage_source_fixture_root/harness-invalid.git.log"
@@ -981,7 +996,6 @@ pre_marker_command="$(awk '
   fail "group-scoped stage probe does not run its fresh-main gate immediately before readiness success"
 
 for required_fresh_main_line in \
-  '    cd /' \
   "    /usr/bin/timeout --signal=KILL 20s \\" \
   "    /usr/bin/env \\" \
   "      -u GIT_DIR \\" \
@@ -1006,7 +1020,7 @@ for required_fresh_main_line in \
   "      GIT_TERMINAL_PROMPT=0 \\" \
   "      GIT_ASKPASS=/bin/false \\" \
   "      SSH_ASKPASS=/bin/false \\" \
-  "      /usr/bin/git \\" \
+  "      /usr/bin/git -C / \\" \
   "        -c credential.helper= \\" \
   "        -c core.askPass=/bin/false \\" \
   "        -c http.sslVerify=true \\" \
