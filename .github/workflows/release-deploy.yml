@@ -123,6 +123,7 @@ jobs:
             "$BUNDLE/provision-deploy-broker.sh"
           install -m 0440 deploy/linux/disk-arcana-deploy.sudoers \
             "$BUNDLE/disk-arcana-deploy.sudoers"
+          install -m 0755 deploy/linux/install.sh "$BUNDLE/install.sh"
           printf '%s\n' "$GITHUB_SHA" >"$BUNDLE/commit"
           bash deploy/linux/validate-deploy-bundle.sh create \
             --root "$BUNDLE" --commit "$GITHUB_SHA"
@@ -345,21 +346,22 @@ jobs:
           fail_on_unmatched_files: true
 
   # ──────────────────────────────────────────────────────────────────────────
-  # 2. Deploy to arcana-devs for both dev and prod dispatches. A production
+  # 2. Deploy through the dedicated Disk staging runner. A production
   #    dispatch must prove this exact build artifact on staging first.
   #    A tag push builds + attaches the release artifact but does NOT auto-deploy
   #    anywhere: deploys (dev or prod) are always an explicit operator action so
-  #    a tag never lands code on a host on its own. (Auto-deploy on tag was also
-  #    unreachable — the dev runner carries the canonical `arcana-devs` label.
+  #    a tag never lands code on a host on its own. The unique runner label is
+  #    part of the least-privilege boundary and must not be shared.
   # ──────────────────────────────────────────────────────────────────────────
   deploy-stage:
-    name: Deploy (arcana-devs)
+    name: Deploy (dedicated staging)
     needs: build
     if: >-
       github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
       (github.event.inputs.target == 'stage' || github.event.inputs.target == 'prod')
-    runs-on: [self-hosted, Linux, X64, arcana-devs]
-    environment: dev
+    runs-on: [self-hosted, Linux, X64, disk-arcana-stage]
+    environment: staging
     permissions:
       actions: read
       contents: read
@@ -378,8 +380,12 @@ jobs:
         run: |
           set -euo pipefail
           BUNDLE="${RUNNER_TEMP}/disk-deploy-bundle"
+          [[ "$(id -u)" -ne 0 ]]
+          printf 'runner_user=%s runner_name=%s\n' "$(id -un)" "$RUNNER_NAME"
+          systemctl is-active --quiet disk-arcana-server
+          systemctl is-enabled --quiet disk-arcana-server
           [[ "$EXPECTED_ARTIFACT_ID" =~ ^[0-9]+$ ]]
-          [[ "$EXPECTED_ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$EXPECTED_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
           [[ "$EXPECTED_MANIFEST_SHA" =~ ^[0-9a-f]{64}$ ]]
           [[ "$EXPECTED_BUILD_COMMIT" == "$GITHUB_SHA" ]]
           [[ "$(sha256sum "$BUNDLE/manifest.sha256" | awk '{print $1}')" == "$EXPECTED_MANIFEST_SHA" ]]
@@ -387,15 +393,18 @@ jobs:
           printf 'artifact_id=%s artifact_digest=%s manifest_sha=%s commit=%s\n' \
             "$EXPECTED_ARTIFACT_ID" "$EXPECTED_ARTIFACT_DIGEST" \
             "$EXPECTED_MANIFEST_SHA" "$EXPECTED_BUILD_COMMIT"
+          authorization_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-staging"
           sudo -n /usr/local/sbin/disk-arcana-deploy-broker --deploy \
-            "$BUNDLE" "$EXPECTED_BUILD_COMMIT" "$(hostname)"
+            "$BUNDLE" "$authorization_id"
           sha256sum /usr/local/bin/disk-arcana-server \
             /etc/systemd/system/disk-arcana-server.service
           systemctl show disk-arcana-server \
             -p ActiveState -p UnitFileState -p Restart \
             -p StartLimitIntervalUSec -p StartLimitBurst
-          curl --fail --silent --show-error --max-time 10 \
-            http://127.0.0.1:9446/health
+          health_body="$(curl --fail --silent --show-error --max-time 10 \
+            http://127.0.0.1:9446/health)"
+          [[ "$(printf '%s' "$health_body" | tr -d '[:space:]')" == *'"status":"ok"'* ]]
+          printf 'health=ok\n'
 
   # ──────────────────────────────────────────────────────────────────────────
   # 3. Deploy to arcana-prod (hard-gated: only on tag push via explicit
@@ -405,8 +414,11 @@ jobs:
   deploy-prod:
     name: Deploy (arcana-prod) [HARD-GATED]
     needs: [build, deploy-stage]
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.target == 'prod'
-    runs-on: [self-hosted, Linux, X64, arcana-prod]
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.event.inputs.target == 'prod'
+    runs-on: [self-hosted, Linux, X64, disk-arcana-prod]
     environment: production
     permissions:
       actions: read
@@ -426,8 +438,12 @@ jobs:
         run: |
           set -euo pipefail
           BUNDLE="${RUNNER_TEMP}/disk-deploy-bundle"
+          [[ "$(id -u)" -ne 0 ]]
+          printf 'runner_user=%s runner_name=%s\n' "$(id -un)" "$RUNNER_NAME"
+          systemctl is-active --quiet disk-arcana-server
+          systemctl is-enabled --quiet disk-arcana-server
           [[ "$EXPECTED_ARTIFACT_ID" =~ ^[0-9]+$ ]]
-          [[ "$EXPECTED_ARTIFACT_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$EXPECTED_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
           [[ "$EXPECTED_MANIFEST_SHA" =~ ^[0-9a-f]{64}$ ]]
           [[ "$EXPECTED_BUILD_COMMIT" == "$GITHUB_SHA" ]]
           [[ "$(sha256sum "$BUNDLE/manifest.sha256" | awk '{print $1}')" == "$EXPECTED_MANIFEST_SHA" ]]
@@ -435,12 +451,15 @@ jobs:
           printf 'artifact_id=%s artifact_digest=%s manifest_sha=%s commit=%s\n' \
             "$EXPECTED_ARTIFACT_ID" "$EXPECTED_ARTIFACT_DIGEST" \
             "$EXPECTED_MANIFEST_SHA" "$EXPECTED_BUILD_COMMIT"
+          authorization_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-production"
           sudo -n /usr/local/sbin/disk-arcana-deploy-broker --deploy \
-            "$BUNDLE" "$EXPECTED_BUILD_COMMIT" "$(hostname)"
+            "$BUNDLE" "$authorization_id"
           sha256sum /usr/local/bin/disk-arcana-server \
             /etc/systemd/system/disk-arcana-server.service
           systemctl show disk-arcana-server \
             -p ActiveState -p UnitFileState -p Restart \
             -p StartLimitIntervalUSec -p StartLimitBurst
-          curl --fail --silent --show-error --max-time 10 \
-            http://127.0.0.1:9446/health
+          health_body="$(curl --fail --silent --show-error --max-time 10 \
+            http://127.0.0.1:9446/health)"
+          [[ "$(printf '%s' "$health_body" | tr -d '[:space:]')" == *'"status":"ok"'* ]]
+          printf 'health=ok\n'

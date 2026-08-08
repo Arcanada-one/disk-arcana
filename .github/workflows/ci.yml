@@ -134,9 +134,9 @@ jobs:
         run: |
           set -euo pipefail
           failures=0
-          for workflow in \
-            .github/workflows/deploy-probe.yml \
-            .github/workflows/deploy-unit.yml; do
+          # deploy-unit.yml was retired by INFRA-0370; the only remaining
+          # operator-selectable legacy probe must stay off the private group.
+          for workflow in .github/workflows/deploy-probe.yml; do
             if grep -nE '^[[:space:]]*-[[:space:]]*arcana-prod-ci[[:space:]]*$' "$workflow"; then
               echo "::error file=${workflow}::public workflow offers private-only runner target arcana-prod-ci"
               failures=1
@@ -153,10 +153,10 @@ jobs:
           exit "$failures"
       - name: systemd unit contract (INFRA-0370)
         run: bash deploy/linux/tests/test-unit-contract.sh
-      - name: systemd unit installer (INFRA-0370)
-        run: bash deploy/linux/tests/test-install-unit.sh
       - name: manifest-bound bundle preflight (INFRA-0370)
         run: bash deploy/linux/tests/test-bundle-manifest.sh
+      - name: cold-host bootstrap durability (INFRA-0370)
+        run: bash deploy/linux/tests/test-bootstrap-install.sh
       - name: crash-recoverable deployment state machine (INFRA-0370)
         run: bash deploy/linux/tests/test-deploy-server.sh
       - name: narrow deployment broker and bootstrap (INFRA-0370)

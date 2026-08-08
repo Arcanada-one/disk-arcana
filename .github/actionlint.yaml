@@ -2,9 +2,9 @@ self-hosted-runner:
   # Custom labels for the org-level self-hosted runners used by deploy jobs.
   # Declared here so actionlint does not flag them as unknown runner labels.
   # Keep this list in sync with the registered runners of the Arcanada-one org
-  # (`gh api orgs/Arcanada-one/actions/runners`). The dev pool is
-  # `arcana-devs`/`dev`; retaining a dead label here would let actionlint accept
-  # a workflow that GitHub Actions can never schedule.
+  # (`gh api orgs/Arcanada-one/actions/runners`). The two Disk deploy labels
+  # are intentionally unique to their dedicated non-root runner identities;
+  # live label readback remains a pre-merge/deploy gate.
   labels:
     - Linux
     - X64
@@ -12,6 +12,8 @@ self-hosted-runner:
     - arcana-devs
     - arcana-prod
     - arcana-prod-ci
+    - disk-arcana-stage
+    - disk-arcana-prod
     - dev
     # `cross` builds need BOTH Docker access and a host C toolchain, because
     # `cargo install cross` compiles on the host. Three runners carry `docker`

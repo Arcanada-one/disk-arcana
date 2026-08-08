@@ -13,6 +13,7 @@ readonly -a MEMBERS=(
   disk-arcana-deploy.sudoers
   disk-arcana-server
   disk-arcana-server.service
+  install.sh
   provision-deploy-broker.sh
 )
 
@@ -21,11 +22,10 @@ die() {
   exit 1
 }
 
-[[ "${1:-}" == --deploy && $# -eq 4 ]] ||
-  die "usage: $(basename "$0") --deploy BUNDLE EXPECTED_COMMIT EXPECTED_HOSTNAME"
+[[ "${1:-}" == --deploy && $# -eq 3 ]] ||
+  die "usage: $(basename "$0") --deploy BUNDLE AUTHORIZATION_ID"
 readonly SOURCE_BUNDLE="$2"
-readonly EXPECTED_COMMIT="$3"
-readonly EXPECTED_HOSTNAME="$4"
+readonly AUTHORIZATION_ID="$3"
 
 TEST_MODE=0
 ROOT=""
@@ -54,12 +54,40 @@ fi
 readonly EXPECT_UID EXPECT_GID
 
 readonly CONFIG="$ROOT/etc/disk-arcana/deploy.conf"
-readonly INBOX_ROOT="$ROOT/var/lib/disk-arcana/deploy-inbox"
+readonly DEPLOY_ROOT="$ROOT/var/lib/disk-arcana-deploy"
+readonly INBOX_ROOT="$DEPLOY_ROOT/inbox"
+readonly AUTHORIZATION_ROOT="$DEPLOY_ROOT/authorizations"
+readonly CONSUMED_AUTHORIZATION_ROOT="$AUTHORIZATION_ROOT/consumed"
 readonly INSTALLED_HELPER="$ROOT/usr/local/libexec/disk-arcana/deploy-server.sh"
 readonly INSTALLED_BROKER="$ROOT/usr/local/sbin/disk-arcana-deploy-broker"
+readonly EXPECTED_REPOSITORY="Arcanada-one/disk-arcana"
+readonly EXPECTED_WORKFLOW_REF="Arcanada-one/disk-arcana/.github/workflows/release-deploy.yml@refs/heads/main"
 
-[[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "invalid expected commit"
-[[ "$EXPECTED_HOSTNAME" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]] || die "invalid expected hostname"
+assert_no_symlink_components() {
+  local path="$1" relative current component
+  local -a components=()
+  [[ "$path" == /* ]] || return 1
+  if [[ -n "$ROOT" ]]; then
+    [[ "$path" == "$ROOT" || "$path" == "$ROOT"/* ]] || return 1
+    relative="${path#"$ROOT"}"; relative="${relative#/}"; current="$ROOT"
+  else
+    relative="${path#/}"; current=""
+  fi
+  IFS=/ read -r -a components <<<"$relative"
+  for component in "${components[@]}"; do
+    [[ -n "$component" && "$component" != . && "$component" != .. ]] || return 1
+    current="$current/$component"
+    [[ ! -L "$current" ]] || return 1
+  done
+}
+
+for fixed_path in "$CONFIG" "$INBOX_ROOT" "$AUTHORIZATION_ROOT" \
+  "$CONSUMED_AUTHORIZATION_ROOT" "$INSTALLED_HELPER" "$INSTALLED_BROKER"; do
+  assert_no_symlink_components "$fixed_path" || die "broker path has a symlink component"
+done
+
+[[ "$AUTHORIZATION_ID" =~ ^[0-9]{1,20}-[0-9]{1,10}-(staging|production)$ ]] ||
+  die "invalid deployment authorization id"
 [[ -f "$CONFIG" && ! -L "$CONFIG" && "$(stat -c '%a' "$CONFIG")" == 600 ]] || die "unsafe broker config"
 [[ -f "$INSTALLED_HELPER" && ! -L "$INSTALLED_HELPER" && "$(stat -c '%a' "$INSTALLED_HELPER")" == 755 ]] || die "unsafe installed helper"
 [[ -f "$INSTALLED_BROKER" && ! -L "$INSTALLED_BROKER" && "$(stat -c '%a' "$INSTALLED_BROKER")" == 755 ]] || die "unsafe installed broker"
@@ -87,10 +115,58 @@ done <"$CONFIG"
 [[ "$RUNNER_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "invalid configured runner user"
 [[ "$RUNNER_GROUP" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "invalid configured runner group"
 [[ "$CALLER" == "$RUNNER_USER" && "$CALLER" != root ]] || die "caller is not the configured runner"
-[[ "$CONFIG_HOST" == "$EXPECTED_HOSTNAME" ]] || die "destination hostname is not authorized"
-[[ "$(hostname 2>/dev/null)" == "$EXPECTED_HOSTNAME" ]] || die "hostname mismatch"
 [[ "$IMPORT_ROOT" == /* && "$IMPORT_ROOT" != / && -d "$IMPORT_ROOT" && ! -L "$IMPORT_ROOT" ]] || die "unsafe import root"
 [[ "$SOURCE_BUNDLE" == /* && -d "$SOURCE_BUNDLE" && ! -L "$SOURCE_BUNDLE" ]] || die "unsafe source bundle"
+
+AUTHORIZATION_FILE="$AUTHORIZATION_ROOT/$AUTHORIZATION_ID.auth"
+[[ -d "$AUTHORIZATION_ROOT" && ! -L "$AUTHORIZATION_ROOT" && "$(stat -c '%a:%u:%g' "$AUTHORIZATION_ROOT")" == "700:$EXPECT_UID:$EXPECT_GID" ]] ||
+  die "unsafe authorization root"
+[[ -d "$CONSUMED_AUTHORIZATION_ROOT" && ! -L "$CONSUMED_AUTHORIZATION_ROOT" && "$(stat -c '%a:%u:%g' "$CONSUMED_AUTHORIZATION_ROOT")" == "700:$EXPECT_UID:$EXPECT_GID" ]] ||
+  die "unsafe consumed-authorization root"
+[[ -f "$AUTHORIZATION_FILE" && ! -L "$AUTHORIZATION_FILE" && "$(stat -c '%a:%u:%g' "$AUTHORIZATION_FILE")" == "600:$EXPECT_UID:$EXPECT_GID" ]] ||
+  die "deployment authorization is absent or unsafe"
+
+AUTH_REPOSITORY="" AUTH_WORKFLOW_REF="" AUTH_RUN_ID="" AUTH_RUN_ATTEMPT=""
+AUTH_TARGET="" AUTH_COMMIT="" AUTH_ARTIFACT_ID="" AUTH_ARTIFACT_DIGEST=""
+AUTH_MANIFEST_SHA="" AUTH_HOSTNAME="" AUTH_NONCE="" AUTH_EXPIRES=""
+declare -A AUTH_SEEN=()
+while IFS='=' read -r key value; do
+  [[ -z "${AUTH_SEEN[$key]+present}" ]] || die "duplicate deployment authorization key"
+  AUTH_SEEN["$key"]=1
+  case "$key" in
+    repository) AUTH_REPOSITORY="$value" ;;
+    workflow_ref) AUTH_WORKFLOW_REF="$value" ;;
+    run_id) AUTH_RUN_ID="$value" ;;
+    run_attempt) AUTH_RUN_ATTEMPT="$value" ;;
+    target) AUTH_TARGET="$value" ;;
+    commit) AUTH_COMMIT="$value" ;;
+    artifact_id) AUTH_ARTIFACT_ID="$value" ;;
+    artifact_digest) AUTH_ARTIFACT_DIGEST="$value" ;;
+    manifest_sha) AUTH_MANIFEST_SHA="$value" ;;
+    hostname) AUTH_HOSTNAME="$value" ;;
+    nonce) AUTH_NONCE="$value" ;;
+    expires) AUTH_EXPIRES="$value" ;;
+    *) die "unknown deployment authorization key" ;;
+  esac
+done <"$AUTHORIZATION_FILE"
+
+[[ "$AUTH_REPOSITORY" == "$EXPECTED_REPOSITORY" ]] || die "repository is not authorized"
+[[ "$AUTH_WORKFLOW_REF" == "$EXPECTED_WORKFLOW_REF" ]] || die "workflow ref is not authorized"
+[[ "$AUTH_RUN_ID" =~ ^[0-9]{1,20}$ && "$AUTH_RUN_ATTEMPT" =~ ^[0-9]{1,10}$ ]] || die "invalid authorized workflow run"
+[[ "$AUTH_TARGET" =~ ^(staging|production)$ ]] || die "invalid authorized target"
+[[ "$AUTHORIZATION_ID" == "$AUTH_RUN_ID-$AUTH_RUN_ATTEMPT-$AUTH_TARGET" ]] || die "authorization identity mismatch"
+[[ "$AUTH_COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "invalid authorized commit"
+[[ "$AUTH_ARTIFACT_ID" =~ ^[0-9]{1,20}$ ]] || die "invalid authorized artifact id"
+[[ "$AUTH_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]] || die "invalid authorized artifact digest"
+[[ "$AUTH_MANIFEST_SHA" =~ ^[0-9a-f]{64}$ ]] || die "invalid authorized manifest identity"
+[[ "$AUTH_HOSTNAME" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]] || die "invalid authorized hostname"
+[[ "$AUTH_NONCE" =~ ^[A-Za-z0-9._-]{20,120}$ ]] || die "invalid authorization nonce"
+[[ "$AUTH_EXPIRES" =~ ^[0-9]{10,12}$ && "$AUTH_EXPIRES" -gt "$(date +%s)" ]] || die "deployment authorization expired"
+[[ "$CONFIG_HOST" == "$AUTH_HOSTNAME" ]] || die "destination hostname is not authorized"
+[[ "$(hostname 2>/dev/null)" == "$AUTH_HOSTNAME" ]] || die "hostname mismatch"
+
+readonly EXPECTED_COMMIT="$AUTH_COMMIT"
+readonly EXPECTED_HOSTNAME="$AUTH_HOSTNAME"
 
 canonical_import="$(realpath -e -- "$IMPORT_ROOT")" || die "could not resolve import root"
 canonical_bundle="$(realpath -e -- "$SOURCE_BUNDLE")" || die "could not resolve source bundle"
@@ -170,9 +246,17 @@ validate_unit_contract() {
 
 validate_bundle || die "bundle validation failed"
 validate_unit_contract || die "unit contract validation failed"
+[[ "$(sha "$SOURCE_BUNDLE/manifest.sha256")" == "$AUTH_MANIFEST_SHA" ]] ||
+  die "bundle is not bound to the root authorization"
 
 [[ -d "$INBOX_ROOT" && ! -L "$INBOX_ROOT" && "$(stat -c '%a' "$INBOX_ROOT")" == 700 ]] || die "unsafe inbox root"
 [[ "$(stat -c '%u' "$INBOX_ROOT")" == "$EXPECT_UID" && "$(stat -c '%g' "$INBOX_ROOT")" == "$EXPECT_GID" ]] || die "unsafe inbox ownership"
+consumed_authorization="$CONSUMED_AUTHORIZATION_ROOT/$AUTHORIZATION_ID-$AUTH_NONCE"
+[[ ! -e "$consumed_authorization" ]] || die "deployment authorization was already consumed"
+mv -- "$AUTHORIZATION_FILE" "$consumed_authorization" || die "could not consume deployment authorization"
+sync -f "$consumed_authorization" >/dev/null 2>&1 || die "authorization consumption fsync failed"
+sync -f "$AUTHORIZATION_ROOT" >/dev/null 2>&1 || die "authorization root fsync failed"
+sync -f "$CONSUMED_AUTHORIZATION_ROOT" >/dev/null 2>&1 || die "consumed authorization root fsync failed"
 inbox="$INBOX_ROOT/$(date -u +%Y%m%dT%H%M%SZ)-$$-$RANDOM"
 install -d -m 0700 "$inbox" || die "could not create protected inbox"
 for member in "${MEMBERS[@]}" manifest.sha256; do

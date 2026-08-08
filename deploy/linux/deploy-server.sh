@@ -21,6 +21,7 @@ readonly -a REQUIRED_MEMBERS=(
   disk-arcana-deploy.sudoers
   disk-arcana-server
   disk-arcana-server.service
+  install.sh
   provision-deploy-broker.sh
 )
 
@@ -99,8 +100,8 @@ fi
 
 readonly LIVE_BINARY="$ROOT/usr/local/bin/disk-arcana-server"
 readonly LIVE_UNIT="$ROOT/etc/systemd/system/$UNIT_NAME"
-readonly STATE_ROOT="$ROOT/var/lib/disk-arcana/deploy-transactions"
-readonly BACKUP_ROOT="$ROOT/var/lib/disk-arcana/deploy-backups"
+readonly STATE_ROOT="$ROOT/var/lib/disk-arcana-deploy/transactions"
+readonly BACKUP_ROOT="$ROOT/var/lib/disk-arcana-deploy/backups"
 readonly CURRENT_JOURNAL="$STATE_ROOT/current"
 readonly RECORD_ROOT="$STATE_ROOT/records"
 readonly LOCK_FILE="$ROOT/run/lock/disk-arcana-deploy.lock"
@@ -118,8 +119,41 @@ else
 fi
 readonly EXPECT_UID EXPECT_GID HEALTH_ATTEMPTS HEALTH_DELAY
 
-install -d -m 0700 "$STATE_ROOT" "$BACKUP_ROOT" "$RECORD_ROOT"
-install -d -m 0755 "$(dirname "$LOCK_FILE")"
+assert_no_symlink_components() {
+  local path="$1" relative current component
+  local -a components=()
+  [[ "$path" == /* ]] || return 1
+  if [[ -n "$ROOT" ]]; then
+    [[ "$path" == "$ROOT" || "$path" == "$ROOT"/* ]] || return 1
+    relative="${path#"$ROOT"}"
+    relative="${relative#/}"
+    current="$ROOT"
+  else
+    relative="${path#/}"
+    current=""
+  fi
+  IFS=/ read -r -a components <<<"$relative"
+  for component in "${components[@]}"; do
+    [[ -n "$component" && "$component" != . && "$component" != .. ]] || return 1
+    current="$current/$component"
+    [[ ! -L "$current" ]] || return 1
+  done
+}
+
+for fixed_path in "$LIVE_BINARY" "$LIVE_UNIT" "$STATE_ROOT" "$BACKUP_ROOT" \
+  "$RECORD_ROOT" "$LOCK_FILE"; do
+  assert_no_symlink_components "$fixed_path" || die "fixed deployment path has a symlink component"
+done
+for private_dir in "$STATE_ROOT" "$BACKUP_ROOT" "$RECORD_ROOT"; do
+  [[ -d "$private_dir" && ! -L "$private_dir" ]] || die "required deployment state directory is absent"
+  [[ "$(stat -c '%a:%u:%g' "$private_dir")" == "700:$EXPECT_UID:$EXPECT_GID" ]] ||
+    die "deployment state directory has unsafe metadata"
+done
+[[ -d "$(dirname "$LOCK_FILE")" && ! -L "$(dirname "$LOCK_FILE")" ]] ||
+  die "deploy lock directory is unsafe"
+[[ -f "$LOCK_FILE" && ! -L "$LOCK_FILE" ]] || die "deploy lock is absent or unsafe"
+[[ "$(stat -c '%a:%u:%g' "$LOCK_FILE")" == "600:$EXPECT_UID:$EXPECT_GID" ]] ||
+  die "deploy lock has unsafe metadata"
 exec 9>"$LOCK_FILE"
 flock -n 9 || die "another deployment holds the lock"
 
@@ -353,6 +387,7 @@ recover_current() {
     [[ "$(sha256_file "$LIVE_BINARY")" == "$TX_NEW_BINARY_SHA" ]] || return 1
     [[ "$(sha256_file "$LIVE_UNIT")" == "$TX_NEW_UNIT_SHA" ]] || return 1
     systemctl is-active --quiet "$SERVICE_NAME" >/dev/null 2>&1 || return 1
+    systemctl is-enabled --quiet "$SERVICE_NAME" >/dev/null 2>&1 || return 1
     loaded_policy_ok || return 1
     health_ok || return 1
     cleanup_stages || return 1
@@ -367,6 +402,7 @@ recover_current() {
     ! systemctl daemon-reload >/dev/null 2>&1 ||
     ! systemctl restart "$SERVICE_NAME" >/dev/null 2>&1 ||
     ! systemctl is-active --quiet "$SERVICE_NAME" >/dev/null 2>&1 ||
+    ! systemctl is-enabled --quiet "$SERVICE_NAME" >/dev/null 2>&1 ||
     ! health_ok; then
     TX_STATE="FAILED_RECOVERY_REQUIRED"
     write_journal || true
@@ -406,6 +442,7 @@ assert_safe_destination "$LIVE_UNIT" "$ROOT/etc/systemd/system" || die "unsafe e
 [[ "$(uid_of "$LIVE_BINARY")" == "$EXPECT_UID" && "$(gid_of "$LIVE_BINARY")" == "$EXPECT_GID" ]] || die "unexpected current binary ownership"
 [[ "$(uid_of "$LIVE_UNIT")" == "$EXPECT_UID" && "$(gid_of "$LIVE_UNIT")" == "$EXPECT_GID" ]] || die "unexpected current unit ownership"
 systemctl is-active --quiet "$SERVICE_NAME" >/dev/null 2>&1 || die "service is not active before deployment"
+systemctl is-enabled --quiet "$SERVICE_NAME" >/dev/null 2>&1 || die "service is not enabled before deployment"
 health_ok || die "service health baseline failed"
 
 TX_NEW_BINARY_SHA="$(manifest_digest disk-arcana-server)" || die "binary missing from manifest"
@@ -414,6 +451,7 @@ TX_NEW_UNIT_SHA="$(manifest_digest "$UNIT_NAME")" || die "unit missing from mani
 if [[ "$(sha256_file "$LIVE_BINARY")" == "$TX_NEW_BINARY_SHA" &&
   "$(sha256_file "$LIVE_UNIT")" == "$TX_NEW_UNIT_SHA" ]]; then
   loaded_policy_ok || die "installed policy does not match expected values"
+  systemctl is-enabled --quiet "$SERVICE_NAME" >/dev/null 2>&1 || die "installed service is not enabled"
   health_ok || die "installed service is unhealthy"
   printf 'state=COMMITTED idempotent=true commit=%s binary_sha=%s unit_sha=%s\n' \
     "$EXPECTED_COMMIT" "$TX_NEW_BINARY_SHA" "$TX_NEW_UNIT_SHA"
@@ -491,6 +529,7 @@ transition SERVICE_RESTARTED || {
 }
 
 if ! systemctl is-active --quiet "$SERVICE_NAME" >/dev/null 2>&1 ||
+  ! systemctl is-enabled --quiet "$SERVICE_NAME" >/dev/null 2>&1 ||
   ! health_ok || ! loaded_policy_ok; then
   post_backup_failure "post-deploy verification failed"
   exit 1

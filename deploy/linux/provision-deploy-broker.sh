@@ -13,9 +13,10 @@ readonly -a MEMBERS=(
   disk-arcana-deploy.sudoers
   disk-arcana-server
   disk-arcana-server.service
+  install.sh
   provision-deploy-broker.sh
 )
-readonly -a TARGET_NAMES=(helper broker sudoers config)
+readonly -a TARGET_NAMES=(helper broker sudoers config lock)
 
 die() {
   printf 'ERROR: %s\n' "$1" >&2
@@ -42,7 +43,8 @@ else
   [[ -z "${DISK_ARCANA_PROVISION_TEST_KILL_AFTER_STATE:-}" ]] || die "test crash control is forbidden in production"
 fi
 
-readonly STATE_ROOT="$ROOT/var/lib/disk-arcana/deploy-transactions"
+readonly DEPLOY_ROOT="$ROOT/var/lib/disk-arcana-deploy"
+readonly STATE_ROOT="$DEPLOY_ROOT/transactions"
 readonly NONCE_ROOT="$STATE_ROOT/used-authorizations"
 readonly RECORD_ROOT="$STATE_ROOT/provision-records"
 readonly BACKUP_ROOT="$STATE_ROOT/provision-backups"
@@ -51,8 +53,26 @@ readonly HELPER_TARGET="$ROOT/usr/local/libexec/disk-arcana/deploy-server.sh"
 readonly BROKER_TARGET="$ROOT/usr/local/sbin/disk-arcana-deploy-broker"
 readonly SUDOERS_TARGET="$ROOT/etc/sudoers.d/disk-arcana-deploy"
 readonly CONFIG_TARGET="$ROOT/etc/disk-arcana/deploy.conf"
-readonly INBOX_ROOT="$ROOT/var/lib/disk-arcana/deploy-inbox"
-readonly -a TARGETS=("$HELPER_TARGET" "$BROKER_TARGET" "$SUDOERS_TARGET" "$CONFIG_TARGET")
+readonly INBOX_ROOT="$DEPLOY_ROOT/inbox"
+readonly AUTHORIZATION_ROOT="$DEPLOY_ROOT/authorizations"
+readonly CONSUMED_AUTHORIZATION_ROOT="$AUTHORIZATION_ROOT/consumed"
+readonly LOCK_TARGET="$ROOT/run/lock/disk-arcana-deploy.lock"
+readonly HELPER_BACKUP_ROOT="$DEPLOY_ROOT/backups"
+readonly HELPER_RECORD_ROOT="$STATE_ROOT/records"
+readonly -a TARGETS=("$HELPER_TARGET" "$BROKER_TARGET" "$SUDOERS_TARGET" "$CONFIG_TARGET" "$LOCK_TARGET")
+readonly -a DIRECTORY_NAMES=(helper_parent broker_parent sudoers_parent config_parent inbox authorizations consumed_authorizations helper_backups helper_records)
+readonly -a DIRECTORY_PATHS=(
+  "$(dirname "$HELPER_TARGET")"
+  "$(dirname "$BROKER_TARGET")"
+  "$(dirname "$SUDOERS_TARGET")"
+  "$(dirname "$CONFIG_TARGET")"
+  "$INBOX_ROOT"
+  "$AUTHORIZATION_ROOT"
+  "$CONSUMED_AUTHORIZATION_ROOT"
+  "$HELPER_BACKUP_ROOT"
+  "$HELPER_RECORD_ROOT"
+)
+readonly -a DIRECTORY_CREATE_MODES=(0755 0755 0755 0755 0700 0700 0700 0700 0700)
 
 if (( TEST_MODE )); then
   EXPECT_UID="$(id -u)"
@@ -90,6 +110,11 @@ TX_SUDOERS_SHA=""
 TX_CONFIG_SHA=""
 TX_GROUP_EXISTED=""
 TX_MEMBER_EXISTED=""
+TX_RUNNER_USER=""
+declare -a TX_DIRECTORY_EXISTED=()
+declare -a TX_DIRECTORY_MODE=()
+declare -a TX_DIRECTORY_UID=()
+declare -a TX_DIRECTORY_GID=()
 
 write_journal() {
   local tmp="$STATE_ROOT/.provision-current.$$"
@@ -105,6 +130,14 @@ write_journal() {
     printf 'config_sha=%s\n' "$TX_CONFIG_SHA"
     printf 'group_existed=%s\n' "$TX_GROUP_EXISTED"
     printf 'member_existed=%s\n' "$TX_MEMBER_EXISTED"
+    printf 'runner_user=%s\n' "$TX_RUNNER_USER"
+    local i
+    for ((i = 0; i < ${#DIRECTORY_NAMES[@]}; i++)); do
+      printf 'dir_%s_existed=%s\n' "${DIRECTORY_NAMES[i]}" "${TX_DIRECTORY_EXISTED[i]}"
+      printf 'dir_%s_mode=%s\n' "${DIRECTORY_NAMES[i]}" "${TX_DIRECTORY_MODE[i]}"
+      printf 'dir_%s_uid=%s\n' "${DIRECTORY_NAMES[i]}" "${TX_DIRECTORY_UID[i]}"
+      printf 'dir_%s_gid=%s\n' "${DIRECTORY_NAMES[i]}" "${TX_DIRECTORY_GID[i]}"
+    done
     printf 'timestamp=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   } >"$tmp"
   chmod 0600 "$tmp"
@@ -150,11 +183,114 @@ restore_targets() {
   done
 }
 
+assert_no_symlink_components() {
+  local path="$1" relative current component
+  local -a components=()
+  [[ "$path" == /* ]] || return 1
+  if [[ -n "$ROOT" ]]; then
+    [[ "$path" == "$ROOT" || "$path" == "$ROOT"/* ]] || return 1
+    relative="${path#"$ROOT"}"
+    relative="${relative#/}"
+    current="$ROOT"
+  else
+    relative="${path#/}"
+    current=""
+  fi
+  IFS=/ read -r -a components <<<"$relative"
+  for component in "${components[@]}"; do
+    [[ -n "$component" && "$component" != . && "$component" != .. ]] || return 1
+    current="$current/$component"
+    [[ ! -L "$current" ]] || return 1
+  done
+}
+
+inventory_directories() {
+  local i path mode
+  for ((i = 0; i < ${#DIRECTORY_PATHS[@]}; i++)); do
+    path="${DIRECTORY_PATHS[i]}"
+    assert_no_symlink_components "$path" || return 1
+    if [[ -e "$path" ]]; then
+      [[ -d "$path" && ! -L "$path" ]] || return 1
+      [[ "$(stat -c '%u' "$path")" == "$EXPECT_UID" ]] || return 1
+      [[ "$(stat -c '%g' "$path")" == "$EXPECT_GID" ]] || return 1
+      mode="$(stat -c '%a' "$path")"
+      # Existing root-owned parents are preserved byte-for-byte and must not
+      # be group/world writable. The private inbox is stricter.
+      (( (8#$mode & 0022) == 0 )) || return 1
+      case "${DIRECTORY_NAMES[i]}" in
+        inbox|authorizations|consumed_authorizations|helper_backups|helper_records)
+          [[ "$mode" == 700 ]] || return 1
+          ;;
+      esac
+      TX_DIRECTORY_EXISTED[i]=1
+      TX_DIRECTORY_MODE[i]="$mode"
+      TX_DIRECTORY_UID[i]="$EXPECT_UID"
+      TX_DIRECTORY_GID[i]="$EXPECT_GID"
+    else
+      TX_DIRECTORY_EXISTED[i]=0
+      TX_DIRECTORY_MODE[i]=absent
+      TX_DIRECTORY_UID[i]=absent
+      TX_DIRECTORY_GID[i]=absent
+    fi
+  done
+}
+
+ensure_state_directory() {
+  local path="$1"
+  assert_no_symlink_components "$path" || return 1
+  if [[ -e "$path" ]]; then
+    [[ -d "$path" && ! -L "$path" ]] || return 1
+    [[ "$(stat -c '%a:%u:%g' "$path")" == "700:$EXPECT_UID:$EXPECT_GID" ]] || return 1
+  else
+    install -d -o "$EXPECT_UID" -g "$EXPECT_GID" -m 0700 "$path" || return 1
+    fsync_path "$(dirname "$path")" || return 1
+  fi
+}
+
+ensure_directories() {
+  local i path
+  for ((i = 0; i < ${#DIRECTORY_PATHS[@]}; i++)); do
+    path="${DIRECTORY_PATHS[i]}"
+    if [[ "${TX_DIRECTORY_EXISTED[i]}" == 0 ]]; then
+      install -d -o "$EXPECT_UID" -g "$EXPECT_GID" \
+        -m "${DIRECTORY_CREATE_MODES[i]}" "$path" || return 1
+      fsync_path "$(dirname "$path")" || return 1
+    fi
+  done
+}
+
+restore_directories() {
+  local i path
+  for ((i = ${#DIRECTORY_PATHS[@]} - 1; i >= 0; i--)); do
+    path="${DIRECTORY_PATHS[i]}"
+    assert_no_symlink_components "$path" || return 1
+    if [[ "${TX_DIRECTORY_EXISTED[i]}" == 0 ]]; then
+      if [[ -e "$path" ]]; then
+        rmdir -- "$path" || return 1
+        fsync_path "$(dirname "$path")" || return 1
+      fi
+    else
+      [[ -d "$path" && ! -L "$path" ]] || return 1
+      [[ "$(stat -c '%a' "$path")" == "${TX_DIRECTORY_MODE[i]}" ]] || return 1
+      [[ "$(stat -c '%u' "$path")" == "${TX_DIRECTORY_UID[i]}" ]] || return 1
+      [[ "$(stat -c '%g' "$path")" == "${TX_DIRECTORY_GID[i]}" ]] || return 1
+    fi
+  done
+}
+
+revoke_bootstrap() {
+  [[ ! -e "$TX_BOOTSTRAP" || ( -d "$TX_BOOTSTRAP" && ! -L "$TX_BOOTSTRAP" ) ]] || return 1
+  assert_no_symlink_components "$TX_BOOTSTRAP" || return 1
+  rm -rf -- "$TX_BOOTSTRAP" || return 1
+  fsync_path "$(dirname "$TX_BOOTSTRAP")"
+}
+
 installed_generation_ok() {
   [[ -f "$HELPER_TARGET" && ! -L "$HELPER_TARGET" && "$(stat -c '%a' "$HELPER_TARGET")" == 755 ]] || return 1
   [[ -f "$BROKER_TARGET" && ! -L "$BROKER_TARGET" && "$(stat -c '%a' "$BROKER_TARGET")" == 755 ]] || return 1
   [[ -f "$SUDOERS_TARGET" && ! -L "$SUDOERS_TARGET" && "$(stat -c '%a' "$SUDOERS_TARGET")" == 440 ]] || return 1
   [[ -f "$CONFIG_TARGET" && ! -L "$CONFIG_TARGET" && "$(stat -c '%a' "$CONFIG_TARGET")" == 600 ]] || return 1
+  [[ -f "$LOCK_TARGET" && ! -L "$LOCK_TARGET" && "$(stat -c '%a' "$LOCK_TARGET")" == 600 ]] || return 1
   for installed in "$HELPER_TARGET" "$BROKER_TARGET" "$SUDOERS_TARGET" "$CONFIG_TARGET"; do
     [[ "$(stat -c '%u' "$installed")" == "$EXPECT_UID" ]] || return 1
     [[ "$(stat -c '%g' "$installed")" == "$EXPECT_GID" ]] || return 1
@@ -180,13 +316,37 @@ load_journal() {
   TX_CONFIG_SHA="$(journal_get config_sha)" || return 1
   TX_GROUP_EXISTED="$(journal_get group_existed)" || return 1
   TX_MEMBER_EXISTED="$(journal_get member_existed)" || return 1
+  TX_RUNNER_USER="$(journal_get runner_user)" || return 1
+  local i name
+  for ((i = 0; i < ${#DIRECTORY_NAMES[@]}; i++)); do
+    name="${DIRECTORY_NAMES[i]}"
+    TX_DIRECTORY_EXISTED[i]="$(journal_get "dir_${name}_existed")" || return 1
+    TX_DIRECTORY_MODE[i]="$(journal_get "dir_${name}_mode")" || return 1
+    TX_DIRECTORY_UID[i]="$(journal_get "dir_${name}_uid")" || return 1
+    TX_DIRECTORY_GID[i]="$(journal_get "dir_${name}_gid")" || return 1
+    [[ "${TX_DIRECTORY_EXISTED[i]}" =~ ^[01]$ ]] || return 1
+    if [[ "${TX_DIRECTORY_EXISTED[i]}" == 1 ]]; then
+      [[ "${TX_DIRECTORY_MODE[i]}" =~ ^[0-7]{3,4}$ ]] || return 1
+      [[ "${TX_DIRECTORY_UID[i]}" =~ ^[0-9]+$ && "${TX_DIRECTORY_GID[i]}" =~ ^[0-9]+$ ]] || return 1
+    else
+      [[ "${TX_DIRECTORY_MODE[i]}:${TX_DIRECTORY_UID[i]}:${TX_DIRECTORY_GID[i]}" == absent:absent:absent ]] || return 1
+    fi
+  done
   [[ "$TX_COMMIT" =~ ^[0-9a-f]{40}$ ]] || return 1
   [[ "$TX_DEPLOYMENT" =~ ^[A-Za-z0-9._-]{1,80}$ ]] || return 1
-  [[ "$TX_BOOTSTRAP" == "$ROOT/var/lib/disk-arcana/bootstrap/$TX_DEPLOYMENT" ]] || return 1
-  [[ "$TX_HELPER_SHA$TX_BROKER_SHA$TX_SUDOERS_SHA$TX_CONFIG_SHA" =~ ^[0-9a-f]{256}$ ]] || return 1
+  [[ "$TX_BOOTSTRAP" == "$DEPLOY_ROOT/bootstrap/$TX_DEPLOYMENT" ]] || return 1
+  if [[ "$TX_STATE" == AUTHORITY_ISSUED ]]; then
+    [[ -z "$TX_HELPER_SHA$TX_BROKER_SHA$TX_SUDOERS_SHA$TX_CONFIG_SHA" ]] || return 1
+  else
+    [[ "$TX_HELPER_SHA$TX_BROKER_SHA$TX_SUDOERS_SHA$TX_CONFIG_SHA" =~ ^[0-9a-f]{256}$ ]] || return 1
+  fi
   [[ "$TX_GROUP_EXISTED" =~ ^[01]$ && "$TX_MEMBER_EXISTED" =~ ^[01]$ ]] || return 1
-  [[ -d "$TX_BACKUP" && ! -L "$TX_BACKUP" ]] || return 1
-  [[ "$(realpath -e -- "$TX_BACKUP")" == "$(realpath -e -- "$BACKUP_ROOT")"/* ]] || return 1
+  [[ "$TX_RUNNER_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ && "$TX_RUNNER_USER" != root ]] || return 1
+  RUNNER_USER="$TX_RUNNER_USER"
+  if [[ "$TX_STATE" != AUTHORITY_ISSUED ]]; then
+    [[ -d "$TX_BACKUP" && ! -L "$TX_BACKUP" ]] || return 1
+    [[ "$(realpath -e -- "$TX_BACKUP")" == "$(realpath -e -- "$BACKUP_ROOT")"/* ]] || return 1
+  fi
 }
 
 group_exists() {
@@ -253,9 +413,8 @@ recover_unfinished() {
       printf 'state=COMMITTED recovered_from=%s\n' "$recovered_state"
       ;;
     AUTHORITY_ISSUED)
-      [[ ! -e "$TX_BOOTSTRAP" || ( -d "$TX_BOOTSTRAP" && ! -L "$TX_BOOTSTRAP" ) ]] || return 1
-      rm -rf -- "$TX_BOOTSTRAP"
-      fsync_path "$(dirname "$TX_BOOTSTRAP")" || return 1
+      restore_directories || return 1
+      revoke_bootstrap || return 1
       TX_STATE=FAILED_RECOVERED
       write_journal || return 1
       archive_journal authority-revoked || return 1
@@ -264,9 +423,8 @@ recover_unfinished() {
     BACKUP_WRITTEN|INSTALLED|NARROW_RULE_VERIFIED)
       restore_targets || return 1
       restore_privilege_state || return 1
-      [[ ! -e "$TX_BOOTSTRAP" || ( -d "$TX_BOOTSTRAP" && ! -L "$TX_BOOTSTRAP" ) ]] || return 1
-      rm -rf -- "$TX_BOOTSTRAP"
-      fsync_path "$(dirname "$TX_BOOTSTRAP")" || return 1
+      restore_directories || return 1
+      revoke_bootstrap || return 1
       TX_STATE=FAILED_RECOVERED
       write_journal || return 1
       archive_journal failed-recovered || return 1
@@ -314,7 +472,12 @@ done <"$AUTH"
 [[ "$RUNNER_GROUP" == disk-arcana-deploy ]] || die "unexpected runner group"
 [[ "$IMPORT_ROOT" == /* && "$IMPORT_ROOT" != / && -d "$IMPORT_ROOT" && ! -L "$IMPORT_ROOT" ]] || die "unsafe import root"
 [[ "$BOOTSTRAP_ROOT" == /* && "$BOOTSTRAP_ROOT" != / && -d "$BOOTSTRAP_ROOT" && ! -L "$BOOTSTRAP_ROOT" ]] || die "unsafe bootstrap root"
-[[ "$BOOTSTRAP_ROOT" == "$ROOT/var/lib/disk-arcana/bootstrap/$DEPLOYMENT_ID" ]] || die "bootstrap root is not canonical"
+[[ "$BOOTSTRAP_ROOT" == "$DEPLOY_ROOT/bootstrap/$DEPLOYMENT_ID" ]] || die "bootstrap root is not canonical"
+assert_no_symlink_components "$BOOTSTRAP_ROOT" || die "bootstrap path has a symlink component"
+for privileged_path in "$STATE_ROOT" "$NONCE_ROOT" "$RECORD_ROOT" "$BACKUP_ROOT" \
+  "$HELPER_TARGET" "$BROKER_TARGET" "$SUDOERS_TARGET" "$CONFIG_TARGET" "$INBOX_ROOT" "$LOCK_TARGET"; do
+  assert_no_symlink_components "$privileged_path" || die "privileged path has a symlink component"
+done
 [[ "$(realpath -e -- "$AUTH")" == "$(realpath -e -- "$BOOTSTRAP_ROOT")"/* ]] || die "authorization is outside bootstrap root"
 [[ "$(realpath -e -- "$BUNDLE")" == "$(realpath -e -- "$BOOTSTRAP_ROOT")"/* ]] || die "bundle is outside bootstrap root"
 [[ "$(hostname 2>/dev/null)" == "$EXPECTED_HOST" ]] || die "hostname mismatch"
@@ -360,37 +523,54 @@ validate_bundle() {
 
 validate_bundle || die "bundle validation failed"
 
+runner_groups="$(id -nG "$RUNNER_USER" 2>/dev/null || true)"
 while IFS= read -r policy; do
   [[ "$policy" == "$SUDOERS_TARGET" ]] && continue
-  if awk -v user="$RUNNER_USER" -v group="%$RUNNER_GROUP" '
-    /NOPASSWD:/ && (index($0, user) || index($0, group)) {found=1}
+  if awk -v user="$RUNNER_USER" -v configured_group="$RUNNER_GROUP" -v groups="$runner_groups" '
+    BEGIN {
+      count=split(groups, raw, /[[:space:]]+/)
+      inherited[configured_group]=1
+      for (i=1; i<=count; i++) if (raw[i] != "") inherited[raw[i]]=1
+    }
+    /NOPASSWD:/ {
+      if (index($0, user)) found=1
+      for (group in inherited) if (index($0, "%" group)) found=1
+    }
     END {exit !found}
   ' "$policy"; then
     die "broader passwordless sudo rule exists"
   fi
 done < <(find "$ROOT/etc/sudoers" "$ROOT/etc/sudoers.d" -maxdepth 1 -type f 2>/dev/null || true)
 
-install -d -m 0700 "$STATE_ROOT" "$NONCE_ROOT" "$RECORD_ROOT" "$BACKUP_ROOT"
-install -d -m 0755 \
-  "$(dirname "$HELPER_TARGET")" "$(dirname "$BROKER_TARGET")" \
-  "$(dirname "$SUDOERS_TARGET")" "$(dirname "$CONFIG_TARGET")"
-install -d -m 0700 "$INBOX_ROOT"
 if (( ! TEST_MODE )); then
   id -u "$RUNNER_USER" >/dev/null 2>&1 || die "runner user does not exist"
 fi
+
+[[ -d "$STATE_ROOT" && ! -L "$STATE_ROOT" ]] || die "transaction root must be root-issued before provisioning"
+[[ "$(stat -c '%a:%u:%g' "$STATE_ROOT")" == "700:$EXPECT_UID:$EXPECT_GID" ]] ||
+  die "transaction root has unsafe metadata"
 
 TX_STATE=AUTHORITY_ISSUED
 TX_DEPLOYMENT="$DEPLOYMENT_ID"
 TX_COMMIT="$COMMIT"
 TX_BOOTSTRAP="$BOOTSTRAP_ROOT"
+TX_RUNNER_USER="$RUNNER_USER"
 if group_exists; then TX_GROUP_EXISTED=1; else TX_GROUP_EXISTED=0; fi
 if member_exists; then TX_MEMBER_EXISTED=1; else TX_MEMBER_EXISTED=0; fi
 TX_BACKUP="$BACKUP_ROOT/$(date -u +%Y%m%dT%H%M%SZ)-$$"
-install -d -m 0700 "$TX_BACKUP"
+inventory_directories || die "privileged directory inventory failed"
+transition AUTHORITY_ISSUED || die "could not persist issued bootstrap authority"
+
+ensure_state_directory "$NONCE_ROOT" || die "could not prepare nonce state"
+ensure_state_directory "$RECORD_ROOT" || die "could not prepare provision records"
+ensure_state_directory "$BACKUP_ROOT" || die "could not prepare provision backups"
+ensure_directories || die "could not prepare privileged directories"
+install -d -o "$EXPECT_UID" -g "$EXPECT_GID" -m 0700 "$TX_BACKUP"
 tmp_helper="$TX_BACKUP/new-helper"
 tmp_broker="$TX_BACKUP/new-broker"
 tmp_sudoers="$TX_BACKUP/new-sudoers"
 tmp_config="$TX_BACKUP/new-config"
+tmp_lock="$TX_BACKUP/new-lock"
 install -m 0755 "$BUNDLE/deploy-server.sh" "$tmp_helper"
 install -m 0755 "$BUNDLE/deploy-server-broker.sh" "$tmp_broker"
 install -m 0440 "$BUNDLE/disk-arcana-deploy.sudoers" "$tmp_sudoers"
@@ -401,8 +581,9 @@ install -m 0440 "$BUNDLE/disk-arcana-deploy.sudoers" "$tmp_sudoers"
   printf 'expected_hostname=%s\n' "$EXPECTED_HOST"
 } >"$tmp_config"
 chmod 0600 "$tmp_config"
+install -m 0600 /dev/null "$tmp_lock"
 visudo -cf "$tmp_sudoers" >/dev/null 2>&1 || die "sudoers policy validation failed"
-for staged in "$tmp_helper" "$tmp_broker" "$tmp_sudoers" "$tmp_config"; do
+for staged in "$tmp_helper" "$tmp_broker" "$tmp_sudoers" "$tmp_config" "$tmp_lock"; do
   fsync_path "$staged" || die "could not fsync staged broker file"
 done
 TX_HELPER_SHA="$(sha "$tmp_helper")"
@@ -411,7 +592,6 @@ TX_SUDOERS_SHA="$(sha "$tmp_sudoers")"
 TX_CONFIG_SHA="$(sha "$tmp_config")"
 fsync_path "$TX_BACKUP" || die "could not fsync broker backup directory"
 fsync_path "$BACKUP_ROOT" || die "could not fsync broker backup root"
-transition AUTHORITY_ISSUED || die "could not persist issued bootstrap authority"
 
 for ((i = 0; i < ${#TARGETS[@]}; i++)); do
   name="${TARGET_NAMES[i]}"; target="${TARGETS[i]}"
@@ -429,7 +609,7 @@ transition BACKUP_WRITTEN || die "could not persist broker backup transaction"
 
 rollback_failure() {
   printf 'ERROR: broker provisioning failed after backup\n' >&2
-  if restore_targets && restore_privilege_state; then
+  if restore_targets && restore_privilege_state && restore_directories && revoke_bootstrap; then
     TX_STATE=FAILED_RECOVERED
     write_journal || true
     archive_journal failed-recovered || true
@@ -447,8 +627,10 @@ mv -f -- "$tmp_helper" "$HELPER_TARGET" || rollback_failure
 mv -f -- "$tmp_broker" "$BROKER_TARGET" || rollback_failure
 mv -f -- "$tmp_sudoers" "$SUDOERS_TARGET" || rollback_failure
 mv -f -- "$tmp_config" "$CONFIG_TARGET" || rollback_failure
+mv -f -- "$tmp_lock" "$LOCK_TARGET" || rollback_failure
 for parent in "$(dirname "$HELPER_TARGET")" "$(dirname "$BROKER_TARGET")" \
-  "$(dirname "$SUDOERS_TARGET")" "$(dirname "$CONFIG_TARGET")"; do
+  "$(dirname "$SUDOERS_TARGET")" "$(dirname "$CONFIG_TARGET")" \
+  "$(dirname "$LOCK_TARGET")"; do
   fsync_path "$parent" || rollback_failure
 done
 transition INSTALLED || rollback_failure
@@ -464,8 +646,7 @@ chmod 0600 "$NONCE_ROOT/$NONCE"
 fsync_path "$NONCE_ROOT/$NONCE" || rollback_failure
 fsync_path "$NONCE_ROOT" || rollback_failure
 
-rm -rf -- "$BOOTSTRAP_ROOT"
-fsync_path "$(dirname "$BOOTSTRAP_ROOT")" || rollback_failure
+revoke_bootstrap || rollback_failure
 transition BOOTSTRAP_REVOKED || rollback_failure
 transition COMMITTED || rollback_failure
 archive_journal committed || die "could not archive committed broker transaction"

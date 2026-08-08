@@ -65,6 +65,9 @@ case "$cmd" in
   is-active)
     [[ ! -f "$flags/inactive" ]]
     ;;
+  is-enabled)
+    [[ ! -f "$flags/disabled" ]]
+    ;;
   daemon-reload)
     reload_count=0
     [[ -f "$flags/reload-count" ]] && reload_count="$(<"$flags/reload-count")"
@@ -158,11 +161,16 @@ setup_case() {
   install -d -m 0755 \
     "$FAKE_ROOT/usr/local/bin" \
     "$FAKE_ROOT/etc/systemd/system" \
-    "$FAKE_ROOT/var/lib/disk-arcana/deploy-transactions" \
-    "$FAKE_ROOT/var/lib/disk-arcana/deploy-backups" \
+    "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions" \
+    "$FAKE_ROOT/var/lib/disk-arcana-deploy/backups" \
     "$FAKE_ROOT/run/lock" \
     "$FAKE_ROOT/etc/disk-arcana" \
     "$BUNDLE" "$FLAGS"
+  chmod 0700 \
+    "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions" \
+    "$FAKE_ROOT/var/lib/disk-arcana-deploy/backups"
+  install -d -m 0700 "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/records"
+  install -m 0600 /dev/null "$FAKE_ROOT/run/lock/disk-arcana-deploy.lock"
 
   printf 'old server binary\n' >"$FAKE_ROOT/usr/local/bin/disk-arcana-server"
   chmod 0755 "$FAKE_ROOT/usr/local/bin/disk-arcana-server"
@@ -177,6 +185,7 @@ setup_case() {
   chmod 0755 "$BUNDLE/disk-arcana-server"
   install -m 0644 "$UNIT_SOURCE" "$BUNDLE/disk-arcana-server.service"
   install -m 0755 "$DEPLOYER" "$BUNDLE/deploy-server.sh"
+  install -m 0755 "$REPO_ROOT/deploy/linux/install.sh" "$BUNDLE/install.sh"
   printf '#!/usr/bin/env bash\nexit 0\n' >"$BUNDLE/deploy-server-broker.sh"
   printf '#!/usr/bin/env bash\nexit 0\n' >"$BUNDLE/provision-deploy-broker.sh"
   chmod 0755 "$BUNDLE/deploy-server-broker.sh" "$BUNDLE/provision-deploy-broker.sh"
@@ -202,7 +211,7 @@ run_deploy() {
     DISK_TEST_FLAGS="$FLAGS" \
     DISK_TEST_SENTINEL='sentinel-health-0370' \
     "$@" \
-    bash -c 'set +e; "$@"; rc=$?; :; exit "$rc"' _ \
+    bash -c "set +e; \"\$@\"; rc=\$?; :; exit \"\$rc\"" _ \
       "$DEPLOYER" --bundle "$BUNDLE" \
       --expected-commit "$EXPECTED_COMMIT" \
       --expected-hostname "$expected_host" >"$OUTPUT" 2>&1
@@ -246,7 +255,7 @@ if run_deploy wrong.example.internal; then
   fail "wrong hostname was accepted"
 fi
 assert_old_installed
-[[ ! -e "$FAKE_ROOT/var/lib/disk-arcana/deploy-transactions/current" ]] ||
+[[ ! -e "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/current" ]] ||
   fail "failed precheck created a transaction journal"
 pass "wrong hostname fails before target mutation"
 
@@ -277,6 +286,18 @@ fi
 [[ "$(sha "$CASE_ROOT/unit-real")" == "$OLD_UNIT_SHA" ]] || fail "symlink target was mutated"
 pass "symlinked destination fails before target mutation"
 
+setup_case symlinked-ancestor
+mv "$FAKE_ROOT/usr/local" "$CASE_ROOT/local-real"
+ln -s "$CASE_ROOT/local-real" "$FAKE_ROOT/usr/local"
+if run_deploy; then
+  fail "symlinked binary ancestor was accepted"
+fi
+[[ "$(sha "$CASE_ROOT/local-real/bin/disk-arcana-server")" == "$OLD_BINARY_SHA" ]] ||
+  fail "symlink-ancestor target was mutated"
+[[ ! -e "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/current" ]] ||
+  fail "symlink-ancestor precheck created a transaction journal"
+pass "symlinked destination ancestor fails before target mutation"
+
 setup_case wrong-mode
 chmod 0666 "$FAKE_ROOT/etc/systemd/system/disk-arcana-server.service"
 if run_deploy; then
@@ -293,6 +314,14 @@ if run_deploy; then
 fi
 assert_old_installed
 pass "missing active-service baseline fails before target mutation"
+
+setup_case disabled-baseline
+: >"$FLAGS/disabled"
+if run_deploy; then
+  fail "disabled service baseline was accepted"
+fi
+assert_old_installed
+pass "disabled-service baseline fails before target mutation"
 
 setup_case invalid-staged-unit
 sed -i 's/^StartLimitBurst=5$/StartLimitBurst=6/' "$BUNDLE/disk-arcana-server.service"
@@ -336,7 +365,7 @@ if run_deploy; then
 fi
 assert_old_installed
 grep -qF 'state=FAILED_RECOVERY_REQUIRED' \
-  "$FAKE_ROOT/var/lib/disk-arcana/deploy-transactions/current" ||
+  "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/current" ||
   fail "rollback failure did not retain FAILED_RECOVERY_REQUIRED journal"
 pass "rollback failure is terminal FAILED_RECOVERY_REQUIRED"
 
@@ -348,7 +377,7 @@ for recovery_failure in reload restart health; do
     fail "recovery $recovery_failure failure returned success"
   fi
   grep -qF 'state=FAILED_RECOVERY_REQUIRED' \
-    "$FAKE_ROOT/var/lib/disk-arcana/deploy-transactions/current" ||
+    "$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/current" ||
     fail "recovery $recovery_failure failure did not retain terminal journal"
   pass "recovery $recovery_failure failure remains terminal"
 done
@@ -382,9 +411,9 @@ pass "fresh invocation recovers both files after crash between atomic activation
 
 setup_case idempotent
 run_deploy || fail "first idempotence deploy failed"
-backup_count_before="$(find "$FAKE_ROOT/var/lib/disk-arcana/deploy-backups" -mindepth 1 -maxdepth 1 -type d | wc -l)"
+backup_count_before="$(find "$FAKE_ROOT/var/lib/disk-arcana-deploy/backups" -mindepth 1 -maxdepth 1 -type d | wc -l)"
 run_deploy || fail "second idempotence deploy failed"
-backup_count_after="$(find "$FAKE_ROOT/var/lib/disk-arcana/deploy-backups" -mindepth 1 -maxdepth 1 -type d | wc -l)"
+backup_count_after="$(find "$FAKE_ROOT/var/lib/disk-arcana-deploy/backups" -mindepth 1 -maxdepth 1 -type d | wc -l)"
 [[ "$backup_count_before" == "$backup_count_after" ]] || fail "idempotent reapply created a new backup"
 grep -qF 'state=COMMITTED idempotent=true' "$OUTPUT" || fail "idempotent reapply not reported"
 assert_new_installed

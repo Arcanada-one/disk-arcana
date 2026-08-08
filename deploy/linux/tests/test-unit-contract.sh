@@ -79,8 +79,16 @@ if [[ "$failures" -eq 0 ]]; then
   done
 
   if command -v systemd-analyze >/dev/null 2>&1; then
-    canonical_output="$(systemd-analyze verify "$UNIT_FILE" 2>&1 || true)"
-    fixture_output="$(systemd-analyze verify "$FIXTURE_FILE" 2>&1 || true)"
+    analyzer_dir="$(mktemp -d)"
+    canonical_probe="$analyzer_dir/canonical.service"
+    fixture_probe="$analyzer_dir/fixture.service"
+    sed 's#^ExecStart=/usr/local/bin/disk-arcana-server$#ExecStart=/bin/true#' \
+      "$UNIT_FILE" >"$canonical_probe"
+    sed 's#^ExecStart=/usr/local/bin/disk-arcana-server$#ExecStart=/bin/true#' \
+      "$FIXTURE_FILE" >"$fixture_probe"
+    canonical_rc=0
+    canonical_output="$(systemd-analyze verify "$canonical_probe" 2>&1)" || canonical_rc=$?
+    fixture_output="$(systemd-analyze verify "$fixture_probe" 2>&1 || true)"
     systemd_major="$(
       systemd-analyze --version 2>/dev/null |
         sed -n 's/^systemd \([0-9][0-9]*\).*/\1/p' |
@@ -95,8 +103,11 @@ if [[ "$failures" -eq 0 ]]; then
         # unknown-key on the canonical unit is WARN once those pass.
         printf 'WARN  systemd-analyze unknown-key on this runner (skew); structural [Unit] checks passed\n'
         grep -Fi 'Unknown key' <<<"$canonical_output" | head -3 | sed 's/^/WARN  /' || true
-      else
+      elif [[ "$canonical_rc" -eq 0 && -z "$canonical_output" ]]; then
         pass "systemd-analyze reports no unknown key in the canonical unit"
+      else
+        printf '%s\n' "$canonical_output" | sed 's/^/ANALYZER  /' >&2
+        fail "systemd-analyze rejected the canonical unit (status $canonical_rc)"
       fi
 
       if grep -Fqi 'Unknown key' <<<"$fixture_output"; then

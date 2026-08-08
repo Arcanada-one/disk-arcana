@@ -16,7 +16,7 @@ Measured on 2026-08-04, not inferred:
 |---|---|
 | `release-deploy.yml` → `deploy-stage` | Targets `arcana-devs` only through the system-service deployment broker. |
 | `release-deploy.yml` → `deploy-prod` | Targets `arcana-prod` through the same system-service deployment broker. |
-| `deploy-unit.yml` | Delivers unit files, not binaries. Its `arcana-agents` target (added in DISK-0070) covers the **share drop-in** only. |
+| `deploy-arcana-agents-share.yml` | Delivers only the **share drop-in** for this user-scope host; it does not update a binary or system unit. |
 
 And the host itself differs from both deploy targets:
 
@@ -49,8 +49,8 @@ can paper over.
 Pick one; both are deliberate choices, not equivalents:
 
 1. **Give the host a real delivery path.** Add an `arcana-agents` job to
-   `release-deploy.yml` that (a) installs the binary through a root broker in the
-   style of `deploy/linux/install-disk-arcana-install-unit-broker.sh`, and
+   `release-deploy.yml` that (a) installs the binary through a dedicated,
+   fixed root broker for this user-scope service, and
    (b) restarts the **user** unit in `dev`'s session rather than the system one.
    This is the durable answer; it also makes the host's state reproducible.
 2. **Update by hand, once, with the steps recorded.** Acceptable only as a
