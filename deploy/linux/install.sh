@@ -318,6 +318,10 @@ for source_path in "$BINARY_PATH" "$UNIT_PATH"; do
   (( (8#$source_mode & 0022) == 0 )) || die "bootstrap source is group/world writable"
 done
 [[ "$(hostname 2>/dev/null)" == "$EXPECTED_HOSTNAME" ]] || die "hostname mismatch"
+for fixed_path in "$LIVE_BINARY" "$LIVE_UNIT" "$TMP_BINARY" "$TMP_UNIT" \
+  "$CONFIG_ROOT" "$DATA_ROOT" "$LOG_ROOT"; do
+  assert_no_symlink_components "$fixed_path" || die "cold-bootstrap path has a symlink component"
+done
 
 set +e
 recover_unfinished
@@ -330,9 +334,6 @@ case "$recovery_rc" in
   *) die "unfinished cold bootstrap could not be recovered" ;;
 esac
 
-for fixed_path in "$LIVE_BINARY" "$LIVE_UNIT" "$CONFIG_ROOT" "$DATA_ROOT" "$LOG_ROOT"; do
-  assert_no_symlink_components "$fixed_path" || die "cold-bootstrap path has a symlink component"
-done
 [[ ! -e "$LIVE_BINARY" && ! -e "$LIVE_UNIT" ]] || die "install.sh is bootstrap-only; use disk-arcana-deploy-broker for updates"
 [[ -f "$ENV_FILE" && ! -L "$ENV_FILE" && "$(stat -c '%a' "$ENV_FILE")" =~ ^(600|640)$ ]] || die "protected staging environment is absent or unsafe"
 systemd-analyze verify "$UNIT_PATH" >/dev/null 2>&1 || die "bootstrap unit failed systemd verification"

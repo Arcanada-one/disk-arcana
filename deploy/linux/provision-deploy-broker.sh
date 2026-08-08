@@ -441,6 +441,7 @@ remove_uncommitted_backup() {
   local backup_parent
   backup_parent="$(dirname "$TX_BACKUP")" || return 1
   [[ "$backup_parent" == "$BACKUP_ROOT" ]] || return 1
+  assert_no_symlink_components "$TX_BACKUP" || return 1
   if [[ -e "$TX_BACKUP" ]]; then
     [[ -d "$TX_BACKUP" && ! -L "$TX_BACKUP" ]] || return 1
     rm -rf -- "$TX_BACKUP" || return 1
@@ -452,6 +453,11 @@ recover_unfinished() {
   local recovered_state
   [[ -f "$JOURNAL" && ! -L "$JOURNAL" ]] || return 0
   load_journal || return 1
+  assert_no_symlink_components "$TX_BOOTSTRAP" || return 1
+  if [[ "$TX_STATE" != BOOTSTRAP_REVOKED && "$TX_STATE" != COMMITTED ]]; then
+    [[ -d "$TX_BOOTSTRAP" && ! -L "$TX_BOOTSTRAP" ]] || return 1
+    [[ "$(stat -c '%a:%u:%g' "$TX_BOOTSTRAP")" == "700:$EXPECT_UID:$EXPECT_GID" ]] || return 1
+  fi
   recovered_state="$TX_STATE"
   case "$TX_STATE" in
     BOOTSTRAP_REVOKED|COMMITTED)
@@ -498,6 +504,16 @@ rollback_failure() {
 should_fail_at() {
   (( TEST_MODE )) && [[ "${DISK_ARCANA_PROVISION_TEST_FAIL_AT:-}" == "$1" ]]
 }
+
+for recovery_path in "$STATE_ROOT" "$NONCE_ROOT" "$RECORD_ROOT" "$BACKUP_ROOT" \
+  "$HELPER_TARGET" "$BROKER_TARGET" "$SUDOERS_TARGET" "$CONFIG_TARGET" "$INBOX_ROOT" "$LOCK_TARGET" \
+  "$LEGACY_BROKER_TARGET" "$LEGACY_SUDOERS_TARGET"; do
+  assert_no_symlink_components "$recovery_path" || die "recovery path has a symlink component"
+done
+ensure_state_directory "$STATE_ROOT" || die "transaction root has unsafe metadata"
+ensure_state_directory "$NONCE_ROOT" || die "nonce state has unsafe metadata"
+ensure_state_directory "$RECORD_ROOT" || die "provision records have unsafe metadata"
+ensure_state_directory "$BACKUP_ROOT" || die "provision backups have unsafe metadata"
 
 recover_unfinished || die "unfinished broker provisioning could not be recovered"
 
@@ -552,11 +568,6 @@ for owned_ancestor in "$DEPLOY_ROOT" "$DEPLOY_ROOT/bootstrap"; do
   ancestor_mode="$(stat -c '%a' "$owned_ancestor")"
   (( (8#$ancestor_mode & 0022) == 0 )) || die "bootstrap ancestor is group/world writable"
 done
-for privileged_path in "$STATE_ROOT" "$NONCE_ROOT" "$RECORD_ROOT" "$BACKUP_ROOT" \
-  "$HELPER_TARGET" "$BROKER_TARGET" "$SUDOERS_TARGET" "$CONFIG_TARGET" "$INBOX_ROOT" "$LOCK_TARGET" \
-  "$LEGACY_BROKER_TARGET" "$LEGACY_SUDOERS_TARGET"; do
-  assert_no_symlink_components "$privileged_path" || die "privileged path has a symlink component"
-done
 [[ "$(realpath -e -- "$AUTH")" == "$(realpath -e -- "$BOOTSTRAP_ROOT")"/* ]] || die "authorization is outside bootstrap root"
 [[ "$(realpath -e -- "$BUNDLE")" == "$(realpath -e -- "$BOOTSTRAP_ROOT")"/* ]] || die "bundle is outside bootstrap root"
 [[ "$(hostname 2>/dev/null)" == "$EXPECTED_HOST" ]] || die "hostname mismatch"
@@ -607,13 +618,6 @@ effective_sudo_is_prebootstrap_safe || die "effective passwordless sudo exceeds 
 if (( ! TEST_MODE )); then
   id -u "$RUNNER_USER" >/dev/null 2>&1 || die "runner user does not exist"
 fi
-
-[[ -d "$STATE_ROOT" && ! -L "$STATE_ROOT" ]] || die "transaction root must be root-issued before provisioning"
-[[ "$(stat -c '%a:%u:%g' "$STATE_ROOT")" == "700:$EXPECT_UID:$EXPECT_GID" ]] ||
-  die "transaction root has unsafe metadata"
-ensure_state_directory "$NONCE_ROOT" || die "nonce state must be root-issued before provisioning"
-ensure_state_directory "$RECORD_ROOT" || die "provision records must be root-issued before provisioning"
-ensure_state_directory "$BACKUP_ROOT" || die "provision backups must be root-issued before provisioning"
 
 TX_STATE=AUTHORITY_ISSUED
 TX_DEPLOYMENT="$DEPLOYMENT_ID"

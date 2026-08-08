@@ -422,6 +422,24 @@ for state in AUTHORITY_ISSUED BACKUP_WRITTEN INSTALLED NARROW_RULE_VERIFIED; do
   pass "fresh invocation restores prior generation and revokes authority after $state crash"
 done
 
+setup_case crash-then-symlink
+if run_provisioner DISK_ARCANA_PROVISION_TEST_KILL_AFTER_STATE=BACKUP_WRITTEN; then
+  fail "SIGKILL setup after BACKUP_WRITTEN returned success"
+fi
+current_journal="$FAKE_ROOT/var/lib/disk-arcana-deploy/transactions/provision-current"
+backup_path="$(awk -F= '$1 == "backup" {sub(/^[^=]*=/, ""); print}' "$current_journal")"
+journal_sha="$(sha "$current_journal")"
+backup_digest="$(tree_digest "$backup_path")"
+mv "$FAKE_ROOT/usr/local" "$CASE_ROOT/local-before-symlink"
+ln -s "$CASE_ROOT/local-before-symlink" "$FAKE_ROOT/usr/local"
+if run_provisioner; then
+  fail "recovery followed a swapped privileged ancestor"
+fi
+[[ "$(sha "$current_journal")" == "$journal_sha" ]] || fail "symlink rejection rewrote the unfinished journal"
+[[ "$(tree_digest "$backup_path")" == "$backup_digest" ]] || fail "symlink rejection changed the protected backup"
+[[ -e "$BOOTSTRAP" ]] || fail "symlink rejection revoked authority through an unsafe path"
+pass "recovery rejects a swapped privileged ancestor before any mutation"
+
 for state in BOOTSTRAP_REVOKED COMMITTED; do
   setup_case "crash-$state"
   if run_provisioner DISK_ARCANA_PROVISION_TEST_KILL_AFTER_STATE="$state"; then

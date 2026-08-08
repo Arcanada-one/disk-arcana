@@ -152,4 +152,24 @@ for state in INVENTORIED ACCOUNT_READY DIRECTORIES_READY FILES_INSTALLED SERVICE
   pass "fresh invocation restores the absent baseline after $state crash"
 done
 
+setup_case crash-then-symlink
+if run_installer DISK_ARCANA_INSTALL_TEST_KILL_AFTER_STATE=FILES_INSTALLED; then
+  fail "SIGKILL setup after FILES_INSTALLED returned success"
+fi
+journal_sha="$(sha256sum "$JOURNAL_DIR/install-current" | awk '{print $1}')"
+binary_sha="$(sha256sum "$FAKE_ROOT/usr/local/bin/disk-arcana-server" | awk '{print $1}')"
+unit_sha="$(sha256sum "$FAKE_ROOT/etc/systemd/system/disk-arcana-server.service" | awk '{print $1}')"
+mv "$FAKE_ROOT/usr/local" "$CASE/local-before-symlink"
+ln -s "$CASE/local-before-symlink" "$FAKE_ROOT/usr/local"
+if run_installer; then
+  fail "cold recovery followed a swapped privileged ancestor"
+fi
+[[ "$(sha256sum "$JOURNAL_DIR/install-current" | awk '{print $1}')" == "$journal_sha" ]] ||
+  fail "cold symlink rejection rewrote the unfinished journal"
+[[ "$(sha256sum "$CASE/local-before-symlink/bin/disk-arcana-server" | awk '{print $1}')" == "$binary_sha" ]] ||
+  fail "cold symlink rejection changed the installed binary"
+[[ "$(sha256sum "$FAKE_ROOT/etc/systemd/system/disk-arcana-server.service" | awk '{print $1}')" == "$unit_sha" ]] ||
+  fail "cold symlink rejection changed the installed unit"
+pass "cold recovery rejects a swapped privileged ancestor before rollback mutation"
+
 printf 'All cold-bootstrap checks passed (%d cases)\n' "$TESTS"
