@@ -159,7 +159,7 @@ assert_reviewed_stage_readiness_script() {
 assert_reviewed_stage_source_script() {
   local block="$1" script_digest
   script_digest="$(extract_stage_readiness_script "$block" | sha256sum | awk '{print $1}')"
-  [[ "$script_digest" == ed95afef5a3b047d044e6b971587282691f517b1d885a85ca5b565daf4f6a3e7 ]] ||
+  [[ "$script_digest" == f411d31f603f47b3c9c204013732631481b57fc1a54272b2e99ba1c1006ef2ad ]] ||
     fail "group-scoped stage probe exact-main source script differs from the reviewed executable contract"
 }
 
@@ -181,6 +181,41 @@ count_exact_command() {
   ' "$file"
 }
 
+extract_job_if_expression() {
+  local block="$1"
+  awk '
+    /^    if: / {
+      value=$0
+      sub(/^    if: /, "", value)
+      if (value != ">-") {
+        print value
+        exit
+      }
+      in_if=1
+      next
+    }
+    in_if && /^      / {
+      value=$0
+      sub(/^      /, "", value)
+      parts[++count]=value
+      next
+    }
+    in_if {exit}
+    END {
+      if (count > 0) {
+        for (i=1; i<=count; i++) printf "%s%s", parts[i], (i == count ? ORS : " ")
+      }
+    }
+  ' <<<"$block"
+}
+
+assert_exact_job_if() {
+  local block="$1" expected="$2" label="$3" actual
+  actual="$(extract_job_if_expression "$block")"
+  [[ "$actual" == "$expected" ]] ||
+    fail "$label does not have its exact probe-only reachability predicate"
+}
+
 grep -qF 'name: Assemble manifest-bound deployment bundle' "$WORKFLOW" ||
   fail "release build does not assemble the fixed deployment bundle"
 grep -qF 'bash deploy/linux/validate-deploy-bundle.sh create' "$WORKFLOW" ||
@@ -190,6 +225,10 @@ grep -qF 'bash deploy/linux/validate-deploy-bundle.sh verify' "$WORKFLOW" ||
 grep -qF "path: \${{ runner.temp }}/disk-deploy-bundle" "$WORKFLOW" ||
   fail "artifact upload is not the complete fixed bundle"
 grep -qF '          - stage' "$WORKFLOW" || fail "stage-only dispatch target is absent"
+grep -qF '          - stage-probe' "$WORKFLOW" ||
+  fail "probe-only dispatch target is absent"
+[[ ! -e "$STAGE_PROBE_WORKFLOW" ]] ||
+  fail "obsolete separate stage probe workflow is still present"
 grep -qF "artifact_digest: \${{ steps.artifact.outputs.artifact-digest }}" "$WORKFLOW" ||
   fail "build does not export the immutable artifact digest"
 [[ "$(sed -n '/^permissions:/,/^env:/p' "$WORKFLOW")" == *'contents: read'* ]] ||
@@ -197,6 +236,8 @@ grep -qF "artifact_digest: \${{ steps.artifact.outputs.artifact-digest }}" "$WOR
 grep -qF 'install.sh is bootstrap-only' "$INSTALLER" ||
   fail "legacy installer is not guarded as first-install-only"
 
+stage_probe_block="$(sed -n '/^  stage-readiness:/,/^  build:/p' "$WORKFLOW")"
+build_block="$(sed -n '/^  build:/,/^  attach-linux-release:/p' "$WORKFLOW")"
 dev_block="$(sed -n '/^  deploy-stage:/,/^  deploy-prod:/p' "$WORKFLOW")"
 prod_block="$(sed -n '/^  deploy-prod:/,$p' "$WORKFLOW")"
 share_block="$(sed -n '/^  deliver:/,$p' "$SHARE_WORKFLOW")"
@@ -207,18 +248,28 @@ macos_release_block="$(sed -n '/^  build-macos-client:/,/^  deploy-stage:/p' "$W
 share_diff_block="$(sed -n '/name: Diff share drop-in/,/name: Install share drop-in/p' "$SHARE_WORKFLOW")"
 share_install_block="$(sed -n '/name: Install share drop-in/,$p' "$SHARE_WORKFLOW")"
 isolation_step="$(sed -n '/^      - name: Staging isolation capabilities$/,/^      - name: systemd version$/p' "$PROBE_WORKFLOW")"
-[[ -f "$STAGE_PROBE_WORKFLOW" ]] || fail "group-scoped stage probe workflow is absent"
-stage_probe_block="$(awk '
-  /^  probe:$/ {in_probe=1}
-  in_probe && $0 != "  probe:" && /^  [a-zA-Z0-9_-]+:$/ {exit}
-  in_probe {print}
-' "$STAGE_PROBE_WORKFLOW")"
-[[ -n "$stage_probe_block" ]] || fail "group-scoped stage probe job is absent"
+[[ -n "$stage_probe_block" ]] || fail "inline group-scoped stage probe job is absent"
 [[ "$(grep -cFx '      - name: Read-only readiness verdict' <<<"$stage_probe_block")" -eq 1 ]] ||
   fail "group-scoped stage probe job does not contain exactly one readiness step"
 stage_readiness_step="$(sed -n '/^      - name: Read-only readiness verdict$/,$p' \
   <<<"$stage_probe_block")"
 stage_readiness_script="$(extract_stage_readiness_script "$stage_readiness_step")"
+probe_inverse="github.event_name != 'workflow_dispatch' || github.event.inputs.target != 'stage-probe'"
+tag_probe_inverse="startsWith(github.ref, 'refs/tags/') && (github.event_name != 'workflow_dispatch' || github.event.inputs.target != 'stage-probe')"
+assert_exact_job_if "$build_block" "$probe_inverse" "build job"
+assert_exact_job_if "$linux_release_block" "$tag_probe_inverse" "Linux release attachment job"
+assert_exact_job_if "$windows_release_block" "$tag_probe_inverse" "Windows client release job"
+assert_exact_job_if "$linux_client_release_block" "$tag_probe_inverse" "Linux client release job"
+assert_exact_job_if "$macos_release_block" "$tag_probe_inverse" "macOS client release job"
+assert_exact_job_if "$dev_block" \
+  "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && (github.event.inputs.target == 'stage' || github.event.inputs.target == 'prod')" \
+  "staging deploy job"
+assert_exact_job_if "$prod_block" \
+  "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.event.inputs.target == 'prod'" \
+  "production deploy job"
+assert_exact_job_if "$stage_probe_block" \
+  "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.event.inputs.target == 'stage-probe'" \
+  "stage-readiness job"
 [[ "$dev_block" == *"github.event.inputs.target == 'prod'"* ]] ||
   fail "production dispatch does not first run staging in the same workflow"
 [[ "$dev_block" == *"github.ref == 'refs/heads/main'"* ]] ||
@@ -329,21 +380,25 @@ probe_redirect_scan="$(sed -E \
 ! grep -qE '<>|(^|[^<])>{1,2}([^=]|$)' <<<"$probe_redirect_scan" ||
   fail "read-only deploy probe writes outside its GitHub output"
 
-grep -qF 'name: Stage runner probe (read-only)' "$STAGE_PROBE_WORKFLOW" ||
-  fail "group-scoped stage probe has the wrong workflow identity"
-stage_probe_on="$(sed -n '/^on:/,/^permissions:/p' "$STAGE_PROBE_WORKFLOW")"
-[[ "$stage_probe_on" == *'workflow_dispatch:'* ]] ||
-  fail "group-scoped stage probe is not workflow-dispatch enabled"
-stage_probe_trigger_count="$(awk '
-  /^on:$/ {in_on=1; next}
-  /^permissions:/ {in_on=0}
-  in_on && /^  [a-zA-Z0-9_-]+:$/ {count++}
-  END {print count + 0}
-' "$STAGE_PROBE_WORKFLOW")"
-[[ "$stage_probe_trigger_count" == 1 ]] ||
-  fail "group-scoped stage probe has an additional trigger"
-grep -qFx 'permissions: {}' "$STAGE_PROBE_WORKFLOW" ||
-  fail "group-scoped stage probe permissions are not empty"
+mapfile -t release_job_keys < <(awk '
+  /^jobs:$/ {in_jobs=1; next}
+  in_jobs && /^  [^[:space:]#]/ {print}
+' "$WORKFLOW")
+expected_release_job_keys="$(printf '%s\n' \
+  '  attach-linux-release:' \
+  '  build:' \
+  '  build-linux-client:' \
+  '  build-macos-client:' \
+  '  build-windows-client:' \
+  '  deploy-prod:' \
+  '  deploy-stage:' \
+  '  stage-readiness:' | sort)"
+actual_release_job_keys="$(printf '%s\n' "${release_job_keys[@]}" | sort)"
+[[ "$actual_release_job_keys" == "$expected_release_job_keys" ]] ||
+  fail "release workflow contains an unexpected or missing job"
+
+! grep -qE '^    needs:' <<<"$stage_probe_block" ||
+  fail "group-scoped stage probe depends on a build or delivery job"
 stage_probe_permissions_count="$(awk '
   /^[[:space:]]*#/ {next}
   {
@@ -353,15 +408,11 @@ stage_probe_permissions_count="$(awk '
     if (line ~ /^[[:space:]]*permissions[[:space:]]*:/) count++
   }
   END {print count + 0}
-' "$STAGE_PROBE_WORKFLOW")"
-[[ "$stage_probe_permissions_count" -eq 1 ]] ||
-  fail "group-scoped stage probe must contain exactly one top-level empty permissions declaration"
-mapfile -t stage_probe_job_keys < <(awk '
-  /^jobs:$/ {in_jobs=1; next}
-  in_jobs && /^  [^[:space:]#]/ {print}
-' "$STAGE_PROBE_WORKFLOW")
-[[ "${#stage_probe_job_keys[@]}" -eq 1 && "${stage_probe_job_keys[0]}" == "  probe:" ]] ||
-  fail "group-scoped stage probe workflow does not contain exactly one job"
+' <<<"$stage_probe_block")"
+if [[ "$stage_probe_permissions_count" -ne 1 ]] ||
+  ! grep -qFx '    permissions: {}' <<<"$stage_probe_block"; then
+  fail "group-scoped stage probe permissions are not exactly empty"
+fi
 grep -qF 'group: disk-arcana-stage' <<<"$stage_probe_block" ||
   fail "group-scoped stage probe does not require runner group disk-arcana-stage"
 grep -qF 'labels: [self-hosted, Linux, X64, disk-arcana-stage]' <<<"$stage_probe_block" ||
@@ -378,10 +429,10 @@ if awk '
         line ~ /[{,][[:space:]]*uses[[:space:]]*:/) found=1
   }
   END {exit found ? 0 : 1}
-' "$STAGE_PROBE_WORKFLOW"; then
+' <<<"$stage_probe_block"; then
   fail "group-scoped stage probe is not actionless"
 fi
-! grep -qE '^[[:space:]]*(if|continue-on-error):' <<<"$stage_probe_block" ||
+! grep -qE '^      (if|continue-on-error):' <<<"$stage_probe_block" ||
   fail "group-scoped stage probe contains a skippable or non-blocking step"
 
 stage_probe_step_count="$(awk '
@@ -394,6 +445,7 @@ stage_probe_step_count="$(awk '
 
 stage_source_guard="$(sed -n '/^      - name: Exact main source$/,/^      - name: Read-only readiness verdict$/p' \
   <<<"$stage_probe_block")"
+stage_source_script="$(extract_stage_readiness_script "$stage_source_guard")"
 ! grep -qE '^[[:space:]]*(if|then|elif|else|case|while|until|for)[[:space:]]' \
   <<<"$stage_source_guard" ||
   fail "group-scoped stage probe exact-main guard is conditional"
@@ -402,10 +454,11 @@ grep -qFx '          [[ "$GITHUB_REF" == refs/heads/main ]]' <<<"$stage_source_g
 grep -qFx '          [[ "$GITHUB_REPOSITORY" == Arcanada-one/disk-arcana ]]' \
   <<<"$stage_source_guard" ||
   fail "group-scoped stage probe does not execute the repository guard directly"
-grep -qFx '          [[ "$GITHUB_WORKFLOW_REF" == Arcanada-one/disk-arcana/.github/workflows/stage-runner-probe.yml@refs/heads/main ]]' \
+grep -qFx '          [[ "$GITHUB_WORKFLOW_REF" == Arcanada-one/disk-arcana/.github/workflows/release-deploy.yml@refs/heads/main ]]' \
   <<<"$stage_source_guard" ||
   fail "group-scoped stage probe does not execute its exact workflow-reference guard directly"
 assert_reviewed_stage_source_script "$stage_source_guard"
+stage_probe_shell_scripts="${stage_source_script}"$'\n'"${stage_readiness_script}"
 
 assert_direct_stage_command "$stage_readiness_step" '[[ "$(id -u)" != 0 ]]' \
   "the non-root rejection"
@@ -470,7 +523,7 @@ assert_direct_stage_command "$stage_readiness_step" \
 stage_probe_redirect_scan="$(sed -E \
   -e 's#2?>/dev/null([[:space:];|&)]|$)#\1#g' \
   -e 's#2>&1([[:space:];|&)]|$)#\1#g' \
-  <<<"$stage_probe_block")"
+  <<<"$stage_probe_shell_scripts")"
 ! grep -qE '<>|(^|[^<])>{1,2}([^=]|$)' <<<"$stage_probe_redirect_scan" ||
   fail "group-scoped stage probe writes to a host path"
 ! grep -qE '(^|[[:space:]])(env|printenv|set)[[:space:]]*($|[|;&])|/etc/(shadow|sudoers|environment)|/proc/[0-9]+/environ' \
@@ -623,16 +676,53 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
     local stage_probe="$1" expected="$2" label="$3" fixture_rc
     set +e
     DISK_ARCANA_ORDER_FIXTURE_CHILD=1 \
-      WORKFLOW_OVERRIDE="$WORKFLOW" \
+      WORKFLOW_OVERRIDE="$stage_probe" \
       SHARE_WORKFLOW_OVERRIDE="$SHARE_WORKFLOW" \
       PROBE_WORKFLOW_OVERRIDE="$PROBE_WORKFLOW" \
-      STAGE_PROBE_WORKFLOW_OVERRIDE="$stage_probe" \
       "$0" >"$fixture_output" 2>&1
     fixture_rc=$?
     set -e
     [[ "$fixture_rc" -ne 0 ]] || fail "$label fixture passed"
     grep -qF "$expected" "$fixture_output" || fail "$label fixture failed for an unintended reason"
   }
+
+  write_probe_reachable_job_fixture() {
+    local job="$1" output="$2"
+    awk -v target="$job" '
+      /^  [A-Za-z0-9_-]+:$/ {
+        line=$0
+        sub(/^[[:space:]]+/, "", line)
+        in_target=(line == target ":")
+      }
+      skip_if && /^      / {next}
+      skip_if {skip_if=0}
+      in_target && !mutated && /^    if: / {
+        print "    if: github.event_name == '\''workflow_dispatch'\'' && github.event.inputs.target == '\''stage-probe'\''"
+        if ($0 ~ />-[[:space:]]*$/) skip_if=1
+        mutated=1
+        next
+      }
+      {print}
+    ' "$WORKFLOW" >"$output"
+  }
+
+  for reachability_case in \
+    'build|build job' \
+    'attach-linux-release|Linux release attachment job' \
+    'build-windows-client|Windows client release job' \
+    'build-linux-client|Linux client release job' \
+    'build-macos-client|macOS client release job' \
+    'deploy-stage|staging deploy job' \
+    'deploy-prod|production deploy job'; do
+    reachability_job="${reachability_case%%|*}"
+    reachability_label="${reachability_case#*|}"
+    reachable_workflow="$fixture_root/release-${reachability_job}-admits-stage-probe.yml"
+    write_probe_reachable_job_fixture "$reachability_job" "$reachable_workflow"
+    run_release_fixture "$reachable_workflow" \
+      "FAIL  $reachability_label does not have its exact probe-only reachability predicate" \
+      "$reachability_label admitting stage-probe"
+    printf 'PASS  %s cannot admit probe-only dispatch\n' "$reachability_label"
+  done
 
   disabled_release="$fixture_root/release-disabled-gate.yml"
   awk '
@@ -868,72 +958,74 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
   printf 'PASS  GitHub-output suffix write is rejected for the intended reason\n'
 
   labels_only_stage_probe="$fixture_root/stage-probe-labels-only.yml"
-  sed '/^[[:space:]]*group: disk-arcana-stage$/d' \
-    "$STAGE_PROBE_WORKFLOW" >"$labels_only_stage_probe"
+  sed '/^  stage-readiness:$/,/^  build:$/ {/^[[:space:]]*group: disk-arcana-stage$/d
+  }' \
+    "$WORKFLOW" >"$labels_only_stage_probe"
   run_stage_probe_fixture "$labels_only_stage_probe" \
     'FAIL  group-scoped stage probe does not require runner group disk-arcana-stage' \
     "labels-only stage probe"
   printf 'PASS  labels-only stage probe is rejected for the intended reason\n'
 
   wrong_group_stage_probe="$fixture_root/stage-probe-wrong-group.yml"
-  sed 's/group: disk-arcana-stage/group: ci-general/' \
-    "$STAGE_PROBE_WORKFLOW" >"$wrong_group_stage_probe"
+  sed '/^  stage-readiness:$/,/^  build:$/ {s/group: disk-arcana-stage/group: ci-general/
+  }' \
+    "$WORKFLOW" >"$wrong_group_stage_probe"
   run_stage_probe_fixture "$wrong_group_stage_probe" \
     'FAIL  group-scoped stage probe does not require runner group disk-arcana-stage' \
     "wrong runner group"
   printf 'PASS  wrong runner group is rejected for the intended reason\n'
 
   job_permissions_stage_probe="$fixture_root/stage-probe-job-permissions.yml"
-  sed '/^  probe:$/a\    permissions: write-all' \
-    "$STAGE_PROBE_WORKFLOW" >"$job_permissions_stage_probe"
+  sed '/^  stage-readiness:$/a\    permissions: write-all' \
+    "$WORKFLOW" >"$job_permissions_stage_probe"
   run_stage_probe_fixture "$job_permissions_stage_probe" \
-    'FAIL  group-scoped stage probe must contain exactly one top-level empty permissions declaration' \
+    'FAIL  group-scoped stage probe permissions are not exactly empty' \
     "job-level write-all permissions"
   printf 'PASS  job-level write-all permissions are rejected for the intended reason\n'
 
   flow_action_stage_probe="$fixture_root/stage-probe-flow-action.yml"
-  sed '/^    steps:$/a\      - {uses: actions/checkout@0000000000000000000000000000000000000000}' \
-    "$STAGE_PROBE_WORKFLOW" >"$flow_action_stage_probe"
+  sed '/^  stage-readiness:$/,/^  build:$/ {/^[[:space:]]*steps:$/a\      - {uses: actions/checkout@0000000000000000000000000000000000000000}
+  }' "$WORKFLOW" >"$flow_action_stage_probe"
   run_stage_probe_fixture "$flow_action_stage_probe" \
     'FAIL  group-scoped stage probe is not actionless' \
     "flow-style stage probe action step"
   printf 'PASS  flow-style action step is rejected for the intended reason\n'
 
   action_stage_probe="$fixture_root/stage-probe-action.yml"
-  sed '/^    steps:$/a\      - uses: actions/checkout@0000000000000000000000000000000000000000' \
-    "$STAGE_PROBE_WORKFLOW" >"$action_stage_probe"
+  sed '/^  stage-readiness:$/,/^  build:$/ {/^[[:space:]]*steps:$/a\      - uses: actions/checkout@0000000000000000000000000000000000000000
+  }' "$WORKFLOW" >"$action_stage_probe"
   run_stage_probe_fixture "$action_stage_probe" \
     'FAIL  group-scoped stage probe is not actionless' \
     "stage probe action step"
   printf 'PASS  separate block-style action step is rejected for the intended reason\n'
 
   raw_sudo_step_stage_probe="$fixture_root/stage-probe-raw-sudo-step.yml"
-  sed '/^    steps:$/a\      - name: Raw sudo policy outside readiness\
+  sed '/^  stage-readiness:$/,/^  build:$/ {/^[[:space:]]*steps:$/a\      - name: Raw sudo policy outside readiness\
         shell: bash\
-        run: sudo -n -l' \
-    "$STAGE_PROBE_WORKFLOW" >"$raw_sudo_step_stage_probe"
+        run: sudo -n -l
+  }' "$WORKFLOW" >"$raw_sudo_step_stage_probe"
   run_stage_probe_fixture "$raw_sudo_step_stage_probe" \
     'FAIL  group-scoped stage probe must contain exactly two steps' \
     "separate raw sudo policy step"
   printf 'PASS  separate raw sudo policy step is rejected for the intended reason\n'
 
   host_write_step_stage_probe="$fixture_root/stage-probe-dd-host-write-step.yml"
-  sed '/^    steps:$/a\      - name: Host write outside readiness\
+  sed '/^  stage-readiness:$/,/^  build:$/ {/^[[:space:]]*steps:$/a\      - name: Host write outside readiness\
         shell: bash\
-        run: dd if=/dev/zero of=/tmp/disk-arcana-stage-probe-mutant bs=1 count=1' \
-    "$STAGE_PROBE_WORKFLOW" >"$host_write_step_stage_probe"
+        run: dd if=/dev/zero of=/tmp/disk-arcana-stage-probe-mutant bs=1 count=1
+  }' "$WORKFLOW" >"$host_write_step_stage_probe"
   run_stage_probe_fixture "$host_write_step_stage_probe" \
     'FAIL  group-scoped stage probe must contain exactly two steps' \
     "separate dd host-write step"
   printf 'PASS  separate dd host-write step is rejected for the intended reason\n'
 
-  extra_trigger_stage_probe="$fixture_root/stage-probe-extra-trigger.yml"
-  sed '/^  workflow_dispatch:$/a\  repository_dispatch:' \
-    "$STAGE_PROBE_WORKFLOW" >"$extra_trigger_stage_probe"
-  run_stage_probe_fixture "$extra_trigger_stage_probe" \
-    'FAIL  group-scoped stage probe has an additional trigger' \
-    "additional stage probe trigger"
-  printf 'PASS  additional stage probe trigger is rejected for the intended reason\n'
+  disabled_stage_probe="$fixture_root/stage-probe-disabled-job.yml"
+  sed "s/github.event.inputs.target == 'stage-probe'/false/" \
+    "$WORKFLOW" >"$disabled_stage_probe"
+  run_stage_probe_fixture "$disabled_stage_probe" \
+    'FAIL  stage-readiness job does not have its exact probe-only reachability predicate' \
+    "disabled stage-readiness job"
+  printf 'PASS  disabled stage-readiness job is rejected for the intended reason\n'
 
   extra_job_stage_probe="$fixture_root/stage-probe-extra-job.yml"
   awk '
@@ -949,15 +1041,15 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
       print "        shell: bash"
       print "        run: touch /tmp/disk-arcana-stage-probe-mutant"
     }
-  ' "$STAGE_PROBE_WORKFLOW" >"$extra_job_stage_probe"
+  ' "$WORKFLOW" >"$extra_job_stage_probe"
   run_stage_probe_fixture "$extra_job_stage_probe" \
-    'FAIL  group-scoped stage probe workflow does not contain exactly one job' \
+    'FAIL  release workflow contains an unexpected or missing job' \
     "additional mutating stage job"
   printf 'PASS  additional mutating stage job is rejected for the intended reason\n'
 
   quoted_job_stage_probe="$fixture_root/stage-probe-quoted-extra-job.yml"
   awk '
-    /^  probe:$/ && !inserted {
+    /^  stage-readiness:$/ && !inserted {
       print "  \"mutate-stage-host\":"
       print "    runs-on:"
       print "      group: disk-arcana-stage"
@@ -968,11 +1060,36 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
       inserted=1
     }
     {print}
-  ' "$STAGE_PROBE_WORKFLOW" >"$quoted_job_stage_probe"
+  ' "$WORKFLOW" >"$quoted_job_stage_probe"
   run_stage_probe_fixture "$quoted_job_stage_probe" \
-    'FAIL  group-scoped stage probe workflow does not contain exactly one job' \
+    'FAIL  release workflow contains an unexpected or missing job' \
     "quoted additional mutating stage job"
   printf 'PASS  quoted additional mutating stage job is rejected for the intended reason\n'
+
+  merge_job_stage_probe="$fixture_root/stage-probe-merge-extra-job.yml"
+  sed '/^  stage-readiness:$/i\  <<: *mutating-stage-job' \
+    "$WORKFLOW" >"$merge_job_stage_probe"
+  run_stage_probe_fixture "$merge_job_stage_probe" \
+    'FAIL  release workflow contains an unexpected or missing job' \
+    "merge-key additional stage job"
+  printf 'PASS  merge-key additional stage job is rejected for the intended reason\n'
+
+  explicit_job_stage_probe="$fixture_root/stage-probe-explicit-extra-job.yml"
+  sed '/^  stage-readiness:$/i\  ? mutate-stage-host\
+  : {runs-on: ubuntu-latest, steps: [{run: touch /tmp/disk-arcana-stage-probe-mutant}]}' \
+    "$WORKFLOW" >"$explicit_job_stage_probe"
+  run_stage_probe_fixture "$explicit_job_stage_probe" \
+    'FAIL  release workflow contains an unexpected or missing job' \
+    "explicit-key additional stage job"
+  printf 'PASS  explicit-key additional stage job is rejected for the intended reason\n'
+
+  flow_job_stage_probe="$fixture_root/stage-probe-flow-extra-job.yml"
+  sed '/^  stage-readiness:$/i\  mutate-stage-host: {runs-on: ubuntu-latest, steps: [{run: touch /tmp/disk-arcana-stage-probe-mutant}]}' \
+    "$WORKFLOW" >"$flow_job_stage_probe"
+  run_stage_probe_fixture "$flow_job_stage_probe" \
+    'FAIL  release workflow contains an unexpected or missing job' \
+    "flow-form additional stage job"
+  printf 'PASS  flow-form additional stage job is rejected for the intended reason\n'
 
   conditional_main_stage_probe="$fixture_root/stage-probe-conditional-main.yml"
   awk '
@@ -986,7 +1103,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
       next
     }
     {print}
-  ' "$STAGE_PROBE_WORKFLOW" >"$conditional_main_stage_probe"
+  ' "$WORKFLOW" >"$conditional_main_stage_probe"
   run_stage_probe_fixture "$conditional_main_stage_probe" \
     'FAIL  group-scoped stage probe exact-main guard is conditional' \
     "conditional exact-main guard"
@@ -1001,7 +1118,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
       next
     }
     {print}
-  ' "$STAGE_PROBE_WORKFLOW" >"$early_exit_main_stage_probe"
+  ' "$WORKFLOW" >"$early_exit_main_stage_probe"
   run_stage_probe_fixture "$early_exit_main_stage_probe" \
     'FAIL  group-scoped stage probe exact-main source script differs from the reviewed executable contract' \
     "early-success exit in exact-main source"
@@ -1016,7 +1133,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
       next
     }
     {print}
-  ' "$STAGE_PROBE_WORKFLOW" >"$early_return_main_stage_probe"
+  ' "$WORKFLOW" >"$early_return_main_stage_probe"
   run_stage_probe_fixture "$early_return_main_stage_probe" \
     'FAIL  group-scoped stage probe exact-main source script differs from the reviewed executable contract' \
     "early-success return in exact-main source"
@@ -1041,7 +1158,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
     }
     in_guard {print "  " $0; next}
     {print}
-  ' "$STAGE_PROBE_WORKFLOW" >"$inert_main_stage_probe"
+  ' "$WORKFLOW" >"$inert_main_stage_probe"
   run_stage_probe_fixture "$inert_main_stage_probe" \
     'FAIL  group-scoped stage probe does not execute the exact-main guard directly' \
     "inert exact-main function"
@@ -1063,7 +1180,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
       next
     }
     {print}
-  ' "$STAGE_PROBE_WORKFLOW" >"$inert_readiness_stage_probe"
+  ' "$WORKFLOW" >"$inert_readiness_stage_probe"
   inert_readiness_script="$(sed -n '/^      - name: Read-only readiness verdict$/,$p' \
     "$inert_readiness_stage_probe")"
   bash -n -s <<<"$(extract_stage_readiness_script "$inert_readiness_script")" ||
@@ -1089,7 +1206,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
       next
     }
     {print}
-  ' "$STAGE_PROBE_WORKFLOW" >"$short_circuit_readiness_stage_probe"
+  ' "$WORKFLOW" >"$short_circuit_readiness_stage_probe"
   short_circuit_readiness_script="$(sed -n '/^      - name: Read-only readiness verdict$/,$p' \
     "$short_circuit_readiness_stage_probe")"
   bash -n -s <<<"$(extract_stage_readiness_script "$short_circuit_readiness_script")" ||
@@ -1101,35 +1218,25 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
 
   decoy_readiness_stage_probe="$fixture_root/stage-probe-decoy-readiness.yml"
   awk '
-    {lines[NR]=$0}
-    /^  probe:$/ {probe_start=NR}
-    END {
-      for (i=1; i<probe_start; i++) print lines[i]
-      print "  decoy:"
-      print "    if: false"
-      for (i=probe_start + 1; i<=NR; i++) print lines[i]
-      for (i=probe_start; i<=NR; i++) {
-        line=lines[i]
-        if (!mutated && line == "          [[ \"$rootless_userns\" == true ]]") {
-          print "          false && { :"
-          print line
-          in_assertions=1
-          mutated=1
-          continue
-        }
-        if (in_assertions && index(line, "assert_active_runner_binding \"${runner_units[0]}\" /proc/self/cgroup")) {
-          print line
-          print "          :; }"
-          in_assertions=0
-          continue
-        }
-        print line
-      }
+    /^  stage-readiness:$/ {print "  decoy: {if: false}"}
+    !mutated && $0 == "          [[ \"$rootless_userns\" == true ]]" {
+      print "          false && { :"
+      print
+      in_assertions=1
+      mutated=1
+      next
     }
-  ' "$STAGE_PROBE_WORKFLOW" >"$decoy_readiness_stage_probe"
+    in_assertions && index($0, "assert_active_runner_binding \"${runner_units[0]}\" /proc/self/cgroup") {
+      print
+      print "          :; }"
+      in_assertions=0
+      next
+    }
+    {print}
+  ' "$WORKFLOW" >"$decoy_readiness_stage_probe"
   decoy_probe_block="$(awk '
-    /^  probe:$/ {in_probe=1}
-    in_probe && $0 != "  probe:" && /^  [a-zA-Z0-9_-]+:$/ {exit}
+    /^  stage-readiness:$/ {in_probe=1}
+    in_probe && $0 != "  stage-readiness:" && /^  [a-zA-Z0-9_-]+:$/ {exit}
     in_probe {print}
   ' "$decoy_readiness_stage_probe")"
   decoy_readiness_script="$(sed -n '/^      - name: Read-only readiness verdict$/,$p' \
@@ -1137,13 +1244,13 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
   bash -n -s <<<"$(extract_stage_readiness_script "$decoy_readiness_script")" ||
     fail "decoy readiness fixture real probe is not valid Bash"
   run_stage_probe_fixture "$decoy_readiness_stage_probe" \
-    'FAIL  group-scoped stage probe workflow does not contain exactly one job' \
+    'FAIL  release workflow contains an unexpected or missing job' \
     "skipped decoy readiness"
   printf 'PASS  skipped decoy cannot authenticate inert real-probe readiness\n'
 
   unbound_runner_stage_probe="$fixture_root/stage-probe-unbound-runner.yml"
   sed '/assert_active_runner_binding "${runner_units\[0\]}" \/proc\/self\/cgroup/d' \
-    "$STAGE_PROBE_WORKFLOW" >"$unbound_runner_stage_probe"
+    "$WORKFLOW" >"$unbound_runner_stage_probe"
   run_stage_probe_fixture "$unbound_runner_stage_probe" \
     'FAIL  group-scoped stage probe does not execute the active runner/cgroup binding directly' \
     "unbound runner service"
@@ -1151,7 +1258,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
 
   user_scope_runner_stage_probe="$fixture_root/stage-probe-user-scope-runner.yml"
   sed 's#assert_active_runner_binding "${runner_units\[0\]}" /proc/self/cgroup#assert_active_runner_binding "${runner_units[0]}" /proc/self/cgroup-user#' \
-    "$STAGE_PROBE_WORKFLOW" >"$user_scope_runner_stage_probe"
+    "$WORKFLOW" >"$user_scope_runner_stage_probe"
   run_stage_probe_fixture "$user_scope_runner_stage_probe" \
     'FAIL  group-scoped stage probe does not execute the active runner/cgroup binding directly' \
     "user-scope runner cgroup"
@@ -1159,7 +1266,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
 
   broad_installed_runner_stage_probe="$fixture_root/stage-probe-broad-installed-runner.yml"
   sed 's/\[\[ "${#installed_runner_units\[@\]}" -eq 1 \]\]/[[ "${#installed_runner_units[@]}" -ge 1 ]]/' \
-    "$STAGE_PROBE_WORKFLOW" >"$broad_installed_runner_stage_probe"
+    "$WORKFLOW" >"$broad_installed_runner_stage_probe"
   run_stage_probe_fixture "$broad_installed_runner_stage_probe" \
     'FAIL  group-scoped stage probe does not execute the single installed runner-unit requirement directly' \
     "broad installed runner inventory"
@@ -1167,7 +1274,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
 
   body_capture_health_stage_probe="$fixture_root/stage-probe-body-capture-health.yml"
   sed 's#^          curl --fail --silent --show-error --max-time 10 -o /dev/null http://127.0.0.1:9446/health$#          health_body="$(curl --fail --silent --show-error --max-time 10 http://127.0.0.1:9446/health)"#' \
-    "$STAGE_PROBE_WORKFLOW" >"$body_capture_health_stage_probe"
+    "$WORKFLOW" >"$body_capture_health_stage_probe"
   run_stage_probe_fixture "$body_capture_health_stage_probe" \
     'FAIL  group-scoped stage probe does not execute the body-suppressing health verdict directly' \
     "health body capture"
@@ -1175,7 +1282,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
 
   degraded_health_stage_probe="$fixture_root/stage-probe-degraded-health.yml"
   sed 's#curl --fail --silent --show-error --max-time 10 -o /dev/null#curl --silent --show-error --max-time 10 -o /dev/null#' \
-    "$STAGE_PROBE_WORKFLOW" >"$degraded_health_stage_probe"
+    "$WORKFLOW" >"$degraded_health_stage_probe"
   run_stage_probe_fixture "$degraded_health_stage_probe" \
     'FAIL  group-scoped stage probe does not execute the body-suppressing health verdict directly' \
     "degraded health acceptance"
@@ -1183,7 +1290,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
 
   mutating_stage_probe="$fixture_root/stage-probe-systemd-mutation.yml"
   sed '/rootless_userns=/a\          systemctl restart disk-arcana-server' \
-    "$STAGE_PROBE_WORKFLOW" >"$mutating_stage_probe"
+    "$WORKFLOW" >"$mutating_stage_probe"
   run_stage_probe_fixture "$mutating_stage_probe" \
     'FAIL  group-scoped stage probe contains a host mutation' \
     "stage systemd mutation"
@@ -1191,7 +1298,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
 
   writing_stage_probe="$fixture_root/stage-probe-host-write.yml"
   sed '/rootless_userns=/a\          printf mutated >disk-arcana-stage-probe-mutant' \
-    "$STAGE_PROBE_WORKFLOW" >"$writing_stage_probe"
+    "$WORKFLOW" >"$writing_stage_probe"
   run_stage_probe_fixture "$writing_stage_probe" \
     'FAIL  group-scoped stage probe writes to a host path' \
     "stage host write"
@@ -1199,7 +1306,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
 
   read_write_stage_probe="$fixture_root/stage-probe-read-write.yml"
   sed '/rootless_userns=/a\          exec 3<>disk-arcana-stage-probe-mutant' \
-    "$STAGE_PROBE_WORKFLOW" >"$read_write_stage_probe"
+    "$WORKFLOW" >"$read_write_stage_probe"
   run_stage_probe_fixture "$read_write_stage_probe" \
     'FAIL  group-scoped stage probe writes to a host path' \
     "stage read-write redirection"
@@ -1207,7 +1314,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
 
   offhost_curl_stage_probe="$fixture_root/stage-probe-offhost-curl.yml"
   sed '/^          printf '\''readiness=ok/i\          curl --fail --silent https://example.com/' \
-    "$STAGE_PROBE_WORKFLOW" >"$offhost_curl_stage_probe"
+    "$WORKFLOW" >"$offhost_curl_stage_probe"
   run_stage_probe_fixture "$offhost_curl_stage_probe" \
     'FAIL  group-scoped stage probe contains an additional network request' \
     "off-host stage probe request"
@@ -1215,7 +1322,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
 
   docker_accept_stage_probe="$fixture_root/stage-probe-docker-accept.yml"
   sed 's/\[\[ "$docker_socket_writable" == false \]\]/[[ "$docker_socket_writable" == true ]]/' \
-    "$STAGE_PROBE_WORKFLOW" >"$docker_accept_stage_probe"
+    "$WORKFLOW" >"$docker_accept_stage_probe"
   run_stage_probe_fixture "$docker_accept_stage_probe" \
     'FAIL  group-scoped stage probe does not execute the writable-Docker rejection directly' \
     "writable Docker acceptance"
@@ -1223,7 +1330,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
 
   root_accept_stage_probe="$fixture_root/stage-probe-root-accept.yml"
   sed 's/\[\[ "$(id -u)" != 0 \]\]/[[ "$(id -u)" == 0 ]]/' \
-    "$STAGE_PROBE_WORKFLOW" >"$root_accept_stage_probe"
+    "$WORKFLOW" >"$root_accept_stage_probe"
   run_stage_probe_fixture "$root_accept_stage_probe" \
     'FAIL  group-scoped stage probe does not execute the non-root rejection directly' \
     "root UID acceptance"
@@ -1231,7 +1338,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
 
   broad_sudo_stage_probe="$fixture_root/stage-probe-broad-sudo.yml"
   sed "s#\[\[ \"\${sudo_specs\[0\]}\" == '(root) NOPASSWD: /usr/local/sbin/disk-arcana-deploy-broker --deploy \*' \]\]#[[ \"\${sudo_specs[0]}\" == *disk-arcana-deploy-broker* ]]#" \
-    "$STAGE_PROBE_WORKFLOW" >"$broad_sudo_stage_probe"
+    "$WORKFLOW" >"$broad_sudo_stage_probe"
   run_stage_probe_fixture "$broad_sudo_stage_probe" \
     'FAIL  group-scoped stage probe lacks the exact narrow sudo command specification' \
     "broad sudo acceptance"
