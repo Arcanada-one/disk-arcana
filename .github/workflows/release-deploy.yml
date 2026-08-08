@@ -55,6 +55,10 @@ jobs:
           [[ "$GITHUB_REF" == refs/heads/main ]]
           [[ "$GITHUB_REPOSITORY" == Arcanada-one/disk-arcana ]]
           [[ "$GITHUB_WORKFLOW_REF" == Arcanada-one/disk-arcana/.github/workflows/release-deploy.yml@refs/heads/main ]]
+          sha_pattern='^[0-9a-f]{40}$'
+          [[ "${GITHUB_SHA:-}" =~ $sha_pattern ]]
+          [[ "${GITHUB_WORKFLOW_SHA:-}" =~ $sha_pattern ]]
+          [[ "${GITHUB_SHA:-}" == "${GITHUB_WORKFLOW_SHA:-}" ]]
 
       - name: Read-only readiness verdict
         shell: bash
@@ -106,6 +110,79 @@ jobs:
             ' "$cgroup_file"
           }
 
+          assert_fresh_main() {
+            local expected_sha="$1"
+            local workflow_sha="$2"
+            local sha_pattern='^[0-9a-f]{40}$'
+            local readback remote_sha remote_ref
+            [[ "$expected_sha" =~ $sha_pattern && "$workflow_sha" =~ $sha_pattern && \
+              "$expected_sha" == "$workflow_sha" ]] || {
+              printf 'fresh-main=invalid-input\n' >&2
+              return 1
+            }
+            readback="$(
+              cd /
+              /usr/bin/timeout --signal=KILL 20s \
+              /usr/bin/env \
+                -u GIT_DIR \
+                -u GIT_WORK_TREE \
+                -u GIT_COMMON_DIR \
+                -u GIT_CONFIG_PARAMETERS \
+                -u GIT_SSL_NO_VERIFY \
+                -u GIT_SSL_CAINFO \
+                -u GIT_SSL_CAPATH \
+                -u CURL_CA_BUNDLE \
+                -u SSL_CERT_FILE \
+                -u SSL_CERT_DIR \
+                -u GIT_TRACE \
+                -u GIT_TRACE2 \
+                -u GIT_TRACE2_EVENT \
+                -u GIT_TRACE2_PERF \
+                -u GIT_TRACE_PACKET \
+                -u GIT_TRACE_CURL \
+                -u GIT_TRACE_CURL_NO_DATA \
+                -u GIT_TRACE_SETUP \
+                -u GIT_TRACE_PERFORMANCE \
+                -u GIT_TRACE_REDACT \
+                -u GIT_TRACE_SHALLOW \
+                -u GIT_TRACE_FSMONITOR \
+                -u GIT_TRACE_PACK_ACCESS \
+                -u GIT_CURL_VERBOSE \
+                -u GIT_EXEC_PATH \
+                GIT_CONFIG_NOSYSTEM=1 \
+                GIT_CONFIG_SYSTEM=/dev/null \
+                GIT_CONFIG_GLOBAL=/dev/null \
+                GIT_CONFIG_COUNT=0 \
+                GIT_TERMINAL_PROMPT=0 \
+                GIT_ASKPASS=/bin/false \
+                SSH_ASKPASS=/bin/false \
+                /usr/bin/git \
+                  -c credential.helper= \
+                  -c core.askPass=/bin/false \
+                  -c http.sslVerify=true \
+                  -c http.followRedirects=false \
+                  ls-remote --quiet --exit-code --refs \
+                https://github.com/Arcanada-one/disk-arcana.git refs/heads/main 2>/dev/null
+            )" || {
+              printf 'fresh-main=query-failed\n' >&2
+              return 1
+            }
+            [[ -n "$readback" && "$readback" != *$'\n'* && "$readback" == *$'\t'* ]] || {
+              printf 'fresh-main=malformed-readback\n' >&2
+              return 1
+            }
+            remote_sha="${readback%%$'\t'*}"
+            remote_ref="${readback#*$'\t'}"
+            [[ "$remote_sha" =~ $sha_pattern && "$remote_ref" == refs/heads/main ]] || {
+              printf 'fresh-main=malformed-readback\n' >&2
+              return 1
+            }
+            [[ "$remote_sha" == "$expected_sha" ]] || {
+              printf 'fresh-main=stale\n' >&2
+              return 1
+            }
+          }
+
           [[ "$(id -u)" != 0 ]]
           [[ " $(id -Gn) " == *" disk-arcana-deploy "* ]]
 
@@ -147,6 +224,7 @@ jobs:
           [[ "$(systemctl show disk-arcana-server -p StartLimitBurst --value 2>/dev/null)" == 5 ]]
           curl --fail --silent --show-error --max-time 10 -o /dev/null http://127.0.0.1:9446/health
 
+          assert_fresh_main "$GITHUB_SHA" "$GITHUB_WORKFLOW_SHA"
           printf 'readiness=ok active_runner_units=%s installed_runner_units=%s sudo_specs=1\n' \
             "${#runner_units[@]}" "${#installed_runner_units[@]}"
   # ──────────────────────────────────────────────────────────────────────────
