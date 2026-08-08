@@ -60,9 +60,14 @@ jobs:
         run: |
           active="$(systemctl is-active disk-arcana-server 2>/dev/null || true)"
           enabled="$(systemctl is-enabled disk-arcana-server 2>/dev/null || true)"
-          echo "active=$active" >>"$GITHUB_OUTPUT"
-          echo "enabled=$enabled" >>"$GITHUB_OUTPUT"
-          printf 'is-active=%s is-enabled=%s\n' "$active" "$enabled"
+          unit_file_state="$(systemctl show disk-arcana-server -p UnitFileState --value 2>/dev/null || true)"
+          {
+            echo "active=$active"
+            echo "enabled=$enabled"
+            echo "unit_file_state=$unit_file_state"
+          } >>"$GITHUB_OUTPUT"
+          printf 'is-active=%s is-enabled=%s UnitFileState=%s\n' \
+            "$active" "$enabled" "$unit_file_state"
 
       - name: Loaded restart policy
         id: policy
@@ -105,6 +110,7 @@ jobs:
             echo "| unit file present | ${{ steps.unit.outputs.exists }} |"
             echo "| is-active | ${{ steps.state.outputs.active }} |"
             echo "| is-enabled | ${{ steps.state.outputs.enabled }} |"
+            echo "| UnitFileState | ${{ steps.state.outputs.unit_file_state }} |"
             echo "| StartLimitIntervalUSec | ${{ steps.policy.outputs.interval }} |"
             echo "| StartLimitBurst | ${{ steps.policy.outputs.burst }} |"
             echo "| health 9446 | ${{ steps.health.outputs.ok }} |"
@@ -113,6 +119,7 @@ jobs:
           fail=0
           [[ "${{ steps.unit.outputs.exists }}" == "true" ]] || { echo "FAIL unit file absent"; fail=1; }
           [[ "${{ steps.state.outputs.active }}" == "active" ]] || { echo "FAIL service not active"; fail=1; }
+          [[ "${{ steps.state.outputs.unit_file_state }}" == "enabled" ]] || { echo "FAIL UnitFileState is not exactly enabled"; fail=1; }
           [[ "${{ steps.health.outputs.ok }}" == "true" ]] || { echo "FAIL health endpoint down"; fail=1; }
           # 120s expressed in microseconds; proves the [Unit] placement parsed.
           [[ "${{ steps.policy.outputs.interval }}" == "2min" ]] || echo "WARN StartLimitIntervalUSec=${{ steps.policy.outputs.interval }} (expected 2min)"

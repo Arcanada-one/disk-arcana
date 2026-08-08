@@ -122,6 +122,15 @@ case "$cmd" in
       Restart)
         printf 'on-failure\n'
         ;;
+      UnitFileState)
+        if [[ -f "$flags/disabled" ]]; then
+          printf 'disabled\n'
+        elif [[ -f "$flags/enabled-runtime" ]]; then
+          printf 'enabled-runtime\n'
+        else
+          printf 'enabled\n'
+        fi
+        ;;
       *)
         exit 2
         ;;
@@ -332,6 +341,14 @@ if run_deploy; then
 fi
 assert_old_installed
 pass "invalid staged unit fails before target mutation"
+
+setup_case enabled-runtime
+: >"$FLAGS/enabled-runtime"
+if run_deploy; then
+  fail "enabled-runtime was accepted as exact persistent enablement"
+fi
+assert_old_installed
+pass "deployer rejects enabled-runtime as non-persistent enablement"
 
 for failure in fail-reload fail-restart bad-policy unhealthy; do
   setup_case "sync-$failure"

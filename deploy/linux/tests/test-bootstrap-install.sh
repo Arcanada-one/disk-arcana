@@ -5,7 +5,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 ROOT_REPO="$(git rev-parse --show-toplevel)"
-INSTALLER="$ROOT_REPO/deploy/linux/install.sh"
+INSTALLER="${INSTALLER_OVERRIDE:-$ROOT_REPO/deploy/linux/install.sh}"
 UNIT_SOURCE="$ROOT_REPO/deploy/linux/disk-arcana-server.service"
 TMP="$(mktemp -d)"
 trap 'rm -rf -- "$TMP"' EXIT
@@ -54,6 +54,13 @@ case "${1:-}" in
   disable) rm -f "$flags/enabled" "$flags/active" ;;
   is-active) [[ -f "$flags/active" ]] ;;
   is-enabled) [[ -f "$flags/enabled" ]] ;;
+  show)
+    if [[ "${2:-}" == disk-arcana-server && "${3:-}" == -p && "${4:-}" == UnitFileState ]]; then
+      [[ -f "$flags/enabled-runtime" ]] && printf 'enabled-runtime\n' || printf 'enabled\n'
+    else
+      exit 2
+    fi
+    ;;
   *) exit 2 ;;
 esac
 SHIM
@@ -105,6 +112,14 @@ run_installer || { sed -n '1,80p' "$OUTPUT" >&2; fail "bootstrap with existing s
   fail "bootstrap did not preserve the existing group while creating the user"
 pass "cold bootstrap supports an existing service group without an existing user"
 
+setup_case enabled-runtime
+: >"$FLAGS/enabled-runtime"
+if run_installer; then
+  fail "enabled-runtime was accepted as exact persistent enablement"
+fi
+assert_cold_absent
+pass "cold bootstrap rejects enabled-runtime as non-persistent enablement"
+
 setup_case unsafe-journal
 chmod 0755 "$JOURNAL_DIR"
 if run_installer; then
@@ -124,6 +139,23 @@ assert_cold_absent
 grep -qF 'state=FAILED_RECOVERED' "$JOURNAL_DIR/install-current" ||
   fail "rollback did not persist recovered state"
 pass "synchronous cold-bootstrap failure restores the absent baseline"
+
+setup_case terminal-recovery-required
+if run_installer DISK_ARCANA_INSTALL_TEST_FAIL_AT=HEALTH_VERIFIED; then
+  fail "terminal-state setup unexpectedly succeeded"
+fi
+sed -i 's/^state=FAILED_RECOVERED$/state=FAILED_RECOVERY_REQUIRED/' \
+  "$JOURNAL_DIR/install-current"
+terminal_journal_sha="$(sha256sum "$JOURNAL_DIR/install-current" | awk '{print $1}')"
+if run_installer; then
+  fail "FAILED_RECOVERY_REQUIRED was automatically retried"
+fi
+grep -qF 'state=FAILED_RECOVERY_REQUIRED' "$JOURNAL_DIR/install-current" ||
+  fail "terminal cold-bootstrap state was rewritten"
+[[ "$(sha256sum "$JOURNAL_DIR/install-current" | awk '{print $1}')" == "$terminal_journal_sha" ]] ||
+  fail "terminal cold-bootstrap journal changed on retry"
+assert_cold_absent
+pass "FAILED_RECOVERY_REQUIRED is terminal for cold bootstrap"
 
 for failure_point in CREATE_ACCOUNT STAGE_BINARY ACTIVATE_UNIT; do
   setup_case "sync-${failure_point,,}"

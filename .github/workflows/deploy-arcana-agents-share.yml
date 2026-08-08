@@ -22,7 +22,9 @@ permissions:
 jobs:
   deliver:
     name: ${{ inputs.mode }} share drop-in on arcana-agents
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, Linux, X64, arcana-agents]
+    environment: production
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
@@ -32,7 +34,9 @@ jobs:
       - name: Diff share drop-in against installed copy
         env:
           DISK_UNIT_OWNER: dev
-        run: bash deploy/linux/install-user-share-dropin.sh
+        run: |
+          bash scripts/require-fresh-main.sh "$GITHUB_SHA"
+          bash deploy/linux/install-user-share-dropin.sh
 
       - name: Install share drop-in and restart the user unit
         if: inputs.mode == 'install'
@@ -40,6 +44,7 @@ jobs:
           DISK_UNIT_OWNER: dev
         run: |
           set -euo pipefail
+          bash scripts/require-fresh-main.sh "$GITHUB_SHA"
           if [[ "$(id -un)" == dev ]]; then
             bash deploy/linux/install-user-share-dropin.sh --install
             bash deploy/linux/install-user-share-dropin.sh --verify

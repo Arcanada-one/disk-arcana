@@ -185,11 +185,12 @@ is_member() {
   return 1
 }
 
-validate_bundle() {
+validate_bundle_at() {
+  local bundle="$1"
   local marker="__disk_arcana_inventory_success__" path member digest actual line=0 status=0
   local -a inventory=()
   mapfile -d '' -t inventory < <(
-    find "$SOURCE_BUNDLE" -mindepth 1 -maxdepth 1 -print0 || status=$?
+    find "$bundle" -mindepth 1 -maxdepth 1 -print0 || status=$?
     (( status == 0 )) && printf '%s\0' "$marker"
   )
   [[ "${#inventory[@]}" -eq $((${#MEMBERS[@]} + 2)) ]] || return 1
@@ -200,7 +201,7 @@ validate_bundle() {
     [[ -f "$path" && ! -L "$path" ]] || return 1
   done
   awk -v expected="$EXPECTED_COMMIT" 'NR == 1 {value=$0} NR > 1 {extra=1}
-    END {exit !(NR == 1 && !extra && value == expected)}' "$SOURCE_BUNDLE/commit" || return 1
+    END {exit !(NR == 1 && !extra && value == expected)}' "$bundle/commit" || return 1
   while IFS= read -r row || [[ -n "$row" ]]; do
     line=$((line + 1))
     [[ "$row" =~ ^([0-9a-f]{64})[[:space:]][[:space:]]([^[:space:]]+)$ ]] || return 1
@@ -208,15 +209,16 @@ validate_bundle() {
     member="${BASH_REMATCH[2]}"
     (( line <= ${#MEMBERS[@]} )) || return 1
     [[ "$member" == "${MEMBERS[$((line - 1))]}" ]] || return 1
-    actual="$(sha "$SOURCE_BUNDLE/$member")"
+    actual="$(sha "$bundle/$member")"
     [[ "$actual" == "$digest" ]] || return 1
-  done <"$SOURCE_BUNDLE/manifest.sha256"
+  done <"$bundle/manifest.sha256"
   [[ "$line" -eq "${#MEMBERS[@]}" ]] || return 1
-  [[ "$(sha "$SOURCE_BUNDLE/deploy-server.sh")" == "$(sha "$INSTALLED_HELPER")" ]] || return 1
-  [[ "$(sha "$SOURCE_BUNDLE/deploy-server-broker.sh")" == "$(sha "$INSTALLED_BROKER")" ]] || return 1
+  [[ "$(sha "$bundle/deploy-server.sh")" == "$(sha "$INSTALLED_HELPER")" ]] || return 1
+  [[ "$(sha "$bundle/deploy-server-broker.sh")" == "$(sha "$INSTALLED_BROKER")" ]] || return 1
 }
 
 validate_unit_contract() {
+  local unit="$1"
   local section="" key line count_interval=0 count_burst=0
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" =~ ^\[([^]]+)\]$ ]]; then
@@ -234,18 +236,18 @@ validate_unit_contract() {
         count_burst=$((count_burst + 1))
         ;;
     esac
-  done <"$SOURCE_BUNDLE/disk-arcana-server.service"
+  done <"$unit"
   [[ "$count_interval" -eq 1 && "$count_burst" -eq 1 ]] || return 1
-  grep -qxF 'ExecStart=/usr/local/bin/disk-arcana-server' "$SOURCE_BUNDLE/disk-arcana-server.service" || return 1
-  grep -qxF 'User=disk-arcana' "$SOURCE_BUNDLE/disk-arcana-server.service" || return 1
-  grep -qxF 'Group=disk-arcana' "$SOURCE_BUNDLE/disk-arcana-server.service" || return 1
-  grep -qxF 'NoNewPrivileges=true' "$SOURCE_BUNDLE/disk-arcana-server.service" || return 1
-  grep -qxF 'ProtectSystem=strict' "$SOURCE_BUNDLE/disk-arcana-server.service" || return 1
-  systemd-analyze verify "$SOURCE_BUNDLE/disk-arcana-server.service" >/dev/null 2>&1
+  grep -qxF 'ExecStart=/usr/local/bin/disk-arcana-server' "$unit" || return 1
+  grep -qxF 'User=disk-arcana' "$unit" || return 1
+  grep -qxF 'Group=disk-arcana' "$unit" || return 1
+  grep -qxF 'NoNewPrivileges=true' "$unit" || return 1
+  grep -qxF 'ProtectSystem=strict' "$unit" || return 1
+  systemd-analyze verify "$unit" >/dev/null 2>&1
 }
 
-validate_bundle || die "bundle validation failed"
-validate_unit_contract || die "unit contract validation failed"
+validate_bundle_at "$SOURCE_BUNDLE" || die "bundle validation failed"
+validate_unit_contract "$SOURCE_BUNDLE/disk-arcana-server.service" || die "unit contract validation failed"
 [[ "$(sha "$SOURCE_BUNDLE/manifest.sha256")" == "$AUTH_MANIFEST_SHA" ]] ||
   die "bundle is not bound to the root authorization"
 
@@ -265,6 +267,18 @@ for member in "${MEMBERS[@]}" manifest.sha256; do
 done
 sync -f "$inbox" >/dev/null 2>&1 || die "inbox fsync failed"
 sync -f "$INBOX_ROOT" >/dev/null 2>&1 || die "inbox root fsync failed"
+
+[[ -d "$inbox" && ! -L "$inbox" && "$(stat -c '%a:%u:%g' "$inbox")" == "700:$EXPECT_UID:$EXPECT_GID" ]] ||
+  die "imported inbox has unsafe metadata"
+for member in "${MEMBERS[@]}" manifest.sha256; do
+  [[ -f "$inbox/$member" && ! -L "$inbox/$member" &&
+    "$(stat -c '%a:%u:%g' "$inbox/$member")" == "600:$EXPECT_UID:$EXPECT_GID" ]] ||
+    die "imported inbox member has unsafe metadata"
+done
+validate_bundle_at "$inbox" || die "imported inbox validation failed"
+validate_unit_contract "$inbox/disk-arcana-server.service" || die "imported unit contract validation failed"
+[[ "$(sha "$inbox/manifest.sha256")" == "$AUTH_MANIFEST_SHA" ]] ||
+  die "imported inbox is not bound to the root authorization"
 
 if (( TEST_MODE )); then
   [[ -n "${DISK_ARCANA_BROKER_TEST_HELPER_LOG:-}" ]] || die "test helper log is required"

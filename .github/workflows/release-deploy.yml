@@ -149,10 +149,15 @@ jobs:
       actions: read
       contents: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
           artifact-ids: ${{ needs.build.outputs.artifact_id }}
           path: ${{ runner.temp }}/disk-deploy-bundle
+      - name: Fresh exact-main release gate
+        env:
+          BUILT_SHA: ${{ needs.build.outputs.build_commit }}
+        run: bash scripts/require-fresh-main.sh "$BUILT_SHA"
       - name: Attach exact bundled binary
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3.0.2
         with:
@@ -197,6 +202,12 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           $ver = "${{ github.ref_name }}"
           ./scripts/bundle-windows.ps1 -Binary target/x86_64-pc-windows-msvc/release/disk.exe -OutDir dist -Version $ver
+
+      - name: Fresh exact-main release gate
+        shell: bash
+        env:
+          BUILT_SHA: ${{ github.sha }}
+        run: bash scripts/require-fresh-main.sh "$BUILT_SHA"
 
       - name: Attach Windows zip to GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3.0.2
@@ -258,6 +269,10 @@ jobs:
         run: |
           cp "target/${{ matrix.target }}/release/disk" "${{ matrix.asset }}"
           chmod +x "${{ matrix.asset }}"
+      - name: Fresh exact-main release gate
+        env:
+          BUILT_SHA: ${{ github.sha }}
+        run: bash scripts/require-fresh-main.sh "$BUILT_SHA"
       - name: Attach client binary to GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3.0.2
         with:
@@ -339,6 +354,10 @@ jobs:
           cp "target/${{ matrix.target }}/release/disk" "${{ matrix.asset }}"
           chmod +x "${{ matrix.asset }}"
 
+      - name: Fresh exact-main release gate
+        env:
+          BUILT_SHA: ${{ github.sha }}
+        run: bash scripts/require-fresh-main.sh "$BUILT_SHA"
       - name: Attach macOS client to GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3.0.2
         with:
@@ -368,6 +387,7 @@ jobs:
       actions: read
       contents: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
           artifact-ids: ${{ needs.build.outputs.artifact_id }}
@@ -385,7 +405,7 @@ jobs:
           [[ "$(id -u)" -ne 0 ]]
           printf 'runner_user=%s runner_name=%s\n' "$(id -un)" "$RUNNER_NAME"
           systemctl is-active --quiet disk-arcana-server
-          systemctl is-enabled --quiet disk-arcana-server
+          [[ "$(systemctl show disk-arcana-server -p UnitFileState --value)" == enabled ]]
           [[ "$EXPECTED_ARTIFACT_ID" =~ ^[0-9]+$ ]]
           [[ "$EXPECTED_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
           [[ "$EXPECTED_MANIFEST_SHA" =~ ^[0-9a-f]{64}$ ]]
@@ -395,11 +415,13 @@ jobs:
           printf 'artifact_id=%s artifact_digest=%s manifest_sha=%s commit=%s\n' \
             "$EXPECTED_ARTIFACT_ID" "$EXPECTED_ARTIFACT_DIGEST" \
             "$EXPECTED_MANIFEST_SHA" "$EXPECTED_BUILD_COMMIT"
+          bash scripts/require-fresh-main.sh "$EXPECTED_BUILD_COMMIT"
           authorization_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-staging"
           sudo -n /usr/local/sbin/disk-arcana-deploy-broker --deploy \
             "$BUNDLE" "$authorization_id"
           sha256sum /usr/local/bin/disk-arcana-server \
             /etc/systemd/system/disk-arcana-server.service
+          [[ "$(systemctl show disk-arcana-server -p UnitFileState --value)" == enabled ]]
           systemctl show disk-arcana-server \
             -p ActiveState -p UnitFileState -p Restart \
             -p StartLimitIntervalUSec -p StartLimitBurst
@@ -426,6 +448,7 @@ jobs:
       actions: read
       contents: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
           artifact-ids: ${{ needs.build.outputs.artifact_id }}
@@ -443,7 +466,7 @@ jobs:
           [[ "$(id -u)" -ne 0 ]]
           printf 'runner_user=%s runner_name=%s\n' "$(id -un)" "$RUNNER_NAME"
           systemctl is-active --quiet disk-arcana-server
-          systemctl is-enabled --quiet disk-arcana-server
+          [[ "$(systemctl show disk-arcana-server -p UnitFileState --value)" == enabled ]]
           [[ "$EXPECTED_ARTIFACT_ID" =~ ^[0-9]+$ ]]
           [[ "$EXPECTED_ARTIFACT_DIGEST" =~ ^[0-9a-f]{64}$ ]]
           [[ "$EXPECTED_MANIFEST_SHA" =~ ^[0-9a-f]{64}$ ]]
@@ -453,11 +476,13 @@ jobs:
           printf 'artifact_id=%s artifact_digest=%s manifest_sha=%s commit=%s\n' \
             "$EXPECTED_ARTIFACT_ID" "$EXPECTED_ARTIFACT_DIGEST" \
             "$EXPECTED_MANIFEST_SHA" "$EXPECTED_BUILD_COMMIT"
+          bash scripts/require-fresh-main.sh "$EXPECTED_BUILD_COMMIT"
           authorization_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-production"
           sudo -n /usr/local/sbin/disk-arcana-deploy-broker --deploy \
             "$BUNDLE" "$authorization_id"
           sha256sum /usr/local/bin/disk-arcana-server \
             /etc/systemd/system/disk-arcana-server.service
+          [[ "$(systemctl show disk-arcana-server -p UnitFileState --value)" == enabled ]]
           systemctl show disk-arcana-server \
             -p ActiveState -p UnitFileState -p Restart \
             -p StartLimitIntervalUSec -p StartLimitBurst
