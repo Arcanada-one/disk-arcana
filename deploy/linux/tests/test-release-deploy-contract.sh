@@ -9,6 +9,7 @@ ROOT="$(git rev-parse --show-toplevel)"
 WORKFLOW="${WORKFLOW_OVERRIDE:-$ROOT/.github/workflows/release-deploy.yml}"
 SHARE_WORKFLOW="${SHARE_WORKFLOW_OVERRIDE:-$ROOT/.github/workflows/deploy-arcana-agents-share.yml}"
 PROBE_WORKFLOW="${PROBE_WORKFLOW_OVERRIDE:-$ROOT/.github/workflows/deploy-probe.yml}"
+STAGE_PROBE_WORKFLOW="${STAGE_PROBE_WORKFLOW_OVERRIDE:-$ROOT/.github/workflows/stage-runner-probe.yml}"
 INSTALLER="$ROOT/deploy/linux/install.sh"
 
 fail() {
@@ -164,6 +165,8 @@ macos_release_block="$(sed -n '/^  build-macos-client:/,/^  deploy-stage:/p' "$W
 share_diff_block="$(sed -n '/name: Diff share drop-in/,/name: Install share drop-in/p' "$SHARE_WORKFLOW")"
 share_install_block="$(sed -n '/name: Install share drop-in/,$p' "$SHARE_WORKFLOW")"
 isolation_step="$(sed -n '/^      - name: Staging isolation capabilities$/,/^      - name: systemd version$/p' "$PROBE_WORKFLOW")"
+[[ -f "$STAGE_PROBE_WORKFLOW" ]] || fail "group-scoped stage probe workflow is absent"
+stage_probe_block="$(sed -n '/^  probe:/,$p' "$STAGE_PROBE_WORKFLOW")"
 [[ "$dev_block" == *"github.event.inputs.target == 'prod'"* ]] ||
   fail "production dispatch does not first run staging in the same workflow"
 [[ "$dev_block" == *"github.ref == 'refs/heads/main'"* ]] ||
@@ -274,6 +277,88 @@ probe_redirect_scan="$(sed -E \
 ! grep -qE '<>|(^|[^<])>{1,2}([^=]|$)' <<<"$probe_redirect_scan" ||
   fail "read-only deploy probe writes outside its GitHub output"
 
+grep -qF 'name: Stage runner probe (read-only)' "$STAGE_PROBE_WORKFLOW" ||
+  fail "group-scoped stage probe has the wrong workflow identity"
+stage_probe_on="$(sed -n '/^on:/,/^permissions:/p' "$STAGE_PROBE_WORKFLOW")"
+[[ "$stage_probe_on" == *'workflow_dispatch:'* ]] ||
+  fail "group-scoped stage probe is not workflow-dispatch enabled"
+! grep -qE '^[[:space:]]+(push|pull_request|schedule|workflow_call):' <<<"$stage_probe_on" ||
+  fail "group-scoped stage probe has an additional trigger"
+grep -qF 'permissions: {}' "$STAGE_PROBE_WORKFLOW" ||
+  fail "group-scoped stage probe permissions are not empty"
+grep -qF 'group: disk-arcana-stage' <<<"$stage_probe_block" ||
+  fail "group-scoped stage probe does not require runner group disk-arcana-stage"
+grep -qF 'labels: [self-hosted, Linux, X64, disk-arcana-stage]' <<<"$stage_probe_block" ||
+  fail "group-scoped stage probe does not require the exact dedicated labels"
+grep -qF 'environment: staging' <<<"$stage_probe_block" ||
+  fail "group-scoped stage probe does not use the staging environment"
+! grep -qE '^[[:space:]]*uses:' "$STAGE_PROBE_WORKFLOW" ||
+  fail "group-scoped stage probe is not actionless"
+! grep -qE '^[[:space:]]*(if|continue-on-error):' <<<"$stage_probe_block" ||
+  fail "group-scoped stage probe contains a skippable or non-blocking step"
+
+stage_source_guard="$(sed -n '/^      - name: Exact main source$/,/^      - name: Read-only readiness verdict$/p' \
+  "$STAGE_PROBE_WORKFLOW")"
+[[ "$stage_source_guard" == *'[[ "$GITHUB_REF" == refs/heads/main ]]'* ]] ||
+  fail "group-scoped stage probe does not require exact main"
+[[ "$stage_source_guard" == *'[[ "$GITHUB_REPOSITORY" == Arcanada-one/disk-arcana ]]'* ]] ||
+  fail "group-scoped stage probe does not require the Disk repository"
+[[ "$stage_source_guard" == *'Arcanada-one/disk-arcana/.github/workflows/stage-runner-probe.yml@refs/heads/main'* ]] ||
+  fail "group-scoped stage probe does not require its exact main workflow reference"
+! grep -qE '^[[:space:]]*(if|then|elif|else|case|while|until|for)[[:space:]]' \
+  <<<"$stage_source_guard" ||
+  fail "group-scoped stage probe exact-main guard is conditional"
+
+[[ "$stage_probe_block" == *'[[ "$(id -u)" != 0 ]]'* ]] ||
+  fail "group-scoped stage probe does not reject root execution"
+[[ "$stage_probe_block" == *'[[ "$rootless_userns" == true ]]'* ]] ||
+  fail "group-scoped stage probe does not require a rootless user namespace"
+[[ "$stage_probe_block" == *'(( subuid_count >= 65536 ))'* ]] ||
+  fail "group-scoped stage probe does not require subordinate UIDs"
+[[ "$stage_probe_block" == *'(( subgid_count >= 65536 ))'* ]] ||
+  fail "group-scoped stage probe does not require subordinate GIDs"
+[[ "$stage_probe_block" == *'[[ "$user_systemd" == true ]]'* ]] ||
+  fail "group-scoped stage probe does not require user systemd"
+[[ "$stage_probe_block" == *'[[ "$linger" == yes ]]'* ]] ||
+  fail "group-scoped stage probe does not require linger"
+[[ "$stage_probe_block" == *'[[ "$podman" == true ]]'* ]] ||
+  fail "group-scoped stage probe does not require podman"
+[[ "$stage_probe_block" == *'[[ "$docker_socket_writable" == false ]]'* ]] ||
+  fail "group-scoped stage probe does not reject writable Docker"
+[[ "$stage_probe_block" == *'[[ "$runner_services" == 1 ]]'* ]] ||
+  fail "group-scoped stage probe does not require exactly one runner service"
+[[ "$stage_probe_block" == *'[[ " $(id -Gn) " == *" disk-arcana-deploy "* ]]'* ]] ||
+  fail "group-scoped stage probe does not require the deployment group"
+[[ "$stage_probe_block" == *'[[ "${#sudo_commands[@]}" -eq 1 ]]'* ]] ||
+  fail "group-scoped stage probe does not require one sudo command"
+[[ "$stage_probe_block" == *'[[ "${sudo_commands[0]}" == '\''/usr/local/sbin/disk-arcana-deploy-broker --deploy *'\'' ]]'* ]] ||
+  fail "group-scoped stage probe does not require the exact narrow sudo command"
+[[ "$stage_probe_block" == *'[[ -f /etc/systemd/system/disk-arcana-server.service ]]'* ]] ||
+  fail "group-scoped stage probe does not require the installed unit"
+[[ "$stage_probe_block" == *'[[ "$(systemctl is-active disk-arcana-server 2>/dev/null)" == active ]]'* ]] ||
+  fail "group-scoped stage probe does not require the active service"
+[[ "$stage_probe_block" == *'[[ "$(systemctl show disk-arcana-server -p UnitFileState --value 2>/dev/null)" == enabled ]]'* ]] ||
+  fail "group-scoped stage probe does not require exact UnitFileState=enabled"
+[[ "$stage_probe_block" == *'[[ "$(systemctl show disk-arcana-server -p Restart --value 2>/dev/null)" == on-failure ]]'* ]] ||
+  fail "group-scoped stage probe does not require Restart=on-failure"
+[[ "$stage_probe_block" == *'[[ "$(systemctl show disk-arcana-server -p StartLimitIntervalUSec --value 2>/dev/null)" == 2min ]]'* ]] ||
+  fail "group-scoped stage probe does not require StartLimitIntervalUSec=2min"
+[[ "$stage_probe_block" == *'[[ "$(systemctl show disk-arcana-server -p StartLimitBurst --value 2>/dev/null)" == 5 ]]'* ]] ||
+  fail "group-scoped stage probe does not require StartLimitBurst=5"
+[[ "$stage_probe_block" == *'curl --fail --silent --show-error --max-time 10 -o /dev/null'* ]] ||
+  fail "group-scoped stage probe does not require a body-suppressed health check"
+
+! grep -qE '(^|[;&|])[[:space:]]*(rm|mv|cp|install|touch|mkdir|chmod|chown|setfacl|tee|truncate|mount|umount|kill|pkill|reboot|shutdown|apt|apt-get|dnf|yum|pacman|snap)[[:space:]]|systemctl[[:space:]]+(--user[[:space:]]+)?(enable|disable|start|stop|restart|reload|daemon-reload|mask|unmask|edit|link|preset)|loginctl[[:space:]]+(enable-linger|disable-linger)|(^|[;&|])[[:space:]]*(podman|docker)[[:space:]]+(run|create|start|stop|restart|rm|build|pull|push|exec)' \
+  <<<"$stage_probe_block" || fail "group-scoped stage probe contains a host mutation"
+stage_probe_redirect_scan="$(sed -E \
+  -e 's#2?>/dev/null([[:space:];|&)]|$)#\1#g' \
+  -e 's#2>&1([[:space:];|&)]|$)#\1#g' \
+  <<<"$stage_probe_block")"
+! grep -qE '<>|(^|[^<])>{1,2}([^=]|$)' <<<"$stage_probe_redirect_scan" ||
+  fail "group-scoped stage probe writes to a host path"
+! grep -qE '(^|[[:space:]])(env|printenv|set)[[:space:]]*($|[|;&])|/etc/(shadow|sudoers|environment)|/proc/[0-9]+/environ' \
+  <<<"$stage_probe_block" || fail "group-scoped stage probe reads protected process or credential state"
+
 for block in "$dev_block" "$prod_block"; do
   [[ "$block" == *'/usr/local/sbin/disk-arcana-deploy-broker --deploy'* ]] ||
     fail "deploy job bypasses the installed broker"
@@ -329,6 +414,21 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
       WORKFLOW_OVERRIDE="$WORKFLOW" \
       SHARE_WORKFLOW_OVERRIDE="$SHARE_WORKFLOW" \
       PROBE_WORKFLOW_OVERRIDE="$probe" \
+      "$0" >"$fixture_output" 2>&1
+    fixture_rc=$?
+    set -e
+    [[ "$fixture_rc" -ne 0 ]] || fail "$label fixture passed"
+    grep -qF "$expected" "$fixture_output" || fail "$label fixture failed for an unintended reason"
+  }
+
+  run_stage_probe_fixture() {
+    local stage_probe="$1" expected="$2" label="$3" fixture_rc
+    set +e
+    DISK_ARCANA_ORDER_FIXTURE_CHILD=1 \
+      WORKFLOW_OVERRIDE="$WORKFLOW" \
+      SHARE_WORKFLOW_OVERRIDE="$SHARE_WORKFLOW" \
+      PROBE_WORKFLOW_OVERRIDE="$PROBE_WORKFLOW" \
+      STAGE_PROBE_WORKFLOW_OVERRIDE="$stage_probe" \
       "$0" >"$fixture_output" 2>&1
     fixture_rc=$?
     set -e
@@ -568,6 +668,96 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
     'FAIL  read-only deploy probe writes outside its GitHub output' \
     "GitHub-output suffix write"
   printf 'PASS  GitHub-output suffix write is rejected for the intended reason\n'
+
+  labels_only_stage_probe="$fixture_root/stage-probe-labels-only.yml"
+  sed '/^[[:space:]]*group: disk-arcana-stage$/d' \
+    "$STAGE_PROBE_WORKFLOW" >"$labels_only_stage_probe"
+  run_stage_probe_fixture "$labels_only_stage_probe" \
+    'FAIL  group-scoped stage probe does not require runner group disk-arcana-stage' \
+    "labels-only stage probe"
+  printf 'PASS  labels-only stage probe is rejected for the intended reason\n'
+
+  wrong_group_stage_probe="$fixture_root/stage-probe-wrong-group.yml"
+  sed 's/group: disk-arcana-stage/group: ci-general/' \
+    "$STAGE_PROBE_WORKFLOW" >"$wrong_group_stage_probe"
+  run_stage_probe_fixture "$wrong_group_stage_probe" \
+    'FAIL  group-scoped stage probe does not require runner group disk-arcana-stage' \
+    "wrong runner group"
+  printf 'PASS  wrong runner group is rejected for the intended reason\n'
+
+  action_stage_probe="$fixture_root/stage-probe-action.yml"
+  sed '/^    steps:$/a\      - uses: actions/checkout@0000000000000000000000000000000000000000' \
+    "$STAGE_PROBE_WORKFLOW" >"$action_stage_probe"
+  run_stage_probe_fixture "$action_stage_probe" \
+    'FAIL  group-scoped stage probe is not actionless' \
+    "stage probe action step"
+  printf 'PASS  added action step is rejected for the intended reason\n'
+
+  conditional_main_stage_probe="$fixture_root/stage-probe-conditional-main.yml"
+  awk '
+    !mutated && index($0, "[[ \"$GITHUB_REF\" == refs/heads/main ]]") {
+      match($0, /[^ ]/)
+      prefix=substr($0, 1, RSTART - 1)
+      print prefix "if false; then"
+      print "  " $0
+      print prefix "fi"
+      mutated=1
+      next
+    }
+    {print}
+  ' "$STAGE_PROBE_WORKFLOW" >"$conditional_main_stage_probe"
+  run_stage_probe_fixture "$conditional_main_stage_probe" \
+    'FAIL  group-scoped stage probe exact-main guard is conditional' \
+    "conditional exact-main guard"
+  printf 'PASS  conditional exact-main guard is rejected for the intended reason\n'
+
+  mutating_stage_probe="$fixture_root/stage-probe-systemd-mutation.yml"
+  sed '/rootless_userns=/a\          systemctl restart disk-arcana-server' \
+    "$STAGE_PROBE_WORKFLOW" >"$mutating_stage_probe"
+  run_stage_probe_fixture "$mutating_stage_probe" \
+    'FAIL  group-scoped stage probe contains a host mutation' \
+    "stage systemd mutation"
+  printf 'PASS  stage systemd mutation is rejected for the intended reason\n'
+
+  writing_stage_probe="$fixture_root/stage-probe-host-write.yml"
+  sed '/rootless_userns=/a\          printf mutated >disk-arcana-stage-probe-mutant' \
+    "$STAGE_PROBE_WORKFLOW" >"$writing_stage_probe"
+  run_stage_probe_fixture "$writing_stage_probe" \
+    'FAIL  group-scoped stage probe writes to a host path' \
+    "stage host write"
+  printf 'PASS  stage host write is rejected for the intended reason\n'
+
+  read_write_stage_probe="$fixture_root/stage-probe-read-write.yml"
+  sed '/rootless_userns=/a\          exec 3<>disk-arcana-stage-probe-mutant' \
+    "$STAGE_PROBE_WORKFLOW" >"$read_write_stage_probe"
+  run_stage_probe_fixture "$read_write_stage_probe" \
+    'FAIL  group-scoped stage probe writes to a host path' \
+    "stage read-write redirection"
+  printf 'PASS  stage read-write redirection is rejected for the intended reason\n'
+
+  docker_accept_stage_probe="$fixture_root/stage-probe-docker-accept.yml"
+  sed 's/\[\[ "$docker_socket_writable" == false \]\]/[[ "$docker_socket_writable" == true ]]/' \
+    "$STAGE_PROBE_WORKFLOW" >"$docker_accept_stage_probe"
+  run_stage_probe_fixture "$docker_accept_stage_probe" \
+    'FAIL  group-scoped stage probe does not reject writable Docker' \
+    "writable Docker acceptance"
+  printf 'PASS  writable Docker acceptance is rejected for the intended reason\n'
+
+  root_accept_stage_probe="$fixture_root/stage-probe-root-accept.yml"
+  sed 's/\[\[ "$(id -u)" != 0 \]\]/[[ "$(id -u)" == 0 ]]/' \
+    "$STAGE_PROBE_WORKFLOW" >"$root_accept_stage_probe"
+  run_stage_probe_fixture "$root_accept_stage_probe" \
+    'FAIL  group-scoped stage probe does not reject root execution' \
+    "root UID acceptance"
+  printf 'PASS  root UID acceptance is rejected for the intended reason\n'
+
+  broad_sudo_stage_probe="$fixture_root/stage-probe-broad-sudo.yml"
+  sed "s#\[\[ \"\${sudo_commands\[0\]}\" == '/usr/local/sbin/disk-arcana-deploy-broker --deploy \*' \]\]#[[ \"\${sudo_commands[0]}\" == *NOPASSWD* ]]#" \
+    "$STAGE_PROBE_WORKFLOW" >"$broad_sudo_stage_probe"
+  run_stage_probe_fixture "$broad_sudo_stage_probe" \
+    'FAIL  group-scoped stage probe does not require the exact narrow sudo command' \
+    "broad sudo acceptance"
+  printf 'PASS  broad sudo acceptance is rejected for the intended reason\n'
 fi
 
 printf 'PASS  release workflow deploys one manifest-bound artifact through staging then production\n'
