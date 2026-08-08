@@ -70,7 +70,7 @@ jobs:
           [[ "$docker_socket_writable" == false ]]
           [[ "${#runner_units[@]}" -eq 1 ]]
           [[ "${runner_units[0]}" == actions.runner.*."${RUNNER_NAME}".service ]]
-          grep -qF "/${runner_units[0]}" /proc/self/cgroup
+          grep -qF "/system.slice/${runner_units[0]}" /proc/self/cgroup
 
           sudo_listing="$(LC_ALL=C sudo -n -l 2>/dev/null)"
           mapfile -t sudo_commands < <(printf '%s\n' "$sudo_listing" | awk '

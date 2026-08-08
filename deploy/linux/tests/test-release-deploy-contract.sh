@@ -136,6 +136,45 @@ assert_direct_stage_command() {
     fail "group-scoped stage probe does not execute $label directly"
 }
 
+assert_stage_assertions_execute() {
+  local block="$1" script witness witness_output expected_markers actual_markers
+  script="$(awk '
+    found && ($0 == "" || /^          /) {
+      sub(/^          /, "")
+      print
+      next
+    }
+    found {exit}
+    /^        run: \|$/ {found=1}
+  ' <<<"$block")"
+  witness="$(awk '
+    {
+      line=$0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+    }
+    line ~ /^\[\[/ || line ~ /^\(\(/ ||
+      line ~ /^grep -qF "\/\$\{runner_units\[0\]\}" \/proc\/self\/cgroup$/ {
+        marker++
+        printf "printf '\''STAGE_READINESS_ASSERTION_%d\\n'\''\n", marker
+        next
+      }
+    line ~ /^[a-zA-Z_][a-zA-Z0-9_]*\(\)[[:space:]]*\{$/ ||
+      line ~ /^(true|false)[[:space:]]*&&[[:space:]]*\{$/ ||
+      $0 == "}" || line ~ /^if .*; then$/ ||
+      line == "else" || line == "fi" {print line; next}
+    {print ":"}
+  ' <<<"$script")"
+  expected_markers="$(awk '/^printf '\''STAGE_READINESS_ASSERTION_[0-9]+/ {count++}
+    END {print count + 0}' <<<"$witness")"
+  witness_output="$(bash -s <<<"$witness")" ||
+    fail "group-scoped stage probe readiness execution witness is invalid"
+  actual_markers="$(awk '/^STAGE_READINESS_ASSERTION_[0-9]+$/ {count++}
+    END {print count + 0}' <<<"$witness_output")"
+  [[ "$expected_markers" -gt 0 && "$actual_markers" -eq "$expected_markers" ]] ||
+    fail "group-scoped stage probe readiness assertions are not execution-load-bearing"
+}
+
 count_exact_command() {
   local file="$1" expected="$2"
   awk -v expected="$expected" '
@@ -347,7 +386,7 @@ assert_direct_stage_command "$stage_readiness_step" '[[ "${#runner_units[@]}" -e
   "the single-runner-unit requirement"
 assert_direct_stage_command "$stage_readiness_step" '[[ "${runner_units[0]}" == actions.runner.*."${RUNNER_NAME}".service ]]' \
   "the runner-name unit binding"
-assert_direct_stage_command "$stage_readiness_step" 'grep -qF "/${runner_units[0]}" /proc/self/cgroup' \
+assert_direct_stage_command "$stage_readiness_step" 'grep -qF "/system.slice/${runner_units[0]}" /proc/self/cgroup' \
   "the executing-cgroup runner binding"
 assert_direct_stage_command "$stage_readiness_step" '[[ "${#sudo_commands[@]}" -eq 1 ]]' \
   "the single sudo-command requirement"
@@ -369,6 +408,7 @@ assert_direct_stage_command "$stage_readiness_step" '[[ "$(systemctl show disk-a
   fail "group-scoped stage probe does not capture the health body"
 assert_direct_stage_command "$stage_readiness_step" '[[ "$(printf '\''%s'\'' "$health_body" | tr -d '\''[:space:]'\'')" == *'\''"status":"ok"'\''* ]]' \
   "the canonical status=ok health verdict"
+assert_stage_assertions_execute "$stage_readiness_step"
 [[ "$(grep -cF 'curl --fail' <<<"$stage_probe_block")" -eq 1 ]] ||
   fail "group-scoped stage probe contains an additional network request"
 [[ "$(grep -cF 'http://127.0.0.1:9446/health' <<<"$stage_probe_block")" -eq 1 ]] ||
@@ -774,34 +814,41 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
 
   inert_readiness_stage_probe="$fixture_root/stage-probe-inert-readiness-function.yml"
   awk '
-    /^          \[\[ "\$\(id -u\)" != 0 \]\]$/ && !mutated {
+    /^          \[\[ "\$rootless_userns" == true \]\]$/ && !mutated {
       print "          readiness_assertions() {"
-      print "  " $0
+      print $0
       in_assertions=1
       mutated=1
       next
     }
-    in_assertions && /^          \[\[ "\$\(printf / {
-      print "  " $0
+    in_assertions && index($0, "grep -qF \"/system.slice/${runner_units[0]}\" /proc/self/cgroup") {
+      print $0
       print "          }"
       in_assertions=0
       next
     }
-    in_assertions {print "  " $0; next}
     {print}
   ' "$STAGE_PROBE_WORKFLOW" >"$inert_readiness_stage_probe"
   run_stage_probe_fixture "$inert_readiness_stage_probe" \
-    'FAIL  group-scoped stage probe does not execute the non-root rejection directly' \
+    'FAIL  group-scoped stage probe readiness assertions are not execution-load-bearing' \
     "inert readiness function"
   printf 'PASS  inert readiness function is rejected for the intended reason\n'
 
   unbound_runner_stage_probe="$fixture_root/stage-probe-unbound-runner.yml"
-  sed '/grep -qF "\/\${runner_units\[0\]}" \/proc\/self\/cgroup/d' \
+  sed '/grep -qF "\/system.slice\/\${runner_units\[0\]}" \/proc\/self\/cgroup/d' \
     "$STAGE_PROBE_WORKFLOW" >"$unbound_runner_stage_probe"
   run_stage_probe_fixture "$unbound_runner_stage_probe" \
     'FAIL  group-scoped stage probe does not execute the executing-cgroup runner binding directly' \
     "unbound runner service"
   printf 'PASS  unbound runner service is rejected for the intended reason\n'
+
+  user_scope_runner_stage_probe="$fixture_root/stage-probe-user-scope-runner.yml"
+  sed 's#grep -qF "/system.slice/${runner_units\[0\]}" /proc/self/cgroup#grep -qF "/${runner_units[0]}" /proc/self/cgroup#' \
+    "$STAGE_PROBE_WORKFLOW" >"$user_scope_runner_stage_probe"
+  run_stage_probe_fixture "$user_scope_runner_stage_probe" \
+    'FAIL  group-scoped stage probe does not execute the executing-cgroup runner binding directly' \
+    "user-scope runner cgroup"
+  printf 'PASS  user-scope runner cgroup is rejected for the intended reason\n'
 
   degraded_health_stage_probe="$fixture_root/stage-probe-degraded-health.yml"
   sed 's/== \*'\''"status":"ok"'\''\* /== *'\''"status":"degraded"'\''* /' \
