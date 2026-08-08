@@ -36,7 +36,9 @@ prod_block="$(sed -n '/^  deploy-prod:/,$p' "$WORKFLOW")"
   fail "staging deploy does not independently require exact main"
 [[ "$dev_block" == *'environment: staging'* ]] ||
   fail "staging deploy does not use the protected staging environment"
-[[ "$dev_block" == *'runs-on: [self-hosted, Linux, X64, disk-arcana-stage]'* ]] ||
+[[ "$dev_block" == *'group: disk-arcana-stage'* ]] ||
+  fail "staging deploy does not require the repository-restricted runner group"
+[[ "$dev_block" == *'labels: [self-hosted, Linux, X64, disk-arcana-stage]'* ]] ||
   fail "staging deploy does not require the dedicated runner label"
 [[ "$prod_block" == *'needs: [build, deploy-stage]'* ]] ||
   fail "production deploy is not causally gated on the same-run staging job"
