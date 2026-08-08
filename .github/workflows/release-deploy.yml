@@ -19,6 +19,7 @@ on:
           # arcana-devs — a side effect nobody asked for when all you need is the
           # artifact.
           - build-only
+          - stage-probe
           - stage
           - prod
 
@@ -32,11 +33,128 @@ env:
   BUILD_TARGET: x86_64-unknown-linux-gnu
 
 jobs:
+  # INFRA-0370: actionless proof on the restricted staging runner group. The
+  # probe-only target cannot reach any build or delivery job in this workflow.
+  stage-readiness:
+    name: Dedicated staging runner readiness
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.event.inputs.target == 'stage-probe'
+    environment: staging
+    runs-on:
+      group: disk-arcana-stage
+      labels: [self-hosted, Linux, X64, disk-arcana-stage]
+    permissions: {}
+    timeout-minutes: 10
+    steps:
+      - name: Exact main source
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$GITHUB_REPOSITORY" == Arcanada-one/disk-arcana ]]
+          [[ "$GITHUB_WORKFLOW_REF" == Arcanada-one/disk-arcana/.github/workflows/release-deploy.yml@refs/heads/main ]]
+
+      - name: Read-only readiness verdict
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          bool_command() {
+            if "$@" >/dev/null 2>&1; then printf true; else printf false; fi
+          }
+
+          subid_count() {
+            local file="$1"
+            awk -F: -v user="$(id -un)" '
+              $1 == user && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ {total += $3}
+              END {print total + 0}
+            ' "$file" 2>/dev/null
+          }
+
+          assert_exact_sudo_policy() {
+            local -a sudo_specs=()
+            mapfile -t sudo_specs < <(awk '
+              / may run the following commands on .*:$/ {in_specs=1; next}
+              !in_specs {next}
+              {
+                spec=$0
+                sub(/^[[:space:]]+/, "", spec)
+                sub(/[[:space:]]+$/, "", spec)
+                if (spec !~ /^\([^)]*\)([[:space:]]|$)/) next
+                gsub(/[[:space:]]+/, " ", spec)
+                gsub(/\([[:space:]]+/, "(", spec)
+                gsub(/[[:space:]]+\)/, ")", spec)
+                sub(/[[:space:]]*:[[:space:]]*/, ": ", spec)
+                print spec
+              }
+            ')
+            [[ "${#sudo_specs[@]}" -eq 1 ]]
+            [[ "${sudo_specs[0]}" == '(root) NOPASSWD: /usr/local/sbin/disk-arcana-deploy-broker --deploy *' ]]
+          }
+
+          assert_active_runner_binding() {
+            local unit="$1" cgroup_file="$2"
+            [[ "$(systemctl is-active "$unit" 2>/dev/null)" == active ]]
+            awk -F: -v expected="/system.slice/$unit" '
+              {
+                path=$3
+                if (path == expected || index(path, expected "/") == 1) found=1
+              }
+              END {exit found ? 0 : 1}
+            ' "$cgroup_file"
+          }
+
+          [[ "$(id -u)" != 0 ]]
+          [[ " $(id -Gn) " == *" disk-arcana-deploy "* ]]
+
+          rootless_userns=false
+          if command -v unshare >/dev/null 2>&1; then
+            rootless_userns="$(bool_command unshare --user --map-root-user true)"
+          fi
+          subuid_count="$(subid_count /etc/subuid)"
+          subgid_count="$(subid_count /etc/subgid)"
+          user_systemd="$(bool_command systemctl --user show-environment)"
+          linger="$(loginctl show-user "$(id -u)" -p Linger --value 2>/dev/null || printf unknown)"
+          podman="$(bool_command command -v podman)"
+          docker_socket_writable="$(bool_command test -w /var/run/docker.sock)"
+          mapfile -t runner_units < <(systemctl list-units --type=service --all \
+            'actions.runner.*' --plain --no-legend --no-pager 2>/dev/null | awk '{print $1}')
+          mapfile -t installed_runner_units < <(systemctl list-unit-files --type=service \
+            'actions.runner.*' --no-legend --no-pager 2>/dev/null | awk '{print $1}')
+
+          [[ "$rootless_userns" == true ]]
+          (( subuid_count >= 65536 ))
+          (( subgid_count >= 65536 ))
+          [[ "$user_systemd" == true ]]
+          [[ "$linger" == yes ]]
+          [[ "$podman" == true ]]
+          [[ "$docker_socket_writable" == false ]]
+          [[ "${#runner_units[@]}" -eq 1 ]]
+          [[ "${runner_units[0]}" == actions.runner.*."${RUNNER_NAME}".service ]]
+          assert_active_runner_binding "${runner_units[0]}" /proc/self/cgroup
+          [[ "${#installed_runner_units[@]}" -eq 1 ]]
+          [[ "${installed_runner_units[0]}" == "${runner_units[0]}" ]]
+
+          LC_ALL=C sudo -n -l 2>/dev/null | assert_exact_sudo_policy
+
+          [[ -f /etc/systemd/system/disk-arcana-server.service ]]
+          [[ "$(systemctl is-active disk-arcana-server 2>/dev/null)" == active ]]
+          [[ "$(systemctl show disk-arcana-server -p UnitFileState --value 2>/dev/null)" == enabled ]]
+          [[ "$(systemctl show disk-arcana-server -p Restart --value 2>/dev/null)" == on-failure ]]
+          [[ "$(systemctl show disk-arcana-server -p StartLimitIntervalUSec --value 2>/dev/null)" == 2min ]]
+          [[ "$(systemctl show disk-arcana-server -p StartLimitBurst --value 2>/dev/null)" == 5 ]]
+          curl --fail --silent --show-error --max-time 10 -o /dev/null http://127.0.0.1:9446/health
+
+          printf 'readiness=ok active_runner_units=%s installed_runner_units=%s sudo_specs=1\n' \
+            "${#runner_units[@]}" "${#installed_runner_units[@]}"
   # ──────────────────────────────────────────────────────────────────────────
   # 1. Build a release binary for Linux x86_64 using cross.
   # ──────────────────────────────────────────────────────────────────────────
   build:
     name: Build (x86_64-unknown-linux-gnu)
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.target != 'stage-probe'
     # `cross` drives the build through a container, so this job needs Docker
     # access — but `cargo install cross` compiles ON THE HOST first, so the
     # runner also needs a working C toolchain. The `docker` label alone does
@@ -142,7 +260,9 @@ jobs:
 
   attach-linux-release:
     name: Attach Linux server to GitHub Release
-    if: startsWith(github.ref, 'refs/tags/')
+    if: >-
+      startsWith(github.ref, 'refs/tags/') &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.target != 'stage-probe')
     needs: build
     runs-on: [self-hosted, Linux, X64]
     permissions:
@@ -170,7 +290,9 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────────
   build-windows-client:
     name: Build Windows client (portable zip)
-    if: startsWith(github.ref, 'refs/tags/')
+    if: >-
+      startsWith(github.ref, 'refs/tags/') &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.target != 'stage-probe')
     runs-on: windows-latest
     permissions:
       contents: write
@@ -220,7 +342,9 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────────
   build-linux-client:
     name: Build Linux client (disk)
-    if: startsWith(github.ref, 'refs/tags/')
+    if: >-
+      startsWith(github.ref, 'refs/tags/') &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.target != 'stage-probe')
     # Also uses `cross`; same host-toolchain requirement as `build` above —
     # pinned to ci-general for the same reason (see the note on that job).
     runs-on: [self-hosted, Linux, X64, ci-general]
@@ -286,7 +410,9 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────────
   build-macos-client:
     name: Build macOS client (signed disk)
-    if: startsWith(github.ref, 'refs/tags/')
+    if: >-
+      startsWith(github.ref, 'refs/tags/') &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.target != 'stage-probe')
     runs-on: macos-14
     permissions:
       contents: write
