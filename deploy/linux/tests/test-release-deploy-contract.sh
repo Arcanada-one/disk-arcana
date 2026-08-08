@@ -192,9 +192,16 @@ share_diff_block="$(sed -n '/name: Diff share drop-in/,/name: Install share drop
 share_install_block="$(sed -n '/name: Install share drop-in/,$p' "$SHARE_WORKFLOW")"
 isolation_step="$(sed -n '/^      - name: Staging isolation capabilities$/,/^      - name: systemd version$/p' "$PROBE_WORKFLOW")"
 [[ -f "$STAGE_PROBE_WORKFLOW" ]] || fail "group-scoped stage probe workflow is absent"
-stage_probe_block="$(sed -n '/^  probe:/,$p' "$STAGE_PROBE_WORKFLOW")"
+stage_probe_block="$(awk '
+  /^  probe:$/ {in_probe=1}
+  in_probe && $0 != "  probe:" && /^  [a-zA-Z0-9_-]+:$/ {exit}
+  in_probe {print}
+' "$STAGE_PROBE_WORKFLOW")"
+[[ -n "$stage_probe_block" ]] || fail "group-scoped stage probe job is absent"
+[[ "$(grep -cFx '      - name: Read-only readiness verdict' <<<"$stage_probe_block")" -eq 1 ]] ||
+  fail "group-scoped stage probe job does not contain exactly one readiness step"
 stage_readiness_step="$(sed -n '/^      - name: Read-only readiness verdict$/,$p' \
-  "$STAGE_PROBE_WORKFLOW")"
+  <<<"$stage_probe_block")"
 [[ "$dev_block" == *"github.event.inputs.target == 'prod'"* ]] ||
   fail "production dispatch does not first run staging in the same workflow"
 [[ "$dev_block" == *"github.ref == 'refs/heads/main'"* ]] ||
@@ -332,7 +339,7 @@ grep -qF 'environment: staging' <<<"$stage_probe_block" ||
   fail "group-scoped stage probe contains a skippable or non-blocking step"
 
 stage_source_guard="$(sed -n '/^      - name: Exact main source$/,/^      - name: Read-only readiness verdict$/p' \
-  "$STAGE_PROBE_WORKFLOW")"
+  <<<"$stage_probe_block")"
 ! grep -qE '^[[:space:]]*(if|then|elif|else|case|while|until|for)[[:space:]]' \
   <<<"$stage_source_guard" ||
   fail "group-scoped stage probe exact-main guard is conditional"
@@ -844,6 +851,48 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
     'FAIL  group-scoped stage probe readiness script differs from the reviewed executable contract' \
     "short-circuit readiness"
   printf 'PASS  short-circuit readiness assertions are rejected for the intended reason\n'
+
+  decoy_readiness_stage_probe="$fixture_root/stage-probe-decoy-readiness.yml"
+  awk '
+    {lines[NR]=$0}
+    /^  probe:$/ {probe_start=NR}
+    END {
+      for (i=1; i<probe_start; i++) print lines[i]
+      print "  decoy:"
+      print "    if: false"
+      for (i=probe_start + 1; i<=NR; i++) print lines[i]
+      for (i=probe_start; i<=NR; i++) {
+        line=lines[i]
+        if (!mutated && line == "          [[ \"$rootless_userns\" == true ]]") {
+          print "          false && { :"
+          print line
+          in_assertions=1
+          mutated=1
+          continue
+        }
+        if (in_assertions && index(line, "grep -qF \"/system.slice/${runner_units[0]}\" /proc/self/cgroup")) {
+          print line
+          print "          :; }"
+          in_assertions=0
+          continue
+        }
+        print line
+      }
+    }
+  ' "$STAGE_PROBE_WORKFLOW" >"$decoy_readiness_stage_probe"
+  decoy_probe_block="$(awk '
+    /^  probe:$/ {in_probe=1}
+    in_probe && $0 != "  probe:" && /^  [a-zA-Z0-9_-]+:$/ {exit}
+    in_probe {print}
+  ' "$decoy_readiness_stage_probe")"
+  decoy_readiness_script="$(sed -n '/^      - name: Read-only readiness verdict$/,$p' \
+    <<<"$decoy_probe_block")"
+  bash -n -s <<<"$(extract_stage_readiness_script "$decoy_readiness_script")" ||
+    fail "decoy readiness fixture real probe is not valid Bash"
+  run_stage_probe_fixture "$decoy_readiness_stage_probe" \
+    'FAIL  group-scoped stage probe readiness script differs from the reviewed executable contract' \
+    "skipped decoy readiness"
+  printf 'PASS  skipped decoy cannot authenticate inert real-probe readiness\n'
 
   unbound_runner_stage_probe="$fixture_root/stage-probe-unbound-runner.yml"
   sed '/grep -qF "\/system.slice\/\${runner_units\[0\]}" \/proc\/self\/cgroup/d' \
