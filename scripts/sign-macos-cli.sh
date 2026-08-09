@@ -100,19 +100,25 @@ if [[ -n "$NOTARY_PROFILE" ]]; then
   xcrun notarytool submit "$zip_path" --keychain-profile "$NOTARY_PROFILE" --wait
 
   echo "==> stapler staple"
-  xcrun stapler staple "$BINARY"
+  # Stapling only works for .app / .pkg / .dmg / .xip — bare Mach-O CLI returns
+  # Error 73. Notarization is still recorded by Apple; Gatekeeper checks online.
+  if ! xcrun stapler staple "$BINARY"; then
+    echo "warning: stapler failed (expected for bare CLI binary; ticket remains with Apple)"
+  fi
 else
   echo "==> skipping notarization (DISK_NOTARY_KEYCHAIN_PROFILE unset)"
   echo "    Gatekeeper may still block downloaded binaries without notarization on modern macOS."
 fi
 
-echo "==> spctl --assess --type execute -vv"
-if ! spctl --assess --type execute -vv "$BINARY" 2>&1 | tee /dev/stderr | grep -qiE 'accepted|allow'; then
-  echo "error: spctl --assess did not report accepted/allow" >&2
+# Prefer install context for CLI tools: `spctl --type execute` often reports
+# "rejected (the code is valid but does not seem to be an app)" even when notarized.
+echo "==> spctl -a -vv -t install (download/install context)"
+if ! spctl -a -vv -t install "$BINARY" 2>&1 | tee /dev/stderr | grep -qiE 'accepted|allow'; then
+  echo "error: spctl -t install did not report accepted/allow" >&2
   exit 1
 fi
 
-echo "==> spctl -a -t install -vv (download/install context)"
-spctl -a -vv -t install "$BINARY" 2>&1 | tee /dev/stderr || true
+echo "==> spctl --assess --type execute -vv (informational for CLI)"
+spctl --assess --type execute -vv "$BINARY" 2>&1 | tee /dev/stderr || true
 
 echo "==> OK: $BINARY is signed (and notarized when profile was set)"
