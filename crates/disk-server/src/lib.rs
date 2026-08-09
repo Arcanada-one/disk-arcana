@@ -37,6 +37,7 @@ pub use config::{CaMode, ConfigError, RegisterNodeMode, ServerConfig};
 pub use share_index::{
     spawn_share_index_watcher, sync_root_is_unwatched, ShareIndexError, ShareIndexHandle,
 };
+pub use tls::ensure_rustls_crypto_provider;
 
 pub use accounts::{
     oauth_callback, oauth_start, refresh_token, resend_verification, routes::AuthHttpState,
