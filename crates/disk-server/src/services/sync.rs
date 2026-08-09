@@ -908,7 +908,12 @@ impl SyncService for SyncServiceImpl {
                 .list_files_scoped(tenant.as_deref(), &share)
                 .await
                 .map_err(|e| Status::internal(format!("meta_db list_files_scoped: {e}")))?;
-            let client: Vec<FileMeta> = req.files.iter().map(proto_to_file_meta).collect();
+            let client: Vec<FileMeta> = req
+                .files
+                .iter()
+                .map(proto_to_file_meta)
+                .filter(|m| !disk_core::filter::is_sync_ephemeral_marker(&m.path))
+                .collect();
             (server, client, db)
         } else {
             // No MetaDb wired — return empty response (legacy / test mode
@@ -962,6 +967,21 @@ impl SyncService for SyncServiceImpl {
                 // Conflict detected — surface in response and persist to meta_db.
                 ActionType::ConflictFork | ActionType::ConflictMerge => {
                     let path_str = action.path.to_string_lossy().to_string();
+
+                    // DISK-0094: receive-only followers must never fork. Canon wins;
+                    // route the server copy as a download instead of a conflict.
+                    if matches!(caller_role, Some(EnforcedRole::ReceiveOnly)) {
+                        if let Some(m) = server_files.iter().find(|m| m.path == action.path) {
+                            to_download.push(file_meta_to_proto(m));
+                        }
+                        tracing::debug!(
+                            share = %share,
+                            node_id = %node_id,
+                            path = %path_str,
+                            "receive_only conflict suppressed — server-wins via to_download"
+                        );
+                        continue;
+                    }
 
                     // Determine the suggested resolution from the conflict kind.
                     let suggested = action

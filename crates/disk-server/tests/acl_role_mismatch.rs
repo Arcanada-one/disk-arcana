@@ -251,3 +251,124 @@ async fn receive_only_caller_is_never_given_upload_work() {
         "a receive_only caller must never be handed upload work"
     );
 }
+
+/// DISK-0094: a receive-only follower must not be told to fork on conflict.
+/// Canon wins — the server copy is routed as `to_download`, `conflicts` empty.
+#[tokio::test]
+async fn receive_only_conflict_is_server_wins_not_fork() {
+    let der = fake_cert_der(0xCD);
+    let fp = cert_fp_from_der(&der);
+
+    let mut table = EnforcementTable::new(1);
+    table.insert(fp, "default", EnforcedRole::ReceiveOnly);
+    let enforcer = AclEnforcer::new_loaded(table);
+
+    let pool = make_in_memory_pool().await;
+    let audit = AuditEmitter::new(pool);
+    let root = tempdir().unwrap();
+    let store = AuthStore::new();
+    let db_dir = tempdir().unwrap();
+    let db = disk_core::MetaDb::open(&db_dir.path().join("meta.sqlite"))
+        .await
+        .expect("open meta db");
+    let svc =
+        SyncServiceImpl::with_acl(store.clone(), root.path().to_path_buf(), enforcer, audit)
+            .with_meta_db(db, "server");
+
+    let key = store.register_node("kb-node", "N", "test", None).unwrap();
+    let (token, _) = store.authenticate("kb-node", key.as_str()).unwrap();
+
+    // Server has shared.md @ [0xAA].
+    let mut server_vc = disk_core::VectorClock::new();
+    server_vc.advance("server");
+    server_vc.advance("server");
+    let server_file = disk_core::types::FileMeta {
+        path: std::path::PathBuf::from("shared.md"),
+        content_hash: [0xAA; 32],
+        size: 100,
+        mtime_ns: 1_700_000_002_000_000_000,
+        inode: None,
+        vector_clock: server_vc,
+        deleted: false,
+        deleted_at: None,
+        node_id: "server".into(),
+        encryption_nonce: None,
+        version_id: None,
+        parent_version_id: None,
+    };
+    svc.meta_router
+        .as_ref()
+        .unwrap()
+        .control()
+        .upsert_file(&server_file)
+        .await
+        .unwrap();
+
+    // Baseline: common ancestor [0xCC].
+    let baseline_file = disk_core::types::FileMeta {
+        path: std::path::PathBuf::from("shared.md"),
+        content_hash: [0xCC; 32],
+        size: 80,
+        mtime_ns: 1_700_000_000_000_000_000,
+        inode: None,
+        vector_clock: disk_core::VectorClock::new(),
+        deleted: false,
+        deleted_at: None,
+        node_id: "kb-node".into(),
+        encryption_nonce: None,
+        version_id: None,
+        parent_version_id: None,
+    };
+    svc.meta_router
+        .as_ref()
+        .unwrap()
+        .control()
+        .upsert_node_baselines("kb-node", "default", &[baseline_file])
+        .await
+        .unwrap();
+
+    // Client diverged @ [0xBB] — would fork for bidirectional callers.
+    let mut client_vc_map = std::collections::HashMap::new();
+    client_vc_map.insert("kb-node".to_string(), 2u64);
+    let mut req = Request::new(SyncStateRequest {
+        files: vec![FileMetadata {
+            path: "shared.md".into(),
+            content_hash: [0xBB; 32].to_vec(),
+            size: 110,
+            mtime_ns: 1_700_000_003_000_000_000,
+            vector_clock: client_vc_map,
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    req.metadata_mut().insert(
+        "authorization",
+        format!("Bearer {}", token.as_str()).parse().unwrap(),
+    );
+    req.metadata_mut().insert("x-disk-share", "default".parse().unwrap());
+    req.extensions_mut().insert(CertificateDer::from(der));
+
+    let resp = svc
+        .exchange_state(req)
+        .await
+        .expect("exchange_state")
+        .into_inner();
+
+    assert!(
+        resp.conflicts.is_empty(),
+        "receive_only must not receive conflict reports: {:?}",
+        resp.conflicts
+    );
+    assert_eq!(resp.to_upload.len(), 0, "receive_only must not upload");
+    assert_eq!(
+        resp.to_download.len(),
+        1,
+        "receive_only conflict must become server-wins download"
+    );
+    assert_eq!(resp.to_download[0].path, "shared.md");
+    assert_eq!(
+        resp.to_download[0].content_hash.as_slice(),
+        &[0xAA; 32],
+        "download must carry the server hash"
+    );
+}
