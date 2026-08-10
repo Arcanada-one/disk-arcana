@@ -26,6 +26,7 @@ use tonic::{
 /// Spawn a `disk-arcana-server` on an ephemeral port.
 /// Returns `(port, store, cert_pem)`.
 async fn spawn_server(root: std::path::PathBuf) -> (u16, AuthStore, String) {
+    disk_server::ensure_rustls_crypto_provider();
     let store = AuthStore::new();
 
     let CertifiedKey {

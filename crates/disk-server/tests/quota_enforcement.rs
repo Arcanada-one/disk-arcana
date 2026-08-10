@@ -97,6 +97,7 @@ async fn spawn_server_with_quota(
     meta_db: MetaDb,
     limits: QuotaLimits,
 ) -> (u16, String) {
+    disk_server::ensure_rustls_crypto_provider();
     let store = AuthStore::new();
     let CertifiedKey {
         cert,
