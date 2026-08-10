@@ -3,6 +3,22 @@
 Disk Arcana ships a **client** (`disk` CLI + daemon) and a **server** (`disk-arcana-server`).
 This guide covers the client; server deployment is operator-run on Linux.
 
+## Public download origin
+
+The canonical public installer URL is **`https://disk.arcanada.ai/install.sh`**, served through
+Cloudflare (proxied). Verified 2026-08-10: HTTP 200, `content-type: text/x-shellscript`.
+
+The script resolves the latest [GitHub Release](https://github.com/Arcanada-one/disk-arcana/releases)
+tag and downloads the matching platform asset. Pin a version when reproducibility matters:
+
+```bash
+DISK_VERSION=v0.1.1 curl -fsSL https://disk.arcanada.ai/install.sh | sh
+```
+
+**Note:** Direct public-IP hairpin to the origin host may fail (SYN drop on prod `:443`); use the
+`disk.arcanada.ai` hostname or GitHub Releases URLs. Do not rely on MagicDNS for the public install
+surface.
+
 ## Quick install (Linux x86_64)
 
 When a release asset is published:
@@ -24,7 +40,7 @@ Environment variables:
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `DISK_INSTALL_PREFIX` | `/usr/local/bin` | Binary destination |
-| `DISK_VERSION` | latest GitHub release | Pin a tag (e.g. `v0.1.0`) |
+| `DISK_VERSION` | latest GitHub release | Pin a tag (e.g. `v0.1.1`) |
 
 ## Build from source
 
@@ -39,11 +55,28 @@ sudo ./scripts/install-linux.sh --binary ./target/release/disk
 
 ## macOS
 
-Prebuilt binaries (`disk-macos-arm64`, `disk-macos-x86_64`) must be **Developer ID signed and notarized** for Gatekeeper. See [DISK-RB-013](runbooks/DISK-RB-013-macos-cli-release-signing.md).
+Release **v0.1.1+** ships notarized, Developer ID–signed CLI assets on GitHub:
+
+| Asset | Architecture |
+|-------|----------------|
+| `disk-macos-arm64` | Apple Silicon |
+| `disk-macos-x86_64` | Intel |
+
+Install (recommended):
 
 ```bash
 curl -fsSL https://disk.arcanada.ai/install.sh | sh
 ```
+
+After install, confirm Gatekeeper trust:
+
+```bash
+spctl -a -vv -t execute "$(command -v disk)"
+# expect: accepted / source=Notarized Developer ID
+```
+
+Signing pipeline: [DISK-RB-013](runbooks/DISK-RB-013-macos-cli-release-signing.md). Linux hosts can
+verify release assets with `./scripts/verify-macos-release-assets.sh` (packaging probe only).
 
 Or build from source:
 
