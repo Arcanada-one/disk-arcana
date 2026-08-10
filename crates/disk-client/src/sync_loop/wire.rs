@@ -630,6 +630,16 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                 );
             }
             for to_upload in response.to_upload.iter().filter(|_| !uploads_suppressed) {
+                if disk_core::filter::is_sync_ephemeral_marker(std::path::Path::new(
+                    &to_upload.path,
+                )) {
+                    tracing::debug!(
+                        share = %self.share,
+                        path = %to_upload.path,
+                        "skipping upload for sync ephemeral marker"
+                    );
+                    continue;
+                }
                 let file_path = self.scan_root.join(&to_upload.path);
                 // DISK-0064: log read failures explicitly rather than
                 // silently skipping them via `if let Ok(...)`.
@@ -894,6 +904,14 @@ impl<'a> SyncTransport for RemoteSync<'a> {
             }
             for conflict in &response.conflicts {
                 let rel_path = std::path::Path::new(&conflict.path);
+                if disk_core::filter::is_sync_ephemeral_marker(rel_path) {
+                    tracing::debug!(
+                        share = %self.share,
+                        path = %conflict.path,
+                        "skipping conflict apply for sync ephemeral marker"
+                    );
+                    continue;
+                }
 
                 // Read the current local file.
                 let local_bytes = match std::fs::read(self.scan_root.join(rel_path)) {

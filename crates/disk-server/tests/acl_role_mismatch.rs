@@ -374,3 +374,94 @@ async fn receive_only_conflict_is_server_wins_not_fork() {
         "download must carry the server hash"
     );
 }
+
+/// DISK-0094: ephemeral markers must not reconcile for bidirectional callers either.
+/// datarim-kb on agents is bidirectional for mac-operator — this is the storm shape.
+#[tokio::test]
+async fn bidirectional_ephemeral_marker_produces_no_wire_work() {
+    let der = fake_cert_der(0xCE);
+    let fp = cert_fp_from_der(&der);
+
+    let mut table = EnforcementTable::new(1);
+    table.insert(fp, "default", EnforcedRole::Bidirectional);
+    let enforcer = AclEnforcer::new_loaded(table);
+
+    let pool = make_in_memory_pool().await;
+    let audit = AuditEmitter::new(pool);
+    let root = tempdir().unwrap();
+    let store = AuthStore::new();
+    let db_dir = tempdir().unwrap();
+    let db = disk_core::MetaDb::open(&db_dir.path().join("meta.sqlite"))
+        .await
+        .expect("open meta db");
+    let svc = SyncServiceImpl::with_acl(store.clone(), root.path().to_path_buf(), enforcer, audit)
+        .with_meta_db(db, "server");
+
+    let key = store.register_node("kb-node", "N", "test", None).unwrap();
+    let (token, _) = store.authenticate("kb-node", key.as_str()).unwrap();
+
+    let marker_path = std::path::PathBuf::from("datarim/.kb-last-push");
+    let server_file = disk_core::types::FileMeta {
+        path: marker_path.clone(),
+        content_hash: [0xAA; 32],
+        size: 10,
+        mtime_ns: 1,
+        inode: None,
+        vector_clock: disk_core::VectorClock::default(),
+        deleted: false,
+        deleted_at: None,
+        node_id: "server".into(),
+        encryption_nonce: None,
+        version_id: None,
+        parent_version_id: None,
+    };
+    svc.meta_router
+        .as_ref()
+        .unwrap()
+        .tenant_data(None)
+        .await
+        .expect("tenant db")
+        .upsert_file_scoped(None, "default", &server_file)
+        .await
+        .unwrap();
+
+    let mut req = Request::new(SyncStateRequest {
+        files: vec![FileMetadata {
+            path: "datarim/.kb-last-push".into(),
+            content_hash: [0xBB; 32].to_vec(),
+            size: 12,
+            mtime_ns: 2,
+            ..Default::default()
+        }],
+        ..Default::default()
+    });
+    req.metadata_mut().insert(
+        "authorization",
+        format!("Bearer {}", token.as_str()).parse().unwrap(),
+    );
+    req.metadata_mut()
+        .insert("x-disk-share", "default".parse().unwrap());
+    req.extensions_mut().insert(CertificateDer::from(der));
+
+    let resp = svc
+        .exchange_state(req)
+        .await
+        .expect("exchange_state")
+        .into_inner();
+
+    assert!(
+        resp.conflicts.is_empty(),
+        "ephemeral marker must not fork: {:?}",
+        resp.conflicts
+    );
+    assert!(
+        resp.to_upload.is_empty(),
+        "ephemeral marker must not upload: {:?}",
+        resp.to_upload
+    );
+    assert!(
+        resp.to_download.is_empty(),
+        "ephemeral marker must not download: {:?}",
+        resp.to_download
+    );
+}

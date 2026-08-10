@@ -926,7 +926,10 @@ impl SyncService for SyncServiceImpl {
             let server = db
                 .list_files_scoped(tenant.as_deref(), &share)
                 .await
-                .map_err(|e| Status::internal(format!("meta_db list_files_scoped: {e}")))?;
+                .map_err(|e| Status::internal(format!("meta_db list_files_scoped: {e}")))?
+                .into_iter()
+                .filter(|m| !disk_core::filter::is_sync_ephemeral_marker(&m.path))
+                .collect::<Vec<_>>();
             let client: Vec<FileMeta> = req
                 .files
                 .iter()
@@ -945,7 +948,10 @@ impl SyncService for SyncServiceImpl {
         let baseline = db
             .load_node_baseline_scoped(tenant.as_deref(), &node_id, vault_id)
             .await
-            .map_err(|e| Status::internal(format!("baseline load: {e}")))?;
+            .map_err(|e| Status::internal(format!("baseline load: {e}")))?
+            .into_iter()
+            .filter(|m| !disk_core::filter::is_sync_ephemeral_marker(&m.path))
+            .collect::<Vec<_>>();
 
         let engine = ReconciliationEngine::new(self.server_node_id.clone());
         let actions = engine
@@ -958,6 +964,18 @@ impl SyncService for SyncServiceImpl {
         let mut conflict_reports: Vec<disk_proto::disk::ConflictReport> = Vec::new();
 
         for action in &actions {
+            // DISK-0094: sync sentinels (e.g. `.kb-last-push`) are local-only and must
+            // never participate in reconcile for any ACL role. Measured on the Mac
+            // follower: datarim-kb is bidirectional on agents, so the receive_only
+            // server-wins path did not apply; the marker still forked every cycle.
+            if disk_core::filter::is_sync_ephemeral_marker(&action.path) {
+                tracing::debug!(
+                    share = %share,
+                    path = %action.path.display(),
+                    "skipping reconcile action for sync ephemeral marker"
+                );
+                continue;
+            }
             match action.action {
                 // Server has file; client should download it.
                 ActionType::Upload => {
