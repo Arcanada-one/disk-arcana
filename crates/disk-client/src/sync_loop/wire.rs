@@ -874,6 +874,24 @@ impl<'a> SyncTransport for RemoteSync<'a> {
             //
             // Non-fatal: a failure to resolve a single conflict is logged and
             // skipped so that the remainder of the sync iteration can proceed.
+            let receive_only_conflicts = matches!(
+                self.declared_direction,
+                Some(crate::config::schema::Direction::ReceiveOnly)
+            );
+            if receive_only_conflicts && !response.conflicts.is_empty() {
+                tracing::warn!(
+                    share = %self.share,
+                    entries = response.conflicts.len(),
+                    "server sent conflicts for a receive_only share — applying server-wins (no fork)"
+                );
+                if response.conflicts.len() > 50 {
+                    tracing::error!(
+                        share = %self.share,
+                        entries = response.conflicts.len(),
+                        "receive_only conflict storm detected — circuit breaker active (server-wins only)"
+                    );
+                }
+            }
             for conflict in &response.conflicts {
                 let rel_path = std::path::Path::new(&conflict.path);
 
@@ -924,6 +942,27 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                     Some(p) => p,
                     None => continue,
                 };
+
+                // DISK-0094: receive-only followers never fork — canon wins.
+                if receive_only_conflicts {
+                    let dest = self.scan_root.join(rel_path);
+                    if let Some(parent) = dest.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    if let Err(e) = std::fs::write(&dest, &remote_plain) {
+                        tracing::warn!(
+                            path = %conflict.path,
+                            error = %e,
+                            "receive_only server-wins: cannot write remote copy"
+                        );
+                    } else {
+                        tracing::info!(
+                            path = %conflict.path,
+                            "receive_only server-wins: local file replaced with canon copy"
+                        );
+                    }
+                    continue;
+                }
 
                 // Resolve the base (common-ancestor) bytes from the blob cache.
                 //
