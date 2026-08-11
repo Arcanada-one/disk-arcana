@@ -25,7 +25,7 @@ on:
     # Named explicitly per repository: workflow_run cannot glob, and check_suite
     # does NOT fire for Actions-created suites (anti-recursion rule) — verified
     # empirically in SEC-0039, the check_suite revision never triggered.
-    workflows: ["ci", "deploy-arcana-agents-share", "deploy-probe", "fuzz-deep", "release-deploy", "windows"]
+    workflows: [ci, deploy-arcana-agents-share, deploy-probe, fuzz-deep, release-deploy, windows]
     types: [completed]
 
 permissions:
