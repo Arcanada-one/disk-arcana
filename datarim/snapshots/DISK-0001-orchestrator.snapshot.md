@@ -1,8 +1,19 @@
 # DISK-0001 orchestrator snapshot
 
-**Date:** 2026-07-28  
-**Repo:** `Arcanada-one/disk-arcana` @ `main` (PR #125 merged)  
-**State:** **ACTIVE** — POST-R13 mesh green; hydrate fix landed in git
+**Date:** 2026-07-31  
+**Repo:** `Arcanada-one/disk-arcana` @ `main` (PR #128 merged `51dde0fa`)  
+**State:** **ACTIVE** — epic PR queue drained; dependency gate clean; mesh green
+
+## Epic PR queue closure (2026-07-31)
+
+| PR | Task | Status |
+|----|------|--------|
+| #129 | DISK-0065 round-6 closure docs | **MERGED** |
+| #131 | INFRA-0370 ci-runner scoped sudo | **MERGED** |
+| #133 | INFRA-0370 unit-contract fleet skew | **MERGED** |
+| #128 | DISK-0066 R6-17 dependency remediation | **MERGED** |
+
+RB-011 **not opened** (operator gate only). Windows CI HEAD pass run `30649801858` @ `12bd0b8`.
 
 ## Execution summary (2026-07-28)
 
