@@ -82,10 +82,12 @@ Provisioning is repository-owned and reviewed before use:
   idempotence, exact unit content, and rollback after every fallible phase.
 
 Direct downloads are forbidden unless the artefact digest is checked against a
-separately authenticated manifest. GitHub registration material is ephemeral,
-never logged, never committed, and removed immediately after runner
-configuration. Provisioning fails closed if it cannot avoid exposing that
-material in durable process, shell, journal, or cloud-init state.
+separately authenticated manifest. The complete cloud-init pair is likewise
+bound to one separately frozen, reviewed digest before seed creation. GitHub
+registration material is never logged, committed, or placed in cloud-init. A
+mode-0600 root-only recovery copy may survive only while bootstrap is
+incomplete; it is deleted after commit or successful revocation. Provisioning
+fails closed if it cannot preserve that bounded recovery and deletion contract.
 
 ## Control flow and failure handling
 
@@ -103,10 +105,14 @@ material in durable process, shell, journal, or cloud-init state.
    `target=stage-probe`. Terminal success and the `readiness=ok` marker are the
    live proof.
 
-Any failure before registration removes staged guest state. A failure after
-registration first stops the runner, then deregisters that exact identity, then
-stops the guest. Existing host runners, Docker workloads, production service,
-runner groups, environment policies, and INFRA-0389 are never modified.
+Any failure before registration removes staged guest state. A hard interruption
+is resumed from the protected phase journal: pre-registration authority is
+discarded, while a registration-intent or later phase reconstructs the exact
+runner if necessary and revokes it before entering terminal `RECOVERED`. A
+failure after registration first stops the runner, then deregisters that exact
+identity, then stops the guest. Existing host runners, Docker workloads,
+production service, runner groups, environment policies, and INFRA-0389 are
+never modified.
 
 ## Threat model
 

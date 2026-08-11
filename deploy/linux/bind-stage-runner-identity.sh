@@ -57,15 +57,17 @@ expected_uid=0
 expected_gid=0
 if [[ "${DISK_ARCANA_STAGE_BIND_TESTING:-}" == 1 ]]; then
   [[ "$(id -u)" != 0 ]] || die 65 'identity binding test mode is forbidden for root'
-  [[ "$validate_only" == true ]] || die 65 'identity binding test mode is validation-only'
   [[ -n "${DISK_ARCANA_STAGE_BIND_API_RESPONSE:-}" ]] ||
     die 65 'identity binding test mode requires an API response fixture'
+  [[ -n "${DISK_ARCANA_STAGE_BIND_GROUP_API_RESPONSE:-}" ]] ||
+    die 65 'identity binding test mode requires a group API response fixture'
   test_mode=true
   expected_uid="$(id -u)"
   expected_gid="$(id -g)"
 else
   [[ -z "${DISK_ARCANA_STAGE_BIND_TESTING:-}" &&
-     -z "${DISK_ARCANA_STAGE_BIND_API_RESPONSE:-}" ]] ||
+     -z "${DISK_ARCANA_STAGE_BIND_API_RESPONSE:-}" &&
+     -z "${DISK_ARCANA_STAGE_BIND_GROUP_API_RESPONSE:-}" ]] ||
     die 65 'identity binding test controls are forbidden in production'
   [[ "$(id -u)" == 0 ]] || die 77 'identity binding requires root'
   [[ "$(dirname "$state_root")" == /var/lib/disk-arcana-stage ]] ||
@@ -86,6 +88,7 @@ manifest_state_root=''
 host_unit=''
 management_port=''
 cloud_image_sha256=''
+guest_bundle_sha256=''
 runner_archive_sha256=''
 runner_name=''
 manifest_runner_id=''
@@ -100,17 +103,19 @@ while IFS='=' read -r key value; do
     host_unit) host_unit="$value" ;;
     management_port) management_port="$value" ;;
     cloud_image_sha256) cloud_image_sha256="$value" ;;
+    guest_bundle_sha256) guest_bundle_sha256="$value" ;;
     runner_archive_sha256) runner_archive_sha256="$value" ;;
     runner_name) runner_name="$value" ;;
     runner_id) manifest_runner_id="$value" ;;
     *) die 65 'state manifest contains an unknown key' ;;
   esac
 done <"$manifest"
-[[ "${#manifest_seen[@]}" -eq 8 ]] || die 65 'state manifest is incomplete'
+[[ "${#manifest_seen[@]}" -eq 9 ]] || die 65 'state manifest is incomplete'
 [[ "$guest_name" == disk-arcana-stage && "$manifest_state_root" == "$state_root" &&
    "$host_unit" == disk-arcana-stage-vm.service && "$runner_name" == disk-arcana-stage ]] ||
   die 65 'state manifest identity mismatch'
 [[ "$management_port" =~ ^[0-9]+$ && "$cloud_image_sha256" =~ ^[0-9a-f]{64}$ &&
+   "$guest_bundle_sha256" =~ ^[0-9a-f]{64}$ &&
    "$runner_archive_sha256" =~ ^[0-9a-f]{64}$ ]] || die 65 'state manifest metadata is invalid'
 [[ "$manifest_runner_id" == UNREGISTERED || "$manifest_runner_id" == "$requested_runner_id" ]] ||
   die 66 'state manifest is bound to another runner ID'
@@ -123,6 +128,10 @@ if [[ "$test_mode" == true ]]; then
   [[ -f "$api_response_file" && ! -L "$api_response_file" ]] ||
     die 65 'API response fixture is unsafe'
   api_response="$(<"$api_response_file")"
+  group_api_response_file="$DISK_ARCANA_STAGE_BIND_GROUP_API_RESPONSE"
+  [[ -f "$group_api_response_file" && ! -L "$group_api_response_file" ]] ||
+    die 65 'group API response fixture is unsafe'
+  group_api_response="$(<"$group_api_response_file")"
 else
   command -v curl >/dev/null 2>&1 || die 69 'curl is unavailable'
   api_response="$(
@@ -132,6 +141,13 @@ else
       -H 'X-GitHub-Api-Version: 2022-11-28' \
       "https://api.github.com/orgs/Arcanada-one/actions/runners/$requested_runner_id"
   )" || die 69 'GitHub runner readback failed'
+  group_api_response="$(
+    curl --fail --silent --show-error --max-time 20 \
+      -H "Authorization: Bearer $github_token" \
+      -H 'Accept: application/vnd.github+json' \
+      -H 'X-GitHub-Api-Version: 2022-11-28' \
+      'https://api.github.com/orgs/Arcanada-one/actions/runner-groups/8/runners?per_page=100'
+  )" || die 69 'GitHub runner group readback failed'
 fi
 api_id="$(jq -er '.id | select(type == "number")' <<<"$api_response")" ||
   die 66 'GitHub runner readback is malformed'
@@ -139,6 +155,18 @@ api_name="$(jq -er '.name | select(type == "string")' <<<"$api_response")" ||
   die 66 'GitHub runner readback is malformed'
 [[ "$api_id" == "$requested_runner_id" && "$api_name" == "$runner_name" ]] ||
   die 66 'GitHub runner identity mismatch'
+api_status="$(jq -er '.status | select(type == "string")' <<<"$api_response")" ||
+  die 66 'GitHub runner readback is malformed'
+api_busy="$(jq -r 'if (.busy | type) == "boolean" then (.busy | tostring) else error("busy") end' \
+  <<<"$api_response")" ||
+  die 66 'GitHub runner readback is malformed'
+api_has_label="$(jq -r 'if (.labels | type) == "array" then ([.labels[]?.name] | index("disk-arcana-stage") != null | tostring) else error("labels") end' \
+  <<<"$api_response")" || die 66 'GitHub runner readback is malformed'
+group_match_count="$(jq -er --argjson id "$requested_runner_id" --arg name "$runner_name" \
+  '[.runners[]? | select(.id == $id and .name == $name)] | length' \
+  <<<"$group_api_response")" || die 66 'GitHub runner group readback is malformed'
+[[ "$api_status" == online && "$api_busy" == false && "$api_has_label" == true &&
+   "$group_match_count" == 1 ]] || die 66 'GitHub runner boundary mismatch'
 
 if [[ "$validate_only" == true ]]; then
   printf 'validation=ok runner_id=%s runner_name=%s\n' "$requested_runner_id" "$runner_name"
@@ -156,6 +184,7 @@ temporary="$state_root/.state.manifest.$$"
   printf 'host_unit=%s\n' "$host_unit"
   printf 'management_port=%s\n' "$management_port"
   printf 'cloud_image_sha256=%s\n' "$cloud_image_sha256"
+  printf 'guest_bundle_sha256=%s\n' "$guest_bundle_sha256"
   printf 'runner_archive_sha256=%s\n' "$runner_archive_sha256"
   printf 'runner_name=%s\n' "$runner_name"
   printf 'runner_id=%s\n' "$requested_runner_id"

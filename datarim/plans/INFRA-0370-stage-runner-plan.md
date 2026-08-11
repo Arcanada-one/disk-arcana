@@ -47,12 +47,15 @@ done
 
 ```text
 --state-root --cloud-image --cloud-image-sha256 --guest-bundle
+--guest-bundle-sha256
 --runner-archive --runner-archive-sha256 --management-port
 ```
 
 - [ ] Require UID 0, absolute non-symlink state under
   `/var/lib/disk-arcana-stage`, two lowercase 64-hex digests, `/dev/kvm`, a
   free numeric loopback port, and absence of foreign guest/unit state.
+- [ ] Require the cloud-init pair to match a separately frozen, reviewed
+  `--guest-bundle-sha256` and persist that digest in the state manifest.
 - [ ] Verify inputs before creating state; build in a mode-0700 sibling staging
   directory; journal each phase in mode 0600; atomically install only after
   qcow2, NoCloud seed, and rendered unit validate.
@@ -80,6 +83,11 @@ done
 - [ ] Register the organization runner into group `disk-arcana-stage` with
   name and label `disk-arcana-stage`, install exactly one
   `actions.runner.*` system unit, and remove registration material immediately.
+- [ ] Before consuming registration authority, persist a root-only recovery
+  copy plus phase journal. On an incomplete rerun, `--recover-only` must either
+  discard pre-registration authority or reconstruct and revoke the exact
+  partially registered runner, then enter terminal `RECOVERED` without
+  rerunning bootstrap mutations.
 - [ ] Start the runner only after service active/enabled, health, restart
   limits, exact sudo, Podman, userns, subordinate IDs, and Docker negative pass.
 - [ ] Force failure after every phase and compare the complete fake-root

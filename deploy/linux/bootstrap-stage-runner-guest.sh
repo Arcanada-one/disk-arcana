@@ -19,6 +19,7 @@ bootstrap_root=''
 expected_commit=''
 expected_hostname=''
 validate_only=false
+recover_only=false
 
 while (($#)); do
   case "$1" in
@@ -41,6 +42,10 @@ while (($#)); do
       validate_only=true
       shift
       ;;
+    --recover-only)
+      recover_only=true
+      shift
+      ;;
     *)
       die 64 "unknown option: $1"
       ;;
@@ -53,6 +58,8 @@ done
 [[ "$expected_commit" =~ ^[0-9a-f]{40}$ ]] || die 65 'expected commit must be 40 lowercase hex characters'
 [[ "$expected_hostname" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]] ||
   die 65 'expected hostname is invalid'
+[[ "$validate_only" != true || "$recover_only" != true ]] ||
+  die 64 '--validate-only and --recover-only are mutually exclusive'
 [[ "$bootstrap_root" == /* && "$bootstrap_root" != / && -d "$bootstrap_root" && ! -L "$bootstrap_root" ]] ||
   die 65 'bootstrap root is unsafe'
 
@@ -61,12 +68,21 @@ expected_uid=0
 expected_gid=0
 if [[ "${DISK_ARCANA_STAGE_BOOTSTRAP_TESTING:-}" == 1 ]]; then
   [[ "$(id -u)" != 0 ]] || die 65 'guest bootstrap test mode is forbidden for root'
-  [[ "$validate_only" == true ]] || die 65 'guest bootstrap test mode is validation-only'
+  [[ "$validate_only" == true || "$recover_only" == true ]] ||
+    die 65 'guest bootstrap test mode permits validation or recovery only'
+  if [[ "$recover_only" == true ]]; then
+    [[ -n "${DISK_ARCANA_STAGE_BOOTSTRAP_STATE_ROOT:-}" &&
+       -n "${DISK_ARCANA_STAGE_BOOTSTRAP_RUNNER_ROOT:-}" ]] ||
+      die 65 'guest bootstrap recovery test mode requires isolated roots'
+  fi
   test_mode=true
   expected_uid="$(id -u)"
   expected_gid="$(id -g)"
 else
-  [[ -z "${DISK_ARCANA_STAGE_BOOTSTRAP_TESTING:-}" ]] || die 65 'invalid guest bootstrap test control'
+  [[ -z "${DISK_ARCANA_STAGE_BOOTSTRAP_TESTING:-}" &&
+     -z "${DISK_ARCANA_STAGE_BOOTSTRAP_STATE_ROOT:-}" &&
+     -z "${DISK_ARCANA_STAGE_BOOTSTRAP_RUNNER_ROOT:-}" ]] ||
+    die 65 'invalid guest bootstrap test control'
   [[ "$(id -u)" == 0 ]] || die 77 'guest bootstrap requires root'
   [[ "$bootstrap_root" == /var/lib/disk-arcana-deploy/bootstrap/* ]] ||
     die 65 'bootstrap root is not canonical'
@@ -87,6 +103,144 @@ assert_no_symlink_components() {
 assert_no_symlink_components "$bootstrap_root" || die 65 'bootstrap path has a symlink component'
 [[ "$(stat -c '%a:%u:%g' "$bootstrap_root")" == "700:$expected_uid:$expected_gid" ]] ||
   die 65 'bootstrap root has unsafe metadata'
+
+state_root="${DISK_ARCANA_STAGE_BOOTSTRAP_STATE_ROOT:-/var/lib/disk-arcana-stage-bootstrap}"
+runner_install_root="${DISK_ARCANA_STAGE_BOOTSTRAP_RUNNER_ROOT:-/opt/actions-runner}"
+state_journal="$state_root/bootstrap-current"
+recovery_file="$state_root/recovery.env"
+
+write_phase() {
+  local next="$1" temporary="$state_root/.bootstrap-current.$$"
+  printf 'phase=%s\ncommit=%s\nrunner_name=%s\n' \
+    "$next" "$expected_commit" "${runner_name:-disk-arcana-stage}" >"$temporary"
+  chmod 0600 "$temporary"
+  sync -f "$temporary" >/dev/null 2>&1
+  mv -f -- "$temporary" "$state_journal"
+  sync -f "$state_root" >/dev/null 2>&1
+}
+
+if [[ "$recover_only" == true ]]; then
+  [[ -d "$state_root" && ! -L "$state_root" &&
+     "$(stat -c '%a:%u:%g' "$state_root")" == "700:$expected_uid:$expected_gid" ]] ||
+    die 65 'bootstrap recovery state root has unsafe metadata'
+  [[ -f "$state_journal" && ! -L "$state_journal" &&
+     "$(stat -c '%a:%u:%g' "$state_journal")" == "600:$expected_uid:$expected_gid" ]] ||
+    die 65 'bootstrap recovery journal has unsafe metadata'
+
+  journal_phase=''
+  journal_commit=''
+  journal_runner_name=''
+  declare -A recovery_journal_seen=()
+  while IFS='=' read -r key value; do
+    [[ -n "$key" && -z "${recovery_journal_seen[$key]+present}" ]] ||
+      die 65 'bootstrap recovery journal is malformed'
+    recovery_journal_seen["$key"]=1
+    case "$key" in
+      phase) journal_phase="$value" ;;
+      commit) journal_commit="$value" ;;
+      runner_name) journal_runner_name="$value" ;;
+      *) die 65 'bootstrap recovery journal is malformed' ;;
+    esac
+  done <"$state_journal"
+  [[ "${#recovery_journal_seen[@]}" -eq 3 && "$journal_commit" == "$expected_commit" &&
+     "$journal_runner_name" == disk-arcana-stage ]] ||
+    die 65 'bootstrap recovery journal identity mismatch'
+  if [[ "$journal_phase" == COMMITTED ]]; then
+    if [[ -e "$recovery_file" || -L "$recovery_file" ]]; then
+      [[ -f "$recovery_file" && ! -L "$recovery_file" &&
+         "$(stat -c '%a:%u:%g' "$recovery_file")" == "600:$expected_uid:$expected_gid" ]] ||
+        die 65 'committed bootstrap recovery authority has unsafe metadata'
+      rm -f -- "$recovery_file"
+      sync -f "$state_root" >/dev/null 2>&1
+    fi
+    printf 'recovery=already-committed runner_name=%s\n' "$journal_runner_name"
+    exit 0
+  fi
+  case "$journal_phase" in
+    AUTHORITY_STAGED|AUTHORITY_CONSUMED|PACKAGES_INSTALLED|RUNNER_IDENTITY_CREATED|REGISTRATION_INTENT|RUNNER_REGISTERED|RUNNER_CONFIGURED|SERVER_INSTALLED|BROKER_INSTALLED)
+      ;;
+    *) die 65 'bootstrap recovery journal phase is not recoverable' ;;
+  esac
+  [[ -f "$recovery_file" && ! -L "$recovery_file" &&
+     "$(stat -c '%a:%u:%g' "$recovery_file")" == "600:$expected_uid:$expected_gid" ]] ||
+    die 65 'bootstrap recovery authority has unsafe metadata'
+
+  runner_url=''
+  runner_group=''
+  runner_name=''
+  runner_label=''
+  registration_token=''
+  removal_token=''
+  declare -A recovery_authority_seen=()
+  while IFS='=' read -r key value; do
+    [[ -n "$key" && -z "${recovery_authority_seen[$key]+present}" ]] ||
+      die 65 'bootstrap recovery authority is malformed'
+    recovery_authority_seen["$key"]=1
+    case "$key" in
+      runner_url) runner_url="$value" ;;
+      runner_group) runner_group="$value" ;;
+      runner_name) runner_name="$value" ;;
+      runner_label) runner_label="$value" ;;
+      registration_token) registration_token="$value" ;;
+      removal_token) removal_token="$value" ;;
+      *) die 65 'bootstrap recovery authority is malformed' ;;
+    esac
+  done <"$recovery_file"
+  [[ "${#recovery_authority_seen[@]}" -eq 6 &&
+     "$runner_url" == https://github.com/Arcanada-one &&
+     "$runner_group" == disk-arcana-stage && "$runner_name" == disk-arcana-stage &&
+     "$runner_label" == disk-arcana-stage &&
+     "$registration_token" =~ ^[A-Za-z0-9_-]{20,200}$ &&
+     "$removal_token" =~ ^[A-Za-z0-9_-]{20,200}$ ]] ||
+    die 65 'bootstrap recovery authority identity mismatch'
+  if [[ "$journal_phase" == AUTHORITY_STAGED || "$journal_phase" == AUTHORITY_CONSUMED ||
+        "$journal_phase" == PACKAGES_INSTALLED || "$journal_phase" == RUNNER_IDENTITY_CREATED ]]; then
+    if [[ -e "$bootstrap_root/registration.env" || -L "$bootstrap_root/registration.env" ]]; then
+      [[ -f "$bootstrap_root/registration.env" && ! -L "$bootstrap_root/registration.env" &&
+         "$(stat -c '%a:%u:%g' "$bootstrap_root/registration.env")" == "600:$expected_uid:$expected_gid" ]] ||
+        die 65 'bootstrap registration authority has unsafe recovery metadata'
+      rm -f -- "$bootstrap_root/registration.env"
+    fi
+    rm -f -- "$recovery_file"
+    write_phase RECOVERED
+    printf 'recovery=ok runner_name=%s prior_phase=%s\n' "$runner_name" "$journal_phase"
+    exit 0
+  fi
+  [[ -d "$runner_install_root" && ! -L "$runner_install_root" &&
+     -f "$runner_install_root/config.sh" && ! -L "$runner_install_root/config.sh" &&
+     -x "$runner_install_root/config.sh" ]] ||
+    die 65 'bootstrap recovery runner installation is unavailable'
+  [[ ! -e "$runner_install_root/.runner" ||
+     ( -f "$runner_install_root/.runner" && ! -L "$runner_install_root/.runner" ) ]] ||
+    die 65 'bootstrap recovery runner identity is unsafe'
+
+  if [[ ! -f "$runner_install_root/.runner" ]]; then
+    if [[ "$test_mode" == true ]]; then
+      "$runner_install_root/config.sh" --unattended --replace \
+        --url "$runner_url" --token "$registration_token" \
+        --runnergroup "$runner_group" --name "$runner_name" \
+        --labels "$runner_label" --work _work --disableupdate >/dev/null
+    else
+      runuser -u disk-stage -- "$runner_install_root/config.sh" --unattended --replace \
+        --url "$runner_url" --token "$registration_token" \
+        --runnergroup "$runner_group" --name "$runner_name" \
+        --labels "$runner_label" --work _work --disableupdate >/dev/null
+    fi
+  fi
+  if [[ "$test_mode" == true ]]; then
+    "$runner_install_root/config.sh" remove --unattended --token "$removal_token" >/dev/null
+  else
+    if [[ -x "$runner_install_root/svc.sh" ]]; then
+      "$runner_install_root/svc.sh" uninstall >/dev/null 2>&1 || true
+    fi
+    runuser -u disk-stage -- "$runner_install_root/config.sh" remove \
+      --unattended --token "$removal_token" >/dev/null
+  fi
+  rm -f -- "$recovery_file"
+  write_phase RECOVERED
+  printf 'recovery=ok runner_name=%s prior_phase=%s\n' "$runner_name" "$journal_phase"
+  exit 0
+fi
 
 bundle="$bootstrap_root/bundle"
 runner_archive="$bootstrap_root/runner.tar.gz"
@@ -145,15 +299,18 @@ cleanup_authority() {
     rm -f -- "$registration_file" || status=1
   fi
   if [[ "$runner_registration_attempted" == true && -n "$removal_token" &&
-        -x /opt/actions-runner/config.sh ]]; then
+        -x "$runner_install_root/config.sh" ]]; then
     if [[ -n "$runner_service" ]]; then
       systemctl stop "$runner_service" >/dev/null 2>&1 || status=1
     fi
-    if [[ -x /opt/actions-runner/svc.sh ]]; then
-      /opt/actions-runner/svc.sh uninstall >/dev/null 2>&1 || status=1
+    if [[ -x "$runner_install_root/svc.sh" ]]; then
+      "$runner_install_root/svc.sh" uninstall >/dev/null 2>&1 || status=1
     fi
-    runuser -u disk-stage -- /opt/actions-runner/config.sh remove \
+    runuser -u disk-stage -- "$runner_install_root/config.sh" remove \
       --unattended --token "$removal_token" >/dev/null 2>&1 || status=1
+  fi
+  if ((status == 0)) && [[ -f "$recovery_file" && ! -L "$recovery_file" ]]; then
+    rm -f -- "$recovery_file" || status=1
   fi
   return "$status"
 }
@@ -205,7 +362,7 @@ fi
 for command_name in apt-get getent groupadd useradd usermod loginctl systemctl runuser tar unshare; do
   command -v "$command_name" >/dev/null 2>&1 || die 69 "required command is unavailable: $command_name"
 done
-[[ ! -e /opt/actions-runner ]] || die 73 'runner installation already exists'
+[[ ! -e "$runner_install_root" ]] || die 73 'runner installation already exists'
 mapfile -t preexisting_runner_units < <(
   systemctl list-unit-files --type=service 'actions.runner.*' --no-legend --no-pager 2>/dev/null |
     awk '{print $1}'
@@ -214,24 +371,24 @@ mapfile -t preexisting_runner_units < <(
 ! id disk-stage >/dev/null 2>&1 || die 73 'runner user already exists'
 ! getent group disk-arcana-deploy >/dev/null 2>&1 || die 73 'runner group already exists'
 
+install -d -o root -g root -m 0700 "$state_root"
+recovery_temporary="$state_root/.recovery.env.$$"
+{
+  printf 'runner_url=%s\n' "$runner_url"
+  printf 'runner_group=%s\n' "$runner_group"
+  printf 'runner_name=%s\n' "$runner_name"
+  printf 'runner_label=%s\n' "$runner_label"
+  printf 'registration_token=%s\n' "$registration_token"
+  printf 'removal_token=%s\n' "$removal_token"
+} >"$recovery_temporary"
+chmod 0600 "$recovery_temporary"
+sync -f "$recovery_temporary" >/dev/null 2>&1
+mv -f -- "$recovery_temporary" "$recovery_file"
+sync -f "$state_root" >/dev/null 2>&1
+write_phase AUTHORITY_STAGED
 rm -f -- "$registration_file"
 registration_consumed=true
-
-state_root='/var/lib/disk-arcana-stage-bootstrap'
-install -d -o root -g root -m 0700 "$state_root"
-state_journal="$state_root/bootstrap-current"
-phase='AUTHORITY_CONSUMED'
-write_phase() {
-  local next="$1" temporary="$state_root/.bootstrap-current.$$"
-  printf 'phase=%s\ncommit=%s\nrunner_name=%s\n' \
-    "$next" "$expected_commit" "$runner_name" >"$temporary"
-  chmod 0600 "$temporary"
-  sync -f "$temporary" >/dev/null 2>&1
-  mv -f -- "$temporary" "$state_journal"
-  sync -f "$state_root" >/dev/null 2>&1
-  phase="$next"
-}
-write_phase "$phase"
+write_phase AUTHORITY_CONSUMED
 
 apt-get \
   -o Acquire::AllowInsecureRepositories=false \
@@ -266,14 +423,15 @@ runner_uid="$(id -u disk-stage)"
 systemctl start "user@$runner_uid.service"
 write_phase RUNNER_IDENTITY_CREATED
 
-install -d -o disk-stage -g disk-stage -m 0750 /opt/actions-runner
-install -o disk-stage -g disk-stage -m 0600 "$runner_archive" /opt/actions-runner/runner.tar.gz
-runuser -u disk-stage -- tar -xzf /opt/actions-runner/runner.tar.gz -C /opt/actions-runner
-rm -f -- /opt/actions-runner/runner.tar.gz
-[[ -x /opt/actions-runner/config.sh && -x /opt/actions-runner/svc.sh ]] ||
+install -d -o disk-stage -g disk-stage -m 0750 "$runner_install_root"
+install -o disk-stage -g disk-stage -m 0600 "$runner_archive" "$runner_install_root/runner.tar.gz"
+runuser -u disk-stage -- tar -xzf "$runner_install_root/runner.tar.gz" -C "$runner_install_root"
+rm -f -- "$runner_install_root/runner.tar.gz"
+[[ -x "$runner_install_root/config.sh" && -x "$runner_install_root/svc.sh" ]] ||
   die 69 'runner archive did not install expected entrypoints'
 runner_registration_attempted=true
-runuser -u disk-stage -- /opt/actions-runner/config.sh \
+write_phase REGISTRATION_INTENT
+runuser -u disk-stage -- "$runner_install_root/config.sh" \
   --unattended \
   --url "$runner_url" \
   --token "$registration_token" \
@@ -283,7 +441,8 @@ runuser -u disk-stage -- /opt/actions-runner/config.sh \
   --work _work \
   --disableupdate
 registration_token=''
-/opt/actions-runner/svc.sh install disk-stage
+write_phase RUNNER_REGISTERED
+"$runner_install_root/svc.sh" install disk-stage
 mapfile -t installed_runner_units < <(
   systemctl list-unit-files --type=service 'actions.runner.*' --no-legend --no-pager 2>/dev/null |
     awk '{print $1}'
@@ -374,5 +533,8 @@ systemctl start "$runner_service"
 [[ "$(systemctl is-active "$runner_service")" == active ]]
 write_phase COMMITTED
 runner_registration_attempted=false
+registration_token=''
 removal_token=''
+rm -f -- "$recovery_file"
+sync -f "$state_root" >/dev/null 2>&1
 printf 'bootstrap=ok commit=%s runner_service=%s\n' "$expected_commit" "$runner_service"

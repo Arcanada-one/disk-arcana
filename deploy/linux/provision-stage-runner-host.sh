@@ -17,6 +17,7 @@ state_root=''
 cloud_image=''
 cloud_sha=''
 guest_bundle=''
+guest_bundle_sha=''
 runner_archive=''
 runner_sha=''
 management_port=''
@@ -42,6 +43,11 @@ while (($#)); do
     --guest-bundle)
       require_value "$1" "${2:-}"
       guest_bundle="$2"
+      shift 2
+      ;;
+    --guest-bundle-sha256)
+      require_value "$1" "${2:-}"
+      guest_bundle_sha="$2"
       shift 2
       ;;
     --runner-archive)
@@ -73,15 +79,43 @@ done
 [[ -n "$cloud_image" ]] || die 64 'missing required option: --cloud-image'
 [[ -n "$cloud_sha" ]] || die 64 'missing required option: --cloud-image-sha256'
 [[ -n "$guest_bundle" ]] || die 64 'missing required option: --guest-bundle'
+[[ -n "$guest_bundle_sha" ]] || die 64 'missing required option: --guest-bundle-sha256'
 [[ -n "$runner_archive" ]] || die 64 'missing required option: --runner-archive'
 [[ -n "$runner_sha" ]] || die 64 'missing required option: --runner-archive-sha256'
 [[ -n "$management_port" ]] || die 64 'missing required option: --management-port'
 
+test_mode=false
+expected_uid=0
+expected_gid=0
+state_parent='/var/lib/disk-arcana-stage'
+unit_name='disk-arcana-stage-vm.service'
+unit_path="/etc/systemd/system/$unit_name"
+kvm_path='/dev/kvm'
+if [[ "${DISK_ARCANA_STAGE_PROVISION_TESTING:-}" == 1 ]]; then
+  [[ "$(id -u)" != 0 ]] || die 65 'host provisioning test mode is forbidden for root'
+  [[ -n "${DISK_ARCANA_STAGE_PROVISION_STATE_PARENT:-}" &&
+     -n "${DISK_ARCANA_STAGE_PROVISION_UNIT_PATH:-}" &&
+     -n "${DISK_ARCANA_STAGE_PROVISION_KVM_PATH:-}" ]] ||
+    die 65 'host provisioning test mode requires isolated paths'
+  test_mode=true
+  expected_uid="$(id -u)"
+  expected_gid="$(id -g)"
+  state_parent="$DISK_ARCANA_STAGE_PROVISION_STATE_PARENT"
+  unit_path="$DISK_ARCANA_STAGE_PROVISION_UNIT_PATH"
+  kvm_path="$DISK_ARCANA_STAGE_PROVISION_KVM_PATH"
+else
+  [[ -z "${DISK_ARCANA_STAGE_PROVISION_TESTING:-}" &&
+     -z "${DISK_ARCANA_STAGE_PROVISION_STATE_PARENT:-}" &&
+     -z "${DISK_ARCANA_STAGE_PROVISION_UNIT_PATH:-}" &&
+     -z "${DISK_ARCANA_STAGE_PROVISION_KVM_PATH:-}" ]] ||
+    die 65 'host provisioning test controls are forbidden in production'
+fi
+
 [[ "$state_root" == /* ]] || die 65 'state root must be absolute'
-[[ "$state_root" == /var/lib/disk-arcana-stage/* ]] ||
-  die 65 'state root must be below /var/lib/disk-arcana-stage'
 [[ "$state_root" != *'/../'* && "$state_root" != */.. ]] ||
   die 65 'state root must not contain parent traversal'
+[[ "$(dirname "$state_root")" == "$state_parent" ]] ||
+  die 65 'state root must be an immediate child of the state parent'
 [[ ! -L "$state_root" ]] || die 65 'state root must not be a symlink'
 
 sha_pattern='^[0-9a-f]{64}$'
@@ -89,6 +123,8 @@ sha_pattern='^[0-9a-f]{64}$'
   die 65 'cloud image SHA-256 must be 64 lowercase hex characters'
 [[ "$runner_sha" =~ $sha_pattern ]] ||
   die 65 'runner archive SHA-256 must be 64 lowercase hex characters'
+[[ "$guest_bundle_sha" =~ $sha_pattern ]] ||
+  die 65 'guest bundle SHA-256 must be 64 lowercase hex characters'
 [[ -f "$cloud_image" && ! -L "$cloud_image" ]] ||
   die 65 'cloud image must be a regular non-symlink file'
 [[ -f "$runner_archive" && ! -L "$runner_archive" ]] ||
@@ -110,6 +146,11 @@ for seed_input in user-data meta-data; do
 done
 bundle_user_data_sha="$(sha256sum "$guest_bundle/user-data" | awk '{print $1}')"
 bundle_meta_data_sha="$(sha256sum "$guest_bundle/meta-data" | awk '{print $1}')"
+actual_guest_bundle_sha="$({
+  printf '%s  user-data\n' "$bundle_user_data_sha"
+  printf '%s  meta-data\n' "$bundle_meta_data_sha"
+} | sha256sum | awk '{print $1}')"
+[[ "$actual_guest_bundle_sha" == "$guest_bundle_sha" ]] || die 66 'guest bundle digest mismatch'
 [[ "$management_port" =~ ^[0-9]+$ ]] || die 65 'management port must be numeric'
 ((management_port >= 1024 && management_port <= 65535)) ||
   die 65 'management port must be between 1024 and 65535'
@@ -124,17 +165,16 @@ if [[ "$validate_only" == true ]]; then
   exit 0
 fi
 
-[[ "$(id -u)" == 0 ]] || die 77 'host provisioning requires root'
-[[ -c /dev/kvm ]] || die 69 '/dev/kvm is unavailable'
+if [[ "$test_mode" != true ]]; then
+  [[ "$(id -u)" == 0 ]] || die 77 'host provisioning requires root'
+  [[ -c "$kvm_path" ]] || die 69 '/dev/kvm is unavailable'
+else
+  [[ -e "$kvm_path" && ! -L "$kvm_path" ]] || die 69 'test KVM marker is unavailable'
+fi
 
-readonly state_parent='/var/lib/disk-arcana-stage'
-readonly unit_name='disk-arcana-stage-vm.service'
-readonly unit_path="/etc/systemd/system/$unit_name"
 unit_template="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/systemd/$unit_name.in"
 readonly unit_template
 
-[[ "$(dirname "$state_root")" == "$state_parent" ]] ||
-  die 65 'state root must be an immediate child of /var/lib/disk-arcana-stage'
 [[ "$(basename "$state_root")" =~ ^[a-z0-9][a-z0-9.-]*$ ]] ||
   die 65 'state root basename contains unsafe characters'
 [[ ! -e "$state_root" ]] || die 73 'state root already exists'
@@ -148,12 +188,16 @@ done
 [[ ! -e "$state_parent" || -d "$state_parent" ]] || die 73 'state parent is not a directory'
 [[ ! -L "$state_parent" ]] || die 73 'state parent must not be a symlink'
 if [[ -e "$state_parent" ]]; then
-  [[ "$(stat -c '%U:%G:%a' "$state_parent")" == root:root:700 ]] ||
+  [[ "$(stat -c '%u:%g:%a' "$state_parent")" == "$expected_uid:$expected_gid:700" ]] ||
     die 73 'state parent ownership or mode is unsafe'
 else
-  install -d -o root -g root -m 0700 "$state_parent" || die 73 'could not create state parent'
+  if [[ "$test_mode" == true ]]; then
+    install -d -m 0700 "$state_parent" || die 73 'could not create state parent'
+  else
+    install -d -o root -g root -m 0700 "$state_parent" || die 73 'could not create state parent'
+  fi
 fi
-[[ "$(stat -c '%U:%G:%a' "$state_parent")" == root:root:700 ]] ||
+[[ "$(stat -c '%u:%g:%a' "$state_parent")" == "$expected_uid:$expected_gid:700" ]] ||
   die 73 'state parent ownership or mode is unsafe'
 
 if ss -H -ltn "sport = :$management_port" 2>/dev/null | grep -q .; then
@@ -211,8 +255,11 @@ cp -a -- "$guest_bundle/." "$staging_root/bundle/"
 [[ -f "$staging_root/bundle/user-data" && ! -L "$staging_root/bundle/user-data" &&
    -f "$staging_root/bundle/meta-data" && ! -L "$staging_root/bundle/meta-data" ]] ||
   die 66 'copied guest bundle metadata is unsafe'
-[[ "$(sha256sum "$staging_root/bundle/user-data" | awk '{print $1}')" == "$bundle_user_data_sha" &&
-   "$(sha256sum "$staging_root/bundle/meta-data" | awk '{print $1}')" == "$bundle_meta_data_sha" ]] ||
+copied_guest_bundle_sha="$({
+  sha256sum "$staging_root/bundle/user-data" | awk '{print $1 "  user-data"}'
+  sha256sum "$staging_root/bundle/meta-data" | awk '{print $1 "  meta-data"}'
+} | sha256sum | awk '{print $1}')"
+[[ "$copied_guest_bundle_sha" == "$guest_bundle_sha" ]] ||
   die 66 'copied guest bundle digest mismatch'
 install -m 0600 "$runner_archive" "$staging_root/runner.tar.gz"
 [[ "$(sha256sum "$staging_root/runner.tar.gz" | awk '{print $1}')" == "$runner_sha" ]] ||
@@ -250,6 +297,7 @@ state_root=$state_root
 host_unit=$unit_name
 management_port=$management_port
 cloud_image_sha256=$cloud_sha
+guest_bundle_sha256=$guest_bundle_sha
 runner_archive_sha256=$runner_sha
 runner_name=disk-arcana-stage
 runner_id=UNREGISTERED
@@ -260,7 +308,11 @@ write_phase READY_TO_INSTALL
 mv -- "$staging_root" "$state_root"
 staging_root="$state_root"
 state_installed=true
-install -o root -g root -m 0644 "$state_root/$unit_name" "$unit_path"
+if [[ "$test_mode" == true ]]; then
+  install -m 0644 "$state_root/$unit_name" "$unit_path"
+else
+  install -o root -g root -m 0644 "$state_root/$unit_name" "$unit_path"
+fi
 unit_installed=true
 systemctl daemon-reload
 systemctl enable --now "$unit_name"

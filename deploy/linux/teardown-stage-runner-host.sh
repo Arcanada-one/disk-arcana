@@ -51,15 +51,23 @@ expected_uid=0
 expected_gid=0
 if [[ "${DISK_ARCANA_STAGE_TEARDOWN_TESTING:-}" == 1 ]]; then
   [[ "$(id -u)" != 0 ]] || die 65 'teardown test mode is forbidden for root'
-  [[ "$validate_only" == true ]] || die 65 'teardown test mode is validation-only'
-  [[ -n "${DISK_ARCANA_STAGE_TEARDOWN_API_RESPONSE:-}" ]] ||
-    die 65 'teardown test mode requires an API response fixture'
+  [[ -n "${DISK_ARCANA_STAGE_TEARDOWN_API_RESPONSE:-}" ||
+     "${DISK_ARCANA_STAGE_TEARDOWN_API_STATUS:-}" == 404 ]] ||
+    die 65 'teardown test mode requires an API response fixture or 404 status'
+  [[ -n "${DISK_ARCANA_STAGE_TEARDOWN_UNIT_PATH:-}" || "$validate_only" == true ]] ||
+    die 65 'teardown mutating test mode requires a unit path'
+  [[ -n "${DISK_ARCANA_STAGE_TEARDOWN_DIAGNOSTICS_ROOT:-}" || "$validate_only" == true ]] ||
+    die 65 'teardown mutating test mode requires a diagnostics root'
   test_mode=true
   expected_uid="$(id -u)"
   expected_gid="$(id -g)"
 else
   [[ -z "${DISK_ARCANA_STAGE_TEARDOWN_TESTING:-}" &&
-     -z "${DISK_ARCANA_STAGE_TEARDOWN_API_RESPONSE:-}" ]] ||
+     -z "${DISK_ARCANA_STAGE_TEARDOWN_API_RESPONSE:-}" &&
+     -z "${DISK_ARCANA_STAGE_TEARDOWN_API_STATUS:-}" &&
+     -z "${DISK_ARCANA_STAGE_TEARDOWN_UNIT_PATH:-}" &&
+     -z "${DISK_ARCANA_STAGE_TEARDOWN_DIAGNOSTICS_ROOT:-}" &&
+     -z "${DISK_ARCANA_STAGE_TEARDOWN_FAIL_AFTER_UNIT_REMOVE:-}" ]] ||
     die 65 'teardown test controls are forbidden in production'
   [[ "$(id -u)" == 0 ]] || die 77 'teardown requires root'
   [[ "$(dirname "$state_root")" == /var/lib/disk-arcana-stage ]] ||
@@ -94,6 +102,7 @@ manifest_state_root=''
 host_unit=''
 management_port=''
 cloud_image_sha256=''
+guest_bundle_sha256=''
 runner_archive_sha256=''
 runner_name=''
 runner_id=''
@@ -108,18 +117,20 @@ while IFS='=' read -r key value; do
     host_unit) host_unit="$value" ;;
     management_port) management_port="$value" ;;
     cloud_image_sha256) cloud_image_sha256="$value" ;;
+    guest_bundle_sha256) guest_bundle_sha256="$value" ;;
     runner_archive_sha256) runner_archive_sha256="$value" ;;
     runner_name) runner_name="$value" ;;
     runner_id) runner_id="$value" ;;
     *) die 65 'state manifest contains an unknown key' ;;
   esac
 done <"$manifest"
-[[ "${#manifest_seen[@]}" -eq 8 ]] || die 65 'state manifest is incomplete'
+[[ "${#manifest_seen[@]}" -eq 9 ]] || die 65 'state manifest is incomplete'
 [[ "$guest_name" == disk-arcana-stage ]] || die 65 'guest identity mismatch'
 [[ "$manifest_state_root" == "$state_root" ]] || die 65 'manifest state root mismatch'
 [[ "$host_unit" == disk-arcana-stage-vm.service ]] || die 65 'host unit identity mismatch'
 [[ "$management_port" =~ ^[0-9]+$ ]] || die 65 'manifest management port is invalid'
-[[ "$cloud_image_sha256" =~ ^[0-9a-f]{64}$ && "$runner_archive_sha256" =~ ^[0-9a-f]{64}$ ]] ||
+[[ "$cloud_image_sha256" =~ ^[0-9a-f]{64}$ && "$guest_bundle_sha256" =~ ^[0-9a-f]{64}$ &&
+   "$runner_archive_sha256" =~ ^[0-9a-f]{64}$ ]] ||
   die 65 'manifest digest is invalid'
 [[ "$runner_name" == disk-arcana-stage ]] || die 65 'runner name is invalid'
 [[ "$runner_id" =~ ^[1-9][0-9]{0,19}$ ]] || die 65 'runner ID is invalid'
@@ -152,7 +163,7 @@ if [[ -e "$teardown_journal" ]]; then
      "$journal_runner_name" == "$runner_name" && "$journal_state_root" == "$state_root" ]] ||
     die 65 'teardown journal identity mismatch'
   case "$journal_phase" in
-    IDENTITY_VERIFIED|GUEST_STOPPED|RUNNER_DELETE_INTENT|RUNNER_DEREGISTERED|UNIT_REMOVED)
+    IDENTITY_VERIFIED|GUEST_STOPPED|RUNNER_DELETE_INTENT|RUNNER_DEREGISTERED|UNIT_REMOVE_INTENT|UNIT_REMOVED)
       teardown_phase="$journal_phase"
       ;;
     *) die 65 'teardown journal phase is unknown' ;;
@@ -164,7 +175,10 @@ github_token="$(<"$github_token_file")"
 
 api_status=''
 api_response=''
-if [[ "$teardown_phase" == RUNNER_DEREGISTERED || "$teardown_phase" == UNIT_REMOVED ]]; then
+if [[ "$teardown_phase" == RUNNER_DEREGISTERED ||
+      "$teardown_phase" == UNIT_REMOVE_INTENT || "$teardown_phase" == UNIT_REMOVED ]]; then
+  api_status=404
+elif [[ "$test_mode" == true && "${DISK_ARCANA_STAGE_TEARDOWN_API_STATUS:-}" == 404 ]]; then
   api_status=404
 elif [[ "$test_mode" == true ]]; then
   api_response_file="$DISK_ARCANA_STAGE_TEARDOWN_API_RESPONSE"
@@ -196,6 +210,7 @@ if [[ "$api_status" == 200 ]]; then
 elif [[ "$api_status" == 404 &&
         ( "$teardown_phase" == RUNNER_DELETE_INTENT ||
           "$teardown_phase" == RUNNER_DEREGISTERED ||
+          "$teardown_phase" == UNIT_REMOVE_INTENT ||
           "$teardown_phase" == UNIT_REMOVED ) ]]; then
   :
 else
@@ -208,8 +223,8 @@ if [[ "$validate_only" == true ]]; then
   exit 0
 fi
 
-unit_path="/etc/systemd/system/$host_unit"
-if [[ "$teardown_phase" != UNIT_REMOVED ]]; then
+unit_path="${DISK_ARCANA_STAGE_TEARDOWN_UNIT_PATH:-/etc/systemd/system/$host_unit}"
+if [[ "$teardown_phase" != UNIT_REMOVE_INTENT && "$teardown_phase" != UNIT_REMOVED ]]; then
   [[ -f "$unit_path" && ! -L "$unit_path" ]] || die 65 'recorded host unit is unsafe'
   grep -F -- "file=$state_root/disk.qcow2" "$unit_path" >/dev/null ||
     die 65 'recorded host unit does not target the recorded guest'
@@ -230,7 +245,9 @@ if [[ "$teardown_phase" == NEW ]]; then
   teardown_phase=IDENTITY_VERIFIED
 fi
 if [[ "$teardown_phase" == IDENTITY_VERIFIED ]]; then
-  systemctl disable --now "$host_unit"
+  if [[ "$test_mode" != true ]]; then
+    systemctl disable --now "$host_unit"
+  fi
   write_phase GUEST_STOPPED
   teardown_phase=GUEST_STOPPED
 fi
@@ -254,14 +271,27 @@ if [[ "$teardown_phase" == RUNNER_DELETE_INTENT ]]; then
   teardown_phase=RUNNER_DEREGISTERED
 fi
 if [[ "$teardown_phase" == RUNNER_DEREGISTERED ]]; then
+  write_phase UNIT_REMOVE_INTENT
+  teardown_phase=UNIT_REMOVE_INTENT
+fi
+if [[ "$teardown_phase" == UNIT_REMOVE_INTENT ]]; then
   rm -f -- "$unit_path"
-  systemctl daemon-reload
+  if [[ "$test_mode" == true && "${DISK_ARCANA_STAGE_TEARDOWN_FAIL_AFTER_UNIT_REMOVE:-}" == 1 ]]; then
+    die 99 'injected interruption after unit removal'
+  fi
+  if [[ "$test_mode" != true ]]; then
+    systemctl daemon-reload
+  fi
   write_phase UNIT_REMOVED
   teardown_phase=UNIT_REMOVED
 fi
 
-diagnostics_root='/var/lib/disk-arcana-stage/diagnostics'
-install -d -o root -g root -m 0700 "$diagnostics_root"
+diagnostics_root="${DISK_ARCANA_STAGE_TEARDOWN_DIAGNOSTICS_ROOT:-/var/lib/disk-arcana-stage/diagnostics}"
+if [[ "$test_mode" == true ]]; then
+  install -d -m 0700 "$diagnostics_root"
+else
+  install -d -o root -g root -m 0700 "$diagnostics_root"
+fi
 diagnostic_target="$diagnostics_root/$(date -u +%Y%m%dT%H%M%SZ)-$runner_id"
 [[ ! -e "$diagnostic_target" ]] || die 73 'diagnostic target already exists'
 mv -- "$state_root" "$diagnostic_target"
