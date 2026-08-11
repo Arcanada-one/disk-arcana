@@ -150,10 +150,12 @@ those threats. The guest is not a general CI runner.
 Rollback targets only the named guest and runner identity. It stops the guest,
 disables its host unit, and either deregisters the manifest-bound ID or resolves
 an `UNREGISTERED` manifest against matching complete organization and group-8
-inventories before deleting the sole exact runner. It rejects foreign/multiple
-runners and diagnostics paths with symlink components, then moves guest state
-to a timestamped diagnostic directory. Purging that directory is a separate
-destructive action.
+inventories before deleting the sole exact runner. A hard crash after canonical
+state installation but before unit installation is recoverable only when the
+protected host phase is exactly `READY_TO_INSTALL` and both inventories are
+empty. Rollback rejects foreign/multiple runners and diagnostics paths with
+symlink components, then moves guest state to a timestamped diagnostic
+directory. Purging that directory is a separate destructive action.
 
 ## Non-goals
 

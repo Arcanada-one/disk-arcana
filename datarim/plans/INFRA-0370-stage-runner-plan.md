@@ -109,6 +109,10 @@ done
   `UNREGISTERED`, stop the VM, require complete organization and group-8 views
   to agree on zero runners or one idle exact-label singleton, and persist every
   destructive intent before deletion.
+- [ ] Recover the post-state-move/pre-unit-install crash interval only when the
+  protected host phase is exactly `READY_TO_INSTALL`, the unit is absent, and
+  complete organization/group-8 inventories are both empty; reject every
+  other missing-unit state before a teardown journal is created.
 - [ ] Stop/disable only the recorded unit, deregister only that runner, and
   move guest state to timestamped diagnostics. Never purge diagnostics.
 - [ ] Test changed name/ID/path/unit, foreign runner/group membership,

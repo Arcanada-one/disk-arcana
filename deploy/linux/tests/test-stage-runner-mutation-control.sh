@@ -198,6 +198,16 @@ require_killed_mutant 'unregistered host teardown' \
   'unregistered teardown rejects an identically named runner outside group 8 status=65 expected=66' \
   env HOST_TEARDOWN_OVERRIDE="$teardown_unregistered_mutant" bash "$SUITE"
 
+teardown_preinstall_mutant="$TMP/teardown-stage-runner-preinstall-mutant.sh"
+sed 's/^    preinstall_recovery=true$/    die 65 '\''preinstall recovery disabled'\''/' \
+  "$REPO_ROOT/deploy/linux/teardown-stage-runner-host.sh" >"$teardown_preinstall_mutant"
+chmod 0755 "$teardown_preinstall_mutant"
+cmp -s "$teardown_preinstall_mutant" "$REPO_ROOT/deploy/linux/teardown-stage-runner-host.sh" &&
+  fail 'teardown preinstall recovery mutant was not applied'
+require_killed_mutant 'pre-unit-install host recovery' \
+  'teardown recovers a host crash after state install but before unit install status=65 expected=0' \
+  env HOST_TEARDOWN_OVERRIDE="$teardown_preinstall_mutant" bash "$SUITE"
+
 teardown_symlink_mutant="$TMP/teardown-stage-runner-symlink-mutant.sh"
 # shellcheck disable=SC2016 # The sed programs match literal shell variables.
 sed -e '/assert_no_symlink_components "$diagnostics_root"/c\  true ||' \

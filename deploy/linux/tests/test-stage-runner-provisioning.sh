@@ -641,6 +641,59 @@ grep -F '/orgs/Arcanada-one/actions/runners/987654' \
   fail 'unregistered host teardown did not delete the exact discovered runner'
 printf 'PASS  interrupted host provisioning has a bounded cleanup path\n'
 
+teardown_preinstall_parent="$fixture_root/teardown-preinstall-crash"
+teardown_preinstall_root="$teardown_preinstall_parent/guest"
+teardown_preinstall_unit="$teardown_preinstall_parent/disk-arcana-stage-vm.service"
+teardown_preinstall_diagnostics="$teardown_preinstall_parent/diagnostics"
+install -d -m 0700 "$teardown_preinstall_parent" "$teardown_preinstall_root"
+{
+  printf 'guest_name=disk-arcana-stage\n'
+  printf 'state_root=%s\n' "$teardown_preinstall_root"
+  printf 'host_unit=disk-arcana-stage-vm.service\n'
+  printf 'management_port=22446\n'
+  printf 'cloud_image_sha256=%s\n' "$cloud_sha"
+  printf 'guest_bundle_sha256=%s\n' "$bundle_sha"
+  printf 'runner_archive_sha256=%s\n' "$runner_sha"
+  printf 'runner_name=disk-arcana-stage\n'
+  printf 'runner_id=UNREGISTERED\n'
+} >"$teardown_preinstall_root/state.manifest"
+chmod 0600 "$teardown_preinstall_root/state.manifest"
+printf 'phase=COMMITTED\n' >"$teardown_preinstall_root/phase"
+chmod 0600 "$teardown_preinstall_root/phase"
+printf 'github-api-token-1234567890\n' >"$teardown_preinstall_parent/token"
+chmod 0600 "$teardown_preinstall_parent/token"
+printf '{"total_count":0,"runners":[]}\n' \
+  >"$teardown_preinstall_parent/group-api-response.json"
+printf '{"total_count":0,"runners":[]}\n' \
+  >"$teardown_preinstall_parent/org-api-response.json"
+run_expect 65 'recorded host unit is unsafe' \
+  'missing host unit is rejected without exact preinstall phase proof' \
+  env DISK_ARCANA_STAGE_TEARDOWN_TESTING=1 \
+    DISK_ARCANA_STAGE_TEARDOWN_GROUP_API_RESPONSE="$teardown_preinstall_parent/group-api-response.json" \
+    DISK_ARCANA_STAGE_TEARDOWN_ORG_API_RESPONSE="$teardown_preinstall_parent/org-api-response.json" \
+    DISK_ARCANA_STAGE_TEARDOWN_UNIT_PATH="$teardown_preinstall_unit" \
+    DISK_ARCANA_STAGE_TEARDOWN_DIAGNOSTICS_ROOT="$teardown_preinstall_diagnostics" \
+    bash "$HOST_TEARDOWN" \
+      --state-root "$teardown_preinstall_root" \
+      --github-token-file "$teardown_preinstall_parent/token"
+[[ ! -e "$teardown_preinstall_root/teardown-current" ]] ||
+  fail 'missing-unit phase mismatch created a teardown journal'
+printf 'phase=READY_TO_INSTALL\n' >"$teardown_preinstall_root/phase"
+chmod 0600 "$teardown_preinstall_root/phase"
+run_expect 0 'teardown=ok runner_id=UNREGISTERED' \
+  'teardown recovers a host crash after state install but before unit install' \
+  env DISK_ARCANA_STAGE_TEARDOWN_TESTING=1 \
+    DISK_ARCANA_STAGE_TEARDOWN_GROUP_API_RESPONSE="$teardown_preinstall_parent/group-api-response.json" \
+    DISK_ARCANA_STAGE_TEARDOWN_ORG_API_RESPONSE="$teardown_preinstall_parent/org-api-response.json" \
+    DISK_ARCANA_STAGE_TEARDOWN_UNIT_PATH="$teardown_preinstall_unit" \
+    DISK_ARCANA_STAGE_TEARDOWN_DIAGNOSTICS_ROOT="$teardown_preinstall_diagnostics" \
+    bash "$HOST_TEARDOWN" \
+      --state-root "$teardown_preinstall_root" \
+      --github-token-file "$teardown_preinstall_parent/token"
+[[ ! -e "$teardown_preinstall_root" && ! -e "$teardown_preinstall_unit" ]] ||
+  fail 'pre-unit-install crash recovery retained canonical host state'
+printf 'PASS  pre-unit-install host crash has an executable bounded cleanup path\n'
+
 teardown_crash_parent="$fixture_root/teardown-crash"
 teardown_crash_root="$teardown_crash_parent/guest"
 teardown_crash_unit="$teardown_crash_parent/disk-arcana-stage-vm.service"

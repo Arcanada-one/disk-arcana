@@ -195,11 +195,22 @@ github_token="$(<"$github_token_file")"
 [[ "$github_token" =~ ^[^[:space:]]{20,500}$ ]] || die 65 'GitHub token is malformed'
 
 unit_path="${DISK_ARCANA_STAGE_TEARDOWN_UNIT_PATH:-/etc/systemd/system/$host_unit}"
+preinstall_recovery=false
 if [[ "$validate_only" != true && "$teardown_phase" != UNIT_REMOVE_INTENT &&
       "$teardown_phase" != UNIT_REMOVED ]]; then
-  [[ -f "$unit_path" && ! -L "$unit_path" ]] || die 65 'recorded host unit is unsafe'
-  grep -F -- "file=$state_root/disk.qcow2" "$unit_path" >/dev/null ||
-    die 65 'recorded host unit does not target the recorded guest'
+  if [[ -f "$unit_path" && ! -L "$unit_path" ]]; then
+    grep -F -- "file=$state_root/disk.qcow2" "$unit_path" >/dev/null ||
+      die 65 'recorded host unit does not target the recorded guest'
+  elif [[ "$runner_id" == UNREGISTERED ]]; then
+    provision_phase_file="$state_root/phase"
+    [[ -f "$provision_phase_file" && ! -L "$provision_phase_file" &&
+       "$(stat -c '%a:%u:%g' "$provision_phase_file")" == "600:$expected_uid:$expected_gid" &&
+       "$(<"$provision_phase_file")" == phase=READY_TO_INSTALL ]] ||
+      die 65 'recorded host unit is unsafe'
+    preinstall_recovery=true
+  else
+    die 65 'recorded host unit is unsafe'
+  fi
 fi
 
 write_phase() {
@@ -217,7 +228,7 @@ if [[ "$validate_only" != true && "$teardown_phase" == NEW ]]; then
   teardown_phase=IDENTITY_VERIFIED
 fi
 if [[ "$validate_only" != true && "$teardown_phase" == IDENTITY_VERIFIED ]]; then
-  if [[ "$test_mode" != true ]]; then
+  if [[ "$test_mode" != true && "$preinstall_recovery" != true ]]; then
     systemctl disable --now "$host_unit"
   fi
   write_phase GUEST_STOPPED
@@ -336,6 +347,9 @@ elif [[ "$api_status" == 404 &&
   :
 elif [[ "$api_status" != 200 ]]; then
   die 69 'GitHub runner readback did not return the recorded identity'
+fi
+if [[ "$preinstall_recovery" == true && "$api_status" != 404 ]]; then
+  die 66 'pre-unit-install recovery found an unexpected runner identity'
 fi
 
 if [[ "$validate_only" == true ]]; then
