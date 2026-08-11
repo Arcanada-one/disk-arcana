@@ -43,6 +43,15 @@ cmp -s "$guest_mutant" "$REPO_ROOT/deploy/linux/bootstrap-stage-runner-guest.sh"
 require_killed_mutant 'guest runner digest' 'guest bootstrap rejects runner digest mismatch before mutation status=0 expected=66' \
   env GUEST_BOOTSTRAP_OVERRIDE="$guest_mutant" bash "$SUITE"
 
+registration_mutant="$TMP/bootstrap-stage-runner-registration-mutant.sh"
+sed 's/^runner_registration_attempted=true$/# registration cleanup arm removed/' \
+  "$REPO_ROOT/deploy/linux/bootstrap-stage-runner-guest.sh" >"$registration_mutant"
+chmod 0755 "$registration_mutant"
+cmp -s "$registration_mutant" "$REPO_ROOT/deploy/linux/bootstrap-stage-runner-guest.sh" &&
+  fail 'registration cleanup mutant was not applied'
+require_killed_mutant 'registration cleanup arm' 'runner cleanup is not armed before the registration side effect' \
+  env GUEST_BOOTSTRAP_OVERRIDE="$registration_mutant" bash "$SUITE"
+
 bind_mutant="$TMP/bind-stage-runner-identity.sh"
 sed '/api_id.*requested_runner_id.*api_name.*runner_name/c true ||' \
   "$REPO_ROOT/deploy/linux/bind-stage-runner-identity.sh" >"$bind_mutant"

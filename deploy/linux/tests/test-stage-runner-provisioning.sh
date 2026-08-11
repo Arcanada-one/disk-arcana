@@ -280,6 +280,20 @@ run_expect 0 'validation=ok' \
   env DISK_ARCANA_STAGE_BOOTSTRAP_TESTING=1 bash "$GUEST_BOOTSTRAP" \
     "${guest_base_args[@]}"
 
+registration_arm_line="$(
+  grep -nF 'runner_registration_attempted=true' "$GUEST_BOOTSTRAP" | cut -d: -f1 || true
+)"
+registration_call_line="$(
+  grep -nF 'runuser -u disk-stage -- /opt/actions-runner/config.sh' "$GUEST_BOOTSTRAP" |
+    tail -n 1 | cut -d: -f1
+)"
+[[ "$registration_arm_line" =~ ^[0-9]+$ && "$registration_call_line" =~ ^[0-9]+$ &&
+   "$registration_arm_line" -lt "$registration_call_line" ]] ||
+  fail 'runner cleanup is not armed before the registration side effect'
+grep -F 'runner_registration_attempted" == true' "$GUEST_BOOTSTRAP" >/dev/null ||
+  fail 'runner cleanup does not consume the pre-registration arm'
+printf 'PASS  runner cleanup is armed before registration can partially succeed\n'
+
 teardown_root="$fixture_root/teardown/guest"
 install -d -m 0700 "$fixture_root/teardown"
 install -d -m 0700 "$teardown_root"

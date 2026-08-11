@@ -136,7 +136,7 @@ runner_name=''
 runner_label=''
 authority_run_id=''
 registration_consumed=false
-runner_configured=false
+runner_registration_attempted=false
 runner_service=''
 
 cleanup_authority() {
@@ -144,7 +144,8 @@ cleanup_authority() {
   if [[ "$registration_consumed" != true && -f "$registration_file" && ! -L "$registration_file" ]]; then
     rm -f -- "$registration_file" || status=1
   fi
-  if [[ "$runner_configured" == true && -n "$removal_token" && -x /opt/actions-runner/config.sh ]]; then
+  if [[ "$runner_registration_attempted" == true && -n "$removal_token" &&
+        -x /opt/actions-runner/config.sh ]]; then
     if [[ -n "$runner_service" ]]; then
       systemctl stop "$runner_service" >/dev/null 2>&1 || status=1
     fi
@@ -271,6 +272,7 @@ runuser -u disk-stage -- tar -xzf /opt/actions-runner/runner.tar.gz -C /opt/acti
 rm -f -- /opt/actions-runner/runner.tar.gz
 [[ -x /opt/actions-runner/config.sh && -x /opt/actions-runner/svc.sh ]] ||
   die 69 'runner archive did not install expected entrypoints'
+runner_registration_attempted=true
 runuser -u disk-stage -- /opt/actions-runner/config.sh \
   --unattended \
   --url "$runner_url" \
@@ -280,7 +282,6 @@ runuser -u disk-stage -- /opt/actions-runner/config.sh \
   --labels "$runner_label" \
   --work _work \
   --disableupdate
-runner_configured=true
 registration_token=''
 /opt/actions-runner/svc.sh install disk-stage
 mapfile -t installed_runner_units < <(
@@ -372,6 +373,6 @@ systemctl start "$runner_service"
 [[ "$(systemctl is-enabled "$runner_service")" == enabled ]]
 [[ "$(systemctl is-active "$runner_service")" == active ]]
 write_phase COMMITTED
-runner_configured=false
+runner_registration_attempted=false
 removal_token=''
 printf 'bootstrap=ok commit=%s runner_service=%s\n' "$expected_commit" "$runner_service"
