@@ -160,12 +160,17 @@ api_status="$(jq -er '.status | select(type == "string")' <<<"$api_response")" |
 api_busy="$(jq -r 'if (.busy | type) == "boolean" then (.busy | tostring) else error("busy") end' \
   <<<"$api_response")" ||
   die 66 'GitHub runner readback is malformed'
-api_has_label="$(jq -r 'if (.labels | type) == "array" then ([.labels[]?.name] | index("disk-arcana-stage") != null | tostring) else error("labels") end' \
+api_labels_exact="$(jq -r 'if (.labels | type) == "array" then (([.labels[]?.name] | sort) == (["self-hosted", "Linux", "X64", "disk-arcana-stage"] | sort) | tostring) else error("labels") end' \
   <<<"$api_response")" || die 66 'GitHub runner readback is malformed'
+group_total_count="$(jq -er '.total_count | select(type == "number")' \
+  <<<"$group_api_response")" || die 66 'GitHub runner group readback is malformed'
+group_returned_count="$(jq -er 'if (.runners | type) == "array" then (.runners | length) else error("runners") end' \
+  <<<"$group_api_response")" || die 66 'GitHub runner group readback is malformed'
 group_match_count="$(jq -er --argjson id "$requested_runner_id" --arg name "$runner_name" \
   '[.runners[]? | select(.id == $id and .name == $name)] | length' \
   <<<"$group_api_response")" || die 66 'GitHub runner group readback is malformed'
-[[ "$api_status" == online && "$api_busy" == false && "$api_has_label" == true &&
+[[ "$api_status" == online && "$api_busy" == false && "$api_labels_exact" == true &&
+   "$group_total_count" == 1 && "$group_returned_count" == 1 &&
    "$group_match_count" == 1 ]] || die 66 'GitHub runner boundary mismatch'
 
 if [[ "$validate_only" == true ]]; then

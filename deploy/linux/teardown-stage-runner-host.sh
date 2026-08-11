@@ -52,6 +52,7 @@ expected_gid=0
 if [[ "${DISK_ARCANA_STAGE_TEARDOWN_TESTING:-}" == 1 ]]; then
   [[ "$(id -u)" != 0 ]] || die 65 'teardown test mode is forbidden for root'
   [[ -n "${DISK_ARCANA_STAGE_TEARDOWN_API_RESPONSE:-}" ||
+     -n "${DISK_ARCANA_STAGE_TEARDOWN_GROUP_API_RESPONSE:-}" ||
      "${DISK_ARCANA_STAGE_TEARDOWN_API_STATUS:-}" == 404 ]] ||
     die 65 'teardown test mode requires an API response fixture or 404 status'
   [[ -n "${DISK_ARCANA_STAGE_TEARDOWN_UNIT_PATH:-}" || "$validate_only" == true ]] ||
@@ -64,6 +65,8 @@ if [[ "${DISK_ARCANA_STAGE_TEARDOWN_TESTING:-}" == 1 ]]; then
 else
   [[ -z "${DISK_ARCANA_STAGE_TEARDOWN_TESTING:-}" &&
      -z "${DISK_ARCANA_STAGE_TEARDOWN_API_RESPONSE:-}" &&
+     -z "${DISK_ARCANA_STAGE_TEARDOWN_GROUP_API_RESPONSE:-}" &&
+     -z "${DISK_ARCANA_STAGE_TEARDOWN_ORG_API_RESPONSE:-}" &&
      -z "${DISK_ARCANA_STAGE_TEARDOWN_API_STATUS:-}" &&
      -z "${DISK_ARCANA_STAGE_TEARDOWN_UNIT_PATH:-}" &&
      -z "${DISK_ARCANA_STAGE_TEARDOWN_DIAGNOSTICS_ROOT:-}" &&
@@ -91,6 +94,23 @@ assert_no_symlink_components "$state_root" || die 65 'state path has a symlink c
   die 65 'state root has unsafe metadata'
 [[ "$(stat -c '%a:%u:%g' "$github_token_file")" == "600:$expected_uid:$expected_gid" ]] ||
   die 65 'GitHub token file has unsafe metadata'
+
+diagnostics_root="${DISK_ARCANA_STAGE_TEARDOWN_DIAGNOSTICS_ROOT:-/var/lib/disk-arcana-stage/diagnostics}"
+if [[ "$validate_only" != true ]]; then
+  [[ "$diagnostics_root" == /* && "$diagnostics_root" != / ]] ||
+    die 65 'diagnostics root is unsafe'
+  assert_no_symlink_components "$diagnostics_root" ||
+    die 65 'diagnostics path has a symlink component'
+  diagnostics_parent="$(dirname "$diagnostics_root")"
+  [[ -d "$diagnostics_parent" && ! -L "$diagnostics_parent" &&
+     "$(stat -c '%a:%u:%g' "$diagnostics_parent")" == "700:$expected_uid:$expected_gid" ]] ||
+    die 65 'diagnostics parent has unsafe metadata'
+  if [[ -e "$diagnostics_root" ]]; then
+    [[ -d "$diagnostics_root" && ! -L "$diagnostics_root" &&
+       "$(stat -c '%a:%u:%g' "$diagnostics_root")" == "700:$expected_uid:$expected_gid" ]] ||
+      die 65 'diagnostics root has unsafe metadata'
+  fi
+fi
 
 manifest="$state_root/state.manifest"
 [[ -f "$manifest" && ! -L "$manifest" &&
@@ -133,7 +153,8 @@ done <"$manifest"
    "$runner_archive_sha256" =~ ^[0-9a-f]{64}$ ]] ||
   die 65 'manifest digest is invalid'
 [[ "$runner_name" == disk-arcana-stage ]] || die 65 'runner name is invalid'
-[[ "$runner_id" =~ ^[1-9][0-9]{0,19}$ ]] || die 65 'runner ID is invalid'
+[[ "$runner_id" == UNREGISTERED || "$runner_id" =~ ^[1-9][0-9]{0,19}$ ]] ||
+  die 65 'runner ID is invalid'
 command -v jq >/dev/null 2>&1 || die 69 'jq is unavailable'
 
 teardown_journal="$state_root/teardown-current"
@@ -173,11 +194,109 @@ fi
 github_token="$(<"$github_token_file")"
 [[ "$github_token" =~ ^[^[:space:]]{20,500}$ ]] || die 65 'GitHub token is malformed'
 
+unit_path="${DISK_ARCANA_STAGE_TEARDOWN_UNIT_PATH:-/etc/systemd/system/$host_unit}"
+if [[ "$validate_only" != true && "$teardown_phase" != UNIT_REMOVE_INTENT &&
+      "$teardown_phase" != UNIT_REMOVED ]]; then
+  [[ -f "$unit_path" && ! -L "$unit_path" ]] || die 65 'recorded host unit is unsafe'
+  grep -F -- "file=$state_root/disk.qcow2" "$unit_path" >/dev/null ||
+    die 65 'recorded host unit does not target the recorded guest'
+fi
+
+write_phase() {
+  local next="$1" temporary="$state_root/.teardown-current.$$"
+  printf 'phase=%s\nrunner_id=%s\nrunner_name=%s\nstate_root=%s\n' \
+    "$next" "$runner_id" "$runner_name" "$state_root" >"$temporary"
+  chmod 0600 "$temporary"
+  sync -f "$temporary" >/dev/null 2>&1
+  mv -f -- "$temporary" "$teardown_journal"
+  sync -f "$state_root" >/dev/null 2>&1
+}
+
+if [[ "$validate_only" != true && "$teardown_phase" == NEW ]]; then
+  write_phase IDENTITY_VERIFIED
+  teardown_phase=IDENTITY_VERIFIED
+fi
+if [[ "$validate_only" != true && "$teardown_phase" == IDENTITY_VERIFIED ]]; then
+  if [[ "$test_mode" != true ]]; then
+    systemctl disable --now "$host_unit"
+  fi
+  write_phase GUEST_STOPPED
+  teardown_phase=GUEST_STOPPED
+fi
+
 api_status=''
 api_response=''
+delete_runner_id=''
 if [[ "$teardown_phase" == RUNNER_DEREGISTERED ||
       "$teardown_phase" == UNIT_REMOVE_INTENT || "$teardown_phase" == UNIT_REMOVED ]]; then
   api_status=404
+elif [[ "$runner_id" == UNREGISTERED ]]; then
+  [[ "$validate_only" != true ]] ||
+    die 65 'validation requires a bound runner identity'
+  if [[ "$test_mode" == true ]]; then
+    group_api_response_file="${DISK_ARCANA_STAGE_TEARDOWN_GROUP_API_RESPONSE:-}"
+    [[ -f "$group_api_response_file" && ! -L "$group_api_response_file" ]] ||
+      die 65 'group API response fixture is unsafe'
+    group_api_response="$(<"$group_api_response_file")"
+    org_api_response_file="${DISK_ARCANA_STAGE_TEARDOWN_ORG_API_RESPONSE:-}"
+    [[ -f "$org_api_response_file" && ! -L "$org_api_response_file" ]] ||
+      die 65 'organization API response fixture is unsafe'
+    org_api_response="$(<"$org_api_response_file")"
+  else
+    command -v curl >/dev/null 2>&1 || die 69 'curl is unavailable'
+    group_api_response="$(
+      curl --fail --silent --show-error --max-time 20 \
+        -H "Authorization: Bearer $github_token" \
+        -H 'Accept: application/vnd.github+json' \
+        -H 'X-GitHub-Api-Version: 2022-11-28' \
+        'https://api.github.com/orgs/Arcanada-one/actions/runner-groups/8/runners?per_page=100'
+    )" || die 69 'GitHub runner group readback failed'
+    org_api_response="$(
+      curl --fail --silent --show-error --max-time 20 \
+        -H "Authorization: Bearer $github_token" \
+        -H 'Accept: application/vnd.github+json' \
+        -H 'X-GitHub-Api-Version: 2022-11-28' \
+        'https://api.github.com/orgs/Arcanada-one/actions/runners?per_page=100'
+    )" || die 69 'GitHub organization runner readback failed'
+  fi
+  group_total_count="$(jq -er '.total_count | select(type == "number")' \
+    <<<"$group_api_response")" || die 66 'GitHub runner group readback is malformed'
+  group_returned_count="$(jq -er 'if (.runners | type) == "array" then (.runners | length) else error("runners") end' \
+    <<<"$group_api_response")" || die 66 'GitHub runner group readback is malformed'
+  [[ "$group_total_count" == "$group_returned_count" &&
+     ( "$group_total_count" == 0 || "$group_total_count" == 1 ) ]] ||
+    die 66 'GitHub unregistered teardown group is not an exact singleton boundary'
+  org_total_count="$(jq -er '.total_count | select(type == "number")' \
+    <<<"$org_api_response")" || die 66 'GitHub organization runner readback is malformed'
+  org_returned_count="$(jq -er 'if (.runners | type) == "array" then (.runners | length) else error("runners") end' \
+    <<<"$org_api_response")" || die 66 'GitHub organization runner readback is malformed'
+  org_name_match_count="$(jq -er --arg name "$runner_name" \
+    '[.runners[]? | select(.name == $name)] | length' <<<"$org_api_response")" ||
+    die 66 'GitHub organization runner readback is malformed'
+  [[ "$org_total_count" == "$org_returned_count" && "$org_total_count" -le 100 &&
+     "$org_name_match_count" == "$group_total_count" ]] ||
+    die 66 'GitHub unregistered teardown organization boundary is ambiguous'
+  if [[ "$group_total_count" == 1 ]]; then
+    delete_runner_id="$(jq -er '.runners[0].id | select(type == "number")' \
+      <<<"$group_api_response")" || die 66 'GitHub unregistered runner readback is malformed'
+    api_name="$(jq -er '.runners[0].name | select(type == "string")' \
+      <<<"$group_api_response")" || die 66 'GitHub unregistered runner readback is malformed'
+    api_busy="$(jq -r 'if (.runners[0].busy | type) == "boolean" then (.runners[0].busy | tostring) else error("busy") end' \
+      <<<"$group_api_response")" || die 66 'GitHub unregistered runner readback is malformed'
+    api_labels_exact="$(jq -r '([.runners[0].labels[]?.name] | sort) == (["self-hosted", "Linux", "X64", "disk-arcana-stage"] | sort) | tostring' \
+      <<<"$group_api_response")" || die 66 'GitHub unregistered runner readback is malformed'
+    [[ "$delete_runner_id" =~ ^[1-9][0-9]{0,19}$ && "$api_name" == "$runner_name" &&
+       "$api_busy" == false && "$api_labels_exact" == true ]] ||
+      die 66 'GitHub unregistered runner identity mismatch'
+    org_runner_id="$(jq -er --arg name "$runner_name" \
+      '.runners[] | select(.name == $name) | .id | select(type == "number")' \
+      <<<"$org_api_response")" || die 66 'GitHub organization runner identity is malformed'
+    [[ "$org_runner_id" == "$delete_runner_id" ]] ||
+      die 66 'GitHub organization and group runner identities differ'
+    api_status=200
+  else
+    api_status=404
+  fi
 elif [[ "$test_mode" == true && "${DISK_ARCANA_STAGE_TEARDOWN_API_STATUS:-}" == 404 ]]; then
   api_status=404
 elif [[ "$test_mode" == true ]]; then
@@ -200,20 +319,22 @@ else
   api_response="${api_wire%$'\n'*}"
 fi
 
-if [[ "$api_status" == 200 ]]; then
+if [[ "$api_status" == 200 && "$runner_id" != UNREGISTERED ]]; then
   api_id="$(jq -er '.id | select(type == "number")' <<<"$api_response")" ||
     die 66 'GitHub runner readback is malformed'
   api_name="$(jq -er '.name | select(type == "string")' <<<"$api_response")" ||
     die 66 'GitHub runner readback is malformed'
   [[ "$api_id" == "$runner_id" && "$api_name" == "$runner_name" ]] ||
     die 66 'GitHub runner identity mismatch'
+  delete_runner_id="$runner_id"
 elif [[ "$api_status" == 404 &&
-        ( "$teardown_phase" == RUNNER_DELETE_INTENT ||
+        ( "$runner_id" == UNREGISTERED ||
+          "$teardown_phase" == RUNNER_DELETE_INTENT ||
           "$teardown_phase" == RUNNER_DEREGISTERED ||
           "$teardown_phase" == UNIT_REMOVE_INTENT ||
           "$teardown_phase" == UNIT_REMOVED ) ]]; then
   :
-else
+elif [[ "$api_status" != 200 ]]; then
   die 69 'GitHub runner readback did not return the recorded identity'
 fi
 
@@ -223,34 +344,6 @@ if [[ "$validate_only" == true ]]; then
   exit 0
 fi
 
-unit_path="${DISK_ARCANA_STAGE_TEARDOWN_UNIT_PATH:-/etc/systemd/system/$host_unit}"
-if [[ "$teardown_phase" != UNIT_REMOVE_INTENT && "$teardown_phase" != UNIT_REMOVED ]]; then
-  [[ -f "$unit_path" && ! -L "$unit_path" ]] || die 65 'recorded host unit is unsafe'
-  grep -F -- "file=$state_root/disk.qcow2" "$unit_path" >/dev/null ||
-    die 65 'recorded host unit does not target the recorded guest'
-fi
-
-write_phase() {
-  local next="$1" temporary="$state_root/.teardown-current.$$"
-  printf 'phase=%s\nrunner_id=%s\nrunner_name=%s\nstate_root=%s\n' \
-    "$next" "$runner_id" "$runner_name" "$state_root" >"$temporary"
-  chmod 0600 "$temporary"
-  sync -f "$temporary" >/dev/null 2>&1
-  mv -f -- "$temporary" "$teardown_journal"
-  sync -f "$state_root" >/dev/null 2>&1
-}
-
-if [[ "$teardown_phase" == NEW ]]; then
-  write_phase IDENTITY_VERIFIED
-  teardown_phase=IDENTITY_VERIFIED
-fi
-if [[ "$teardown_phase" == IDENTITY_VERIFIED ]]; then
-  if [[ "$test_mode" != true ]]; then
-    systemctl disable --now "$host_unit"
-  fi
-  write_phase GUEST_STOPPED
-  teardown_phase=GUEST_STOPPED
-fi
 if [[ "$teardown_phase" == GUEST_STOPPED ]]; then
   write_phase RUNNER_DELETE_INTENT
   teardown_phase=RUNNER_DELETE_INTENT
@@ -260,10 +353,10 @@ if [[ "$teardown_phase" == RUNNER_DELETE_INTENT ]]; then
     delete_status="$(
       curl --silent --show-error --max-time 20 -o /dev/null -w '%{http_code}' \
         -X DELETE \
-        -H "Authorization: Bearer $github_token" \
+      -H "Authorization: Bearer $github_token" \
         -H 'Accept: application/vnd.github+json' \
         -H 'X-GitHub-Api-Version: 2022-11-28' \
-        "https://api.github.com/orgs/Arcanada-one/actions/runners/$runner_id"
+        "https://api.github.com/orgs/Arcanada-one/actions/runners/$delete_runner_id"
     )" || die 69 'GitHub runner deregistration failed'
     [[ "$delete_status" == 204 ]] || die 69 'GitHub runner deregistration was not acknowledged'
   fi
@@ -286,12 +379,14 @@ if [[ "$teardown_phase" == UNIT_REMOVE_INTENT ]]; then
   teardown_phase=UNIT_REMOVED
 fi
 
-diagnostics_root="${DISK_ARCANA_STAGE_TEARDOWN_DIAGNOSTICS_ROOT:-/var/lib/disk-arcana-stage/diagnostics}"
 if [[ "$test_mode" == true ]]; then
   install -d -m 0700 "$diagnostics_root"
 else
   install -d -o root -g root -m 0700 "$diagnostics_root"
 fi
+[[ -d "$diagnostics_root" && ! -L "$diagnostics_root" &&
+   "$(stat -c '%a:%u:%g' "$diagnostics_root")" == "700:$expected_uid:$expected_gid" ]] ||
+  die 65 'diagnostics root has unsafe metadata'
 diagnostic_target="$diagnostics_root/$(date -u +%Y%m%dT%H%M%SZ)-$runner_id"
 [[ ! -e "$diagnostic_target" ]] || die 73 'diagnostic target already exists'
 mv -- "$state_root" "$diagnostic_target"

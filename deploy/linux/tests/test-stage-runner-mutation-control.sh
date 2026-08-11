@@ -85,14 +85,36 @@ require_killed_mutant 'registration cleanup arm' 'runner cleanup is not armed be
   env GUEST_BOOTSTRAP_OVERRIDE="$registration_mutant" bash "$SUITE"
 
 recovery_mutant="$TMP/bootstrap-stage-runner-recovery-mutant.sh"
-sed '/config\.sh.*remove --unattended.*removal_token/c\    true # recovery revocation removed' \
+# shellcheck disable=SC2016 # The sed program matches literal shell variables.
+sed 's/^  if \[\[ "$journal_phase" != RUNNER_REVOKED && -n "$recovered_runner_id" \]\]; then$/  if false; then # API revocation removed/' \
   "$REPO_ROOT/deploy/linux/bootstrap-stage-runner-guest.sh" >"$recovery_mutant"
 chmod 0755 "$recovery_mutant"
 cmp -s "$recovery_mutant" "$REPO_ROOT/deploy/linux/bootstrap-stage-runner-guest.sh" &&
   fail 'bootstrap recovery mutant was not applied'
 require_killed_mutant 'bootstrap crash recovery' \
-  'bootstrap recovery did not execute runner revocation' \
+  'bootstrap recovery did not execute fresh-authority API revocation' \
   env GUEST_BOOTSTRAP_OVERRIDE="$recovery_mutant" bash "$SUITE"
+
+recovery_terminal_mutant="$TMP/bootstrap-stage-runner-terminal-mutant.sh"
+sed '0,/^    write_phase RECOVERED$/s//    : # terminal recovery journal removed/' \
+  "$REPO_ROOT/deploy/linux/bootstrap-stage-runner-guest.sh" >"$recovery_terminal_mutant"
+chmod 0755 "$recovery_terminal_mutant"
+cmp -s "$recovery_terminal_mutant" "$REPO_ROOT/deploy/linux/bootstrap-stage-runner-guest.sh" &&
+  fail 'bootstrap terminal ordering mutant was not applied'
+require_killed_mutant 'bootstrap terminal ordering' \
+  'recovery interruption occurred before terminal journal durability' \
+  env GUEST_BOOTSTRAP_OVERRIDE="$recovery_terminal_mutant" bash "$SUITE"
+
+bootstrap_privileged_mutant="$TMP/bootstrap-stage-runner-privileged-mutant.sh"
+# shellcheck disable=SC2016 # The sed program matches a literal shell variable.
+sed 's|^bash "$bundle/install\.sh" \\|true \\|' \
+  "$REPO_ROOT/deploy/linux/bootstrap-stage-runner-guest.sh" >"$bootstrap_privileged_mutant"
+chmod 0755 "$bootstrap_privileged_mutant"
+cmp -s "$bootstrap_privileged_mutant" "$REPO_ROOT/deploy/linux/bootstrap-stage-runner-guest.sh" &&
+  fail 'privileged bootstrap mutant was not applied'
+require_killed_mutant 'privileged bootstrap path' \
+  'full bootstrap did not execute bundle-install' \
+  env GUEST_BOOTSTRAP_OVERRIDE="$bootstrap_privileged_mutant" bash "$SUITE"
 
 bind_mutant="$TMP/bind-stage-runner-identity.sh"
 sed '/api_id.*requested_runner_id.*api_name.*runner_name/c true ||' \
@@ -113,6 +135,28 @@ require_killed_mutant 'identity boundary' \
   'identity binding rejects offline busy wrong-label wrong-group runner status=0 expected=66' \
   env BIND_IDENTITY_OVERRIDE="$bind_boundary_mutant" bash "$SUITE"
 
+bind_labels_mutant="$TMP/bind-stage-runner-labels-mutant.sh"
+# shellcheck disable=SC2016 # The sed program matches a literal shell variable.
+sed 's/"$api_labels_exact" == true/true == true/' \
+  "$REPO_ROOT/deploy/linux/bind-stage-runner-identity.sh" >"$bind_labels_mutant"
+chmod 0755 "$bind_labels_mutant"
+cmp -s "$bind_labels_mutant" "$REPO_ROOT/deploy/linux/bind-stage-runner-identity.sh" &&
+  fail 'identity labels mutant was not applied'
+require_killed_mutant 'exact runner labels' \
+  'identity binding rejects a runner without the exact workflow label set status=0 expected=66' \
+  env BIND_IDENTITY_OVERRIDE="$bind_labels_mutant" bash "$SUITE"
+
+bind_group_mutant="$TMP/bind-stage-runner-group-mutant.sh"
+# shellcheck disable=SC2016 # The sed program matches literal shell variables.
+sed 's/"$group_total_count" == 1 && "$group_returned_count" == 1 &&/true == true \&\&/' \
+  "$REPO_ROOT/deploy/linux/bind-stage-runner-identity.sh" >"$bind_group_mutant"
+chmod 0755 "$bind_group_mutant"
+cmp -s "$bind_group_mutant" "$REPO_ROOT/deploy/linux/bind-stage-runner-identity.sh" &&
+  fail 'identity singleton-group mutant was not applied'
+require_killed_mutant 'singleton runner group' \
+  'identity binding rejects a group containing a foreign runner status=0 expected=66' \
+  env BIND_IDENTITY_OVERRIDE="$bind_group_mutant" bash "$SUITE"
+
 teardown_mutant="$TMP/teardown-stage-runner-host.sh"
 sed '/api_id.*runner_id.*api_name.*runner_name/c true ||' \
   "$REPO_ROOT/deploy/linux/teardown-stage-runner-host.sh" >"$teardown_mutant"
@@ -131,3 +175,38 @@ cmp -s "$teardown_resume_mutant" "$REPO_ROOT/deploy/linux/teardown-stage-runner-
 require_killed_mutant 'teardown crash resume' \
   'teardown did not persist unit-removal intent before deletion' \
   env HOST_TEARDOWN_OVERRIDE="$teardown_resume_mutant" bash "$SUITE"
+
+teardown_delete_mutant="$TMP/teardown-stage-runner-delete-mutant.sh"
+# shellcheck disable=SC2016 # The sed program matches a literal shell variable.
+sed 's/^  if \[\[ "$api_status" == 200 \]\]; then$/  if false; then # runner API deletion removed/' \
+  "$REPO_ROOT/deploy/linux/teardown-stage-runner-host.sh" >"$teardown_delete_mutant"
+chmod 0755 "$teardown_delete_mutant"
+cmp -s "$teardown_delete_mutant" "$REPO_ROOT/deploy/linux/teardown-stage-runner-host.sh" &&
+  fail 'teardown runner deletion mutant was not applied'
+require_killed_mutant 'teardown runner deletion' \
+  'teardown did not call the exact runner deletion endpoint' \
+  env HOST_TEARDOWN_OVERRIDE="$teardown_delete_mutant" bash "$SUITE"
+
+teardown_unregistered_mutant="$TMP/teardown-stage-runner-unregistered-mutant.sh"
+# shellcheck disable=SC2016 # The sed program matches a literal shell variable.
+sed 's/^\[\[ "$runner_id" == UNREGISTERED || "$runner_id" =~ /[[ "$runner_id" =~ /' \
+  "$REPO_ROOT/deploy/linux/teardown-stage-runner-host.sh" >"$teardown_unregistered_mutant"
+chmod 0755 "$teardown_unregistered_mutant"
+cmp -s "$teardown_unregistered_mutant" "$REPO_ROOT/deploy/linux/teardown-stage-runner-host.sh" &&
+  fail 'teardown unregistered-host mutant was not applied'
+require_killed_mutant 'unregistered host teardown' \
+  'unregistered teardown rejects an identically named runner outside group 8 status=65 expected=66' \
+  env HOST_TEARDOWN_OVERRIDE="$teardown_unregistered_mutant" bash "$SUITE"
+
+teardown_symlink_mutant="$TMP/teardown-stage-runner-symlink-mutant.sh"
+# shellcheck disable=SC2016 # The sed programs match literal shell variables.
+sed -e '/assert_no_symlink_components "$diagnostics_root"/c\  true ||' \
+  -e '/^  if \[\[ -e "$diagnostics_root" \]\]; then$/,/^  fi$/c\  : # preflight diagnostics metadata check removed' \
+  -e '/^\[\[ -d "$diagnostics_root" && ! -L/,/die 65 '\''diagnostics root has unsafe metadata'\''/c\true' \
+  "$REPO_ROOT/deploy/linux/teardown-stage-runner-host.sh" >"$teardown_symlink_mutant"
+chmod 0755 "$teardown_symlink_mutant"
+cmp -s "$teardown_symlink_mutant" "$REPO_ROOT/deploy/linux/teardown-stage-runner-host.sh" &&
+  fail 'teardown diagnostics symlink mutant was not applied'
+require_killed_mutant 'teardown diagnostics symlink' \
+  'teardown rejects a diagnostics-root symlink before moving state status=0 expected=65' \
+  env HOST_TEARDOWN_OVERRIDE="$teardown_symlink_mutant" bash "$SUITE"

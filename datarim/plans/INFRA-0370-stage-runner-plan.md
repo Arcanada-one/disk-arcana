@@ -84,14 +84,16 @@ done
   name and label `disk-arcana-stage`, install exactly one
   `actions.runner.*` system unit, and remove registration material immediately.
 - [ ] Before consuming registration authority, persist a root-only recovery
-  copy plus phase journal. On an incomplete rerun, `--recover-only` must either
-  discard pre-registration authority or reconstruct and revoke the exact
-  partially registered runner, then enter terminal `RECOVERED` without
-  rerunning bootstrap mutations.
+  identity record plus phase journal without caching expiring runner tokens.
+  On an incomplete rerun, `--recover-only` requires a fresh root-owned GitHub
+  token, proves complete organization/group-8 agreement, revokes the sole exact
+  runner if present, and durably enters terminal `RECOVERED` before deleting
+  any authority, without rerunning bootstrap mutations.
 - [ ] Start the runner only after service active/enabled, health, restart
   limits, exact sudo, Podman, userns, subordinate IDs, and Docker negative pass.
-- [ ] Force failure after every phase and compare the complete fake-root
-  inventory/hashes to the pre-run snapshot; neutered rollback must turn RED.
+- [ ] Execute the isolated privileged bootstrap and a post-registration
+  failure; require exact package/user/registration/install/readiness markers,
+  runner revocation, terminal journaling, and killed rollback mutants.
 - [ ] Commit with `feat(infra): bootstrap broker-only stage runner`.
 
 ### Task 4: Implement identity-bound teardown
@@ -101,12 +103,18 @@ done
 - Test: `deploy/linux/tests/test-stage-runner-provisioning.sh`
 
 - [ ] Require a mode-0600 state manifest with the fixed guest name, absolute
-  state root, host unit, runner name, and numeric GitHub runner ID.
-- [ ] Require exact API readback of runner ID/name before the first mutation.
+  state root, host unit, runner name, and a numeric ID or exact
+  `UNREGISTERED` sentinel.
+- [ ] For a numeric identity, require exact API ID/name readback. For
+  `UNREGISTERED`, stop the VM, require complete organization and group-8 views
+  to agree on zero runners or one idle exact-label singleton, and persist every
+  destructive intent before deletion.
 - [ ] Stop/disable only the recorded unit, deregister only that runner, and
   move guest state to timestamped diagnostics. Never purge diagnostics.
-- [ ] Test changed name/ID/path/unit, symlink, missing manifest, and foreign
-  unit; every mismatch must leave command logs and filesystem byte-identical.
+- [ ] Test changed name/ID/path/unit, foreign runner/group membership,
+  unregistered recovery, API deletion, unit-removal interruption, and a
+  diagnostics-root symlink. Identity/path mismatches must fail closed; a
+  safely stopped ambiguous guest remains resumable without runner deletion.
 - [ ] Neuter the ID check and require the wrong-ID fixture to turn RED for a
   deregistration attempt.
 - [ ] Commit with `feat(infra): add identity-bound stage teardown`.

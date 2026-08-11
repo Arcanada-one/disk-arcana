@@ -78,16 +78,20 @@ Provisioning is repository-owned and reviewed before use:
 - a teardown script stops and disables only this guest, deregisters only its
   runner identity, and preserves a diagnostic copy unless explicit purge is
   requested; and
-- shell tests exercise path validation, digest rejection, secret redaction,
-  idempotence, exact unit content, and rollback after every fallible phase.
+- shell tests execute the isolated privileged bootstrap, registration cleanup,
+  fresh-authority API revocation, exact binding, teardown API deletion, path
+  validation, digest rejection, secret redaction, and crash-resume phases.
 
 Direct downloads are forbidden unless the artefact digest is checked against a
 separately authenticated manifest. The complete cloud-init pair is likewise
 bound to one separately frozen, reviewed digest before seed creation. GitHub
-registration material is never logged, committed, or placed in cloud-init. A
-mode-0600 root-only recovery copy may survive only while bootstrap is
-incomplete; it is deleted after commit or successful revocation. Provisioning
-fails closed if it cannot preserve that bounded recovery and deletion contract.
+registration material is never logged, committed, or placed in cloud-init.
+The mode-0600 recovery record persists identity metadata, not expiring runner
+tokens. Recovery requires a separately supplied, root-owned mode-0600 GitHub
+API token, proves the organization and group-8 views agree on zero runners or
+one exact runner, and deletes authority only after durable `COMMITTED` or
+`RECOVERED`. Provisioning fails closed if it cannot preserve that bounded
+recovery and deletion contract.
 
 ## Control flow and failure handling
 
@@ -107,10 +111,11 @@ fails closed if it cannot preserve that bounded recovery and deletion contract.
 
 Any failure before registration removes staged guest state. A hard interruption
 is resumed from the protected phase journal: pre-registration authority is
-discarded, while a registration-intent or later phase reconstructs the exact
-runner if necessary and revokes it before entering terminal `RECOVERED`. A
-failure after registration first stops the runner, then deregisters that exact
-identity, then stops the guest. Existing host runners, Docker workloads,
+discarded only after terminal `RECOVERED`, while a registration-intent or later
+phase uses fresh GitHub API authority to revoke the exact group-8 singleton
+without depending on one-hour registration/removal tokens. A failure after
+registration first stops the runner, then deregisters that exact identity,
+then stops the guest. Existing host runners, Docker workloads,
 production service, runner groups, environment policies, and INFRA-0389 are
 never modified.
 
@@ -129,7 +134,9 @@ those threats. The guest is not a general CI runner.
 
 - Fresh-process RED/GREEN tests prove each negative is load-bearing: wrong
   digest, wrong guest path, writable Docker socket, extra sudo command, extra
-  runner unit, disabled service, stale main, and wrong runner identity.
+  runner unit, disabled service, stale main, wrong runner identity, incomplete
+  labels, foreign group members, expired runner-token recovery, authority
+  deletion ordering, unregistered-host cleanup, and diagnostics symlinks.
 - Run ShellCheck, actionlint, all Linux deployment contract suites, and the
   repository's relevant full verification on the immutable PR head.
 - After protected delivery, compare resulting-main blobs and rerun exact-main
@@ -141,10 +148,12 @@ those threats. The guest is not a general CI runner.
 ## Rollback
 
 Rollback targets only the named guest and runner identity. It stops the guest,
-disables its host unit, deregisters its exact GitHub runner ID, and moves guest
-state to a timestamped diagnostic directory. Purging that directory is a
-separate destructive action. Failure to prove the exact guest path or runner ID
-halts rollback without mutation.
+disables its host unit, and either deregisters the manifest-bound ID or resolves
+an `UNREGISTERED` manifest against matching complete organization and group-8
+inventories before deleting the sole exact runner. It rejects foreign/multiple
+runners and diagnostics paths with symlink components, then moves guest state
+to a timestamped diagnostic directory. Purging that directory is a separate
+destructive action.
 
 ## Non-goals
 

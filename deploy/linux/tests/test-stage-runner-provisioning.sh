@@ -301,7 +301,7 @@ grep -Fx 'runner_id=UNREGISTERED' "$bind_root/state.manifest" >/dev/null ||
   fail 'identity validation mutated the unregistered manifest'
 printf 'PASS  identity validation leaves the unregistered manifest unchanged\n'
 bind_manifest_before="$(sha256sum "$bind_root/state.manifest" | awk '{print $1}')"
-printf '{"id":987655,"name":"disk-arcana-stage","status":"online","busy":false,"labels":[{"name":"disk-arcana-stage"}]}\n' \
+printf '{"id":987655,"name":"disk-arcana-stage","status":"online","busy":false,"labels":[{"name":"self-hosted"},{"name":"Linux"},{"name":"X64"},{"name":"disk-arcana-stage"}]}\n' \
   >"$fixture_root/bind/api-response-wrong-id.json"
 run_expect 66 'GitHub runner identity mismatch' \
   'identity binding rejects wrong runner ID before mutation' \
@@ -334,6 +334,37 @@ run_expect 66 'GitHub runner boundary mismatch' \
 [[ "$(sha256sum "$bind_root/state.manifest" | awk '{print $1}')" == "$bind_manifest_before" ]] ||
   fail 'unsafe runner boundary changed the host manifest'
 printf 'PASS  unsafe runner boundary leaves the host manifest byte-identical\n'
+
+printf '{"id":987654,"name":"disk-arcana-stage","status":"online","busy":false,"labels":[{"name":"disk-arcana-stage"}]}\n' \
+  >"$fixture_root/bind/api-response-incomplete-labels.json"
+run_expect 66 'GitHub runner boundary mismatch' \
+  'identity binding rejects a runner without the exact workflow label set' \
+  env DISK_ARCANA_STAGE_BIND_TESTING=1 \
+    DISK_ARCANA_STAGE_BIND_API_RESPONSE="$fixture_root/bind/api-response-incomplete-labels.json" \
+    DISK_ARCANA_STAGE_BIND_GROUP_API_RESPONSE="$fixture_root/bind/group-api-response.json" \
+    bash "$BIND_IDENTITY" \
+      --state-root "$bind_root" \
+      --runner-id 987654 \
+      --github-token-file "$fixture_root/bind/token" \
+      --validate-only
+[[ "$(sha256sum "$bind_root/state.manifest" | awk '{print $1}')" == "$bind_manifest_before" ]] ||
+  fail 'incomplete runner labels changed the host manifest'
+
+printf '{"total_count":2,"runners":[{"id":987654,"name":"disk-arcana-stage"},{"id":999,"name":"foreign-runner"}]}\n' \
+  >"$fixture_root/bind/group-api-response-foreign.json"
+run_expect 66 'GitHub runner boundary mismatch' \
+  'identity binding rejects a group containing a foreign runner' \
+  env DISK_ARCANA_STAGE_BIND_TESTING=1 \
+    DISK_ARCANA_STAGE_BIND_API_RESPONSE="$fixture_root/bind/api-response.json" \
+    DISK_ARCANA_STAGE_BIND_GROUP_API_RESPONSE="$fixture_root/bind/group-api-response-foreign.json" \
+    bash "$BIND_IDENTITY" \
+      --state-root "$bind_root" \
+      --runner-id 987654 \
+      --github-token-file "$fixture_root/bind/token" \
+      --validate-only
+[[ "$(sha256sum "$bind_root/state.manifest" | awk '{print $1}')" == "$bind_manifest_before" ]] ||
+  fail 'foreign group membership changed the host manifest'
+printf 'PASS  exact labels and singleton group membership are load-bearing\n'
 
 bind_commit_root="$fixture_root/bind-commit/guest"
 install -d -m 0700 "$fixture_root/bind-commit" "$bind_commit_root"
@@ -472,6 +503,144 @@ teardown_after="$(
   fail 'wrong runner ID changed teardown state'
 printf 'PASS  teardown identity mismatch leaves protected state byte-identical\n'
 
+teardown_delete_parent="$fixture_root/teardown-delete"
+teardown_delete_root="$teardown_delete_parent/guest"
+teardown_delete_unit="$teardown_delete_parent/disk-arcana-stage-vm.service"
+teardown_delete_diagnostics="$teardown_delete_parent/diagnostics"
+teardown_delete_bin="$teardown_delete_parent/bin"
+install -d -m 0700 "$teardown_delete_parent" "$teardown_delete_root"
+install -d -m 0755 "$teardown_delete_bin"
+{
+  printf 'guest_name=disk-arcana-stage\n'
+  printf 'state_root=%s\n' "$teardown_delete_root"
+  printf 'host_unit=disk-arcana-stage-vm.service\n'
+  printf 'management_port=22446\n'
+  printf 'cloud_image_sha256=%s\n' "$cloud_sha"
+  printf 'guest_bundle_sha256=%s\n' "$bundle_sha"
+  printf 'runner_archive_sha256=%s\n' "$runner_sha"
+  printf 'runner_name=disk-arcana-stage\n'
+  printf 'runner_id=%s\n' "$runner_id"
+} >"$teardown_delete_root/state.manifest"
+chmod 0600 "$teardown_delete_root/state.manifest"
+printf 'github-api-token-1234567890\n' >"$teardown_delete_parent/token"
+chmod 0600 "$teardown_delete_parent/token"
+printf '{"id":%s,"name":"disk-arcana-stage"}\n' "$runner_id" \
+  >"$teardown_delete_parent/api-response.json"
+printf 'ExecStart=/usr/bin/qemu-system-x86_64 -drive file=%s/disk.qcow2\n' \
+  "$teardown_delete_root" >"$teardown_delete_unit"
+cat >"$teardown_delete_bin/curl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$*" == *'-X DELETE'* ]]
+printf '%s\n' "$*" >>"$DISK_ARCANA_STAGE_TEST_DELETE_LOG"
+printf '204'
+EOF
+chmod 0755 "$teardown_delete_bin/curl"
+run_expect 0 'teardown=ok runner_id=987654' \
+  'teardown executes the exact runner API deletion path' \
+  env PATH="$teardown_delete_bin:$PATH" \
+    DISK_ARCANA_STAGE_TEARDOWN_TESTING=1 \
+    DISK_ARCANA_STAGE_TEARDOWN_API_RESPONSE="$teardown_delete_parent/api-response.json" \
+    DISK_ARCANA_STAGE_TEARDOWN_UNIT_PATH="$teardown_delete_unit" \
+    DISK_ARCANA_STAGE_TEARDOWN_DIAGNOSTICS_ROOT="$teardown_delete_diagnostics" \
+    DISK_ARCANA_STAGE_TEST_DELETE_LOG="$teardown_delete_parent/delete.log" \
+    bash "$HOST_TEARDOWN" \
+      --state-root "$teardown_delete_root" \
+      --github-token-file "$teardown_delete_parent/token"
+grep -F "/orgs/Arcanada-one/actions/runners/$runner_id" \
+  "$teardown_delete_parent/delete.log" >/dev/null ||
+  fail 'teardown did not call the exact runner deletion endpoint'
+printf 'PASS  runner API deletion is behaviorally load-bearing\n'
+
+teardown_unregistered_parent="$fixture_root/teardown-unregistered"
+teardown_unregistered_root="$teardown_unregistered_parent/guest"
+teardown_unregistered_unit="$teardown_unregistered_parent/disk-arcana-stage-vm.service"
+teardown_unregistered_diagnostics="$teardown_unregistered_parent/diagnostics"
+install -d -m 0700 "$teardown_unregistered_parent" "$teardown_unregistered_root"
+{
+  printf 'guest_name=disk-arcana-stage\n'
+  printf 'state_root=%s\n' "$teardown_unregistered_root"
+  printf 'host_unit=disk-arcana-stage-vm.service\n'
+  printf 'management_port=22446\n'
+  printf 'cloud_image_sha256=%s\n' "$cloud_sha"
+  printf 'guest_bundle_sha256=%s\n' "$bundle_sha"
+  printf 'runner_archive_sha256=%s\n' "$runner_sha"
+  printf 'runner_name=disk-arcana-stage\n'
+  printf 'runner_id=UNREGISTERED\n'
+} >"$teardown_unregistered_root/state.manifest"
+chmod 0600 "$teardown_unregistered_root/state.manifest"
+printf 'github-api-token-1234567890\n' >"$teardown_unregistered_parent/token"
+chmod 0600 "$teardown_unregistered_parent/token"
+printf '{"total_count":0,"runners":[]}\n' \
+  >"$teardown_unregistered_parent/group-api-response.json"
+printf '{"total_count":0,"runners":[]}\n' \
+  >"$teardown_unregistered_parent/org-api-response.json"
+printf 'ExecStart=/usr/bin/qemu-system-x86_64 -drive file=%s/disk.qcow2\n' \
+  "$teardown_unregistered_root" >"$teardown_unregistered_unit"
+printf '{"total_count":1,"runners":[{"id":987654,"name":"disk-arcana-stage"}]}\n' \
+  >"$teardown_unregistered_parent/org-api-response-ambiguous.json"
+run_expect 66 'GitHub unregistered teardown organization boundary is ambiguous' \
+  'unregistered teardown rejects an identically named runner outside group 8' \
+  env DISK_ARCANA_STAGE_TEARDOWN_TESTING=1 \
+    DISK_ARCANA_STAGE_TEARDOWN_GROUP_API_RESPONSE="$teardown_unregistered_parent/group-api-response.json" \
+    DISK_ARCANA_STAGE_TEARDOWN_ORG_API_RESPONSE="$teardown_unregistered_parent/org-api-response-ambiguous.json" \
+    DISK_ARCANA_STAGE_TEARDOWN_UNIT_PATH="$teardown_unregistered_unit" \
+    DISK_ARCANA_STAGE_TEARDOWN_DIAGNOSTICS_ROOT="$teardown_unregistered_diagnostics" \
+    bash "$HOST_TEARDOWN" \
+      --state-root "$teardown_unregistered_root" \
+      --github-token-file "$teardown_unregistered_parent/token"
+grep -Fx 'phase=GUEST_STOPPED' "$teardown_unregistered_root/teardown-current" >/dev/null ||
+  fail 'ambiguous unregistered teardown did not remain at its safe stopped phase'
+[[ -e "$teardown_unregistered_unit" ]] ||
+  fail 'ambiguous unregistered teardown removed the host unit'
+run_expect 0 'teardown=ok runner_id=UNREGISTERED' \
+  'teardown removes a recovered host after exact empty-group readback' \
+  env DISK_ARCANA_STAGE_TEARDOWN_TESTING=1 \
+    DISK_ARCANA_STAGE_TEARDOWN_GROUP_API_RESPONSE="$teardown_unregistered_parent/group-api-response.json" \
+    DISK_ARCANA_STAGE_TEARDOWN_ORG_API_RESPONSE="$teardown_unregistered_parent/org-api-response.json" \
+    DISK_ARCANA_STAGE_TEARDOWN_UNIT_PATH="$teardown_unregistered_unit" \
+    DISK_ARCANA_STAGE_TEARDOWN_DIAGNOSTICS_ROOT="$teardown_unregistered_diagnostics" \
+    bash "$HOST_TEARDOWN" \
+      --state-root "$teardown_unregistered_root" \
+      --github-token-file "$teardown_unregistered_parent/token"
+[[ ! -e "$teardown_unregistered_root" && ! -e "$teardown_unregistered_unit" ]] ||
+  fail 'unregistered recovered teardown retained live host state'
+printf 'PASS  recovered unregistered hosts have an executable teardown path\n'
+
+teardown_unbound_parent="$fixture_root/teardown-unbound-runner"
+teardown_unbound_root="$teardown_unbound_parent/guest"
+teardown_unbound_unit="$teardown_unbound_parent/disk-arcana-stage-vm.service"
+teardown_unbound_diagnostics="$teardown_unbound_parent/diagnostics"
+install -d -m 0700 "$teardown_unbound_parent" "$teardown_unbound_root"
+sed "s|^state_root=.*|state_root=$teardown_unbound_root|" \
+  "$teardown_unregistered_diagnostics"/*-UNREGISTERED/state.manifest \
+  >"$teardown_unbound_root/state.manifest"
+chmod 0600 "$teardown_unbound_root/state.manifest"
+printf 'github-api-token-1234567890\n' >"$teardown_unbound_parent/token"
+chmod 0600 "$teardown_unbound_parent/token"
+printf '{"total_count":1,"runners":[{"id":987654,"name":"disk-arcana-stage","status":"offline","busy":false,"labels":[{"name":"self-hosted"},{"name":"Linux"},{"name":"X64"},{"name":"disk-arcana-stage"}]}]}\n' \
+  >"$teardown_unbound_parent/group-api-response.json"
+printf '{"total_count":1,"runners":[{"id":987654,"name":"disk-arcana-stage","status":"offline","busy":false,"labels":[{"name":"self-hosted"},{"name":"Linux"},{"name":"X64"},{"name":"disk-arcana-stage"}]}]}\n' \
+  >"$teardown_unbound_parent/org-api-response.json"
+printf 'ExecStart=/usr/bin/qemu-system-x86_64 -drive file=%s/disk.qcow2\n' \
+  "$teardown_unbound_root" >"$teardown_unbound_unit"
+run_expect 0 'teardown=ok runner_id=UNREGISTERED' \
+  'teardown resolves and deletes an exact unbound runner after a host crash' \
+  env PATH="$teardown_delete_bin:$PATH" \
+    DISK_ARCANA_STAGE_TEARDOWN_TESTING=1 \
+    DISK_ARCANA_STAGE_TEARDOWN_GROUP_API_RESPONSE="$teardown_unbound_parent/group-api-response.json" \
+    DISK_ARCANA_STAGE_TEARDOWN_ORG_API_RESPONSE="$teardown_unbound_parent/org-api-response.json" \
+    DISK_ARCANA_STAGE_TEARDOWN_UNIT_PATH="$teardown_unbound_unit" \
+    DISK_ARCANA_STAGE_TEARDOWN_DIAGNOSTICS_ROOT="$teardown_unbound_diagnostics" \
+    DISK_ARCANA_STAGE_TEST_DELETE_LOG="$teardown_unbound_parent/delete.log" \
+    bash "$HOST_TEARDOWN" \
+      --state-root "$teardown_unbound_root" \
+      --github-token-file "$teardown_unbound_parent/token"
+grep -F '/orgs/Arcanada-one/actions/runners/987654' \
+  "$teardown_unbound_parent/delete.log" >/dev/null ||
+  fail 'unregistered host teardown did not delete the exact discovered runner'
+printf 'PASS  interrupted host provisioning has a bounded cleanup path\n'
+
 teardown_crash_parent="$fixture_root/teardown-crash"
 teardown_crash_root="$teardown_crash_parent/guest"
 teardown_crash_unit="$teardown_crash_parent/disk-arcana-stage-vm.service"
@@ -528,6 +697,50 @@ find "$teardown_crash_diagnostics" -mindepth 1 -maxdepth 1 -type d -name "*-$run
   -print -quit | grep -q . || fail 'resumed teardown did not preserve diagnostics'
 printf 'PASS  teardown unit-removal crash is behaviorally resumable\n'
 
+teardown_symlink_parent="$fixture_root/teardown-symlink"
+teardown_symlink_root="$teardown_symlink_parent/guest"
+teardown_symlink_unit="$teardown_symlink_parent/disk-arcana-stage-vm.service"
+teardown_symlink_foreign="$teardown_symlink_parent/foreign"
+teardown_symlink_diagnostics="$teardown_symlink_parent/diagnostics"
+install -d -m 0700 "$teardown_symlink_parent" "$teardown_symlink_root" \
+  "$teardown_symlink_foreign"
+{
+  printf 'guest_name=disk-arcana-stage\n'
+  printf 'state_root=%s\n' "$teardown_symlink_root"
+  printf 'host_unit=disk-arcana-stage-vm.service\n'
+  printf 'management_port=22446\n'
+  printf 'cloud_image_sha256=%s\n' "$cloud_sha"
+  printf 'guest_bundle_sha256=%s\n' "$bundle_sha"
+  printf 'runner_archive_sha256=%s\n' "$runner_sha"
+  printf 'runner_name=disk-arcana-stage\n'
+  printf 'runner_id=%s\n' "$runner_id"
+} >"$teardown_symlink_root/state.manifest"
+chmod 0600 "$teardown_symlink_root/state.manifest"
+{
+  printf 'phase=UNIT_REMOVED\n'
+  printf 'runner_id=%s\n' "$runner_id"
+  printf 'runner_name=disk-arcana-stage\n'
+  printf 'state_root=%s\n' "$teardown_symlink_root"
+} >"$teardown_symlink_root/teardown-current"
+chmod 0600 "$teardown_symlink_root/teardown-current"
+printf 'github-api-token-1234567890\n' >"$teardown_symlink_parent/token"
+chmod 0600 "$teardown_symlink_parent/token"
+ln -s "$teardown_symlink_foreign" "$teardown_symlink_diagnostics"
+teardown_symlink_before="$(find "$teardown_symlink_parent" -xdev -printf '%P %y %m %l\n' | LC_ALL=C sort | sha256sum | awk '{print $1}')"
+run_expect 65 'diagnostics path has a symlink component' \
+  'teardown rejects a diagnostics-root symlink before moving state' \
+  env DISK_ARCANA_STAGE_TEARDOWN_TESTING=1 \
+    DISK_ARCANA_STAGE_TEARDOWN_API_STATUS=404 \
+    DISK_ARCANA_STAGE_TEARDOWN_UNIT_PATH="$teardown_symlink_unit" \
+    DISK_ARCANA_STAGE_TEARDOWN_DIAGNOSTICS_ROOT="$teardown_symlink_diagnostics" \
+    bash "$HOST_TEARDOWN" \
+      --state-root "$teardown_symlink_root" \
+      --github-token-file "$teardown_symlink_parent/token"
+teardown_symlink_after="$(find "$teardown_symlink_parent" -xdev -printf '%P %y %m %l\n' | LC_ALL=C sort | sha256sum | awk '{print $1}')"
+[[ "$teardown_symlink_before" == "$teardown_symlink_after" ]] ||
+  fail 'diagnostics symlink rejection changed protected state'
+printf 'PASS  diagnostics symlink rejection is byte-identical\n'
+
 validation_output="$(
   DISK_ARCANA_STAGE_BOOTSTRAP_TESTING=1 bash "$GUEST_BOOTSTRAP" \
     "${guest_base_args[@]}"
@@ -554,8 +767,9 @@ run_expect 66 'runner archive digest mismatch' \
 bootstrap_recovery_root="$fixture_root/bootstrap-recovery-input"
 bootstrap_recovery_state="$fixture_root/bootstrap-recovery-state"
 bootstrap_recovery_runner="$fixture_root/bootstrap-recovery-runner"
+bootstrap_recovery_bin="$fixture_root/bootstrap-recovery-bin"
 install -d -m 0700 "$bootstrap_recovery_root" "$bootstrap_recovery_state"
-install -d -m 0750 "$bootstrap_recovery_runner"
+install -d -m 0750 "$bootstrap_recovery_runner" "$bootstrap_recovery_bin"
 {
   printf 'phase=REGISTRATION_INTENT\n'
   printf 'commit=%s\n' "$expected_commit"
@@ -567,39 +781,409 @@ chmod 0600 "$bootstrap_recovery_state/bootstrap-current"
   printf 'runner_group=disk-arcana-stage\n'
   printf 'runner_name=disk-arcana-stage\n'
   printf 'runner_label=disk-arcana-stage\n'
-  printf 'registration_token=%s\n' "$registration_token"
-  printf 'removal_token=%s\n' "$removal_token"
+  printf 'authority_run_id=31444643689\n'
 } >"$bootstrap_recovery_state/recovery.env"
 chmod 0600 "$bootstrap_recovery_state/recovery.env"
+printf 'expired-registration-token-1234567890\n' \
+  >"$bootstrap_recovery_root/registration.env"
+chmod 0600 "$bootstrap_recovery_root/registration.env"
+printf 'fresh-github-api-token-1234567890\n' \
+  >"$bootstrap_recovery_state/github-token"
+chmod 0600 "$bootstrap_recovery_state/github-token"
 printf '{"agentId":987654,"agentName":"disk-arcana-stage"}\n' \
   >"$bootstrap_recovery_runner/.runner"
 cat >"$bootstrap_recovery_runner/config.sh" <<'EOF'
 #!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' "$1" >>"$DISK_ARCANA_STAGE_TEST_CONFIG_LOG"
-if [[ "$1" == remove ]]; then
-  rm -f -- "$(dirname "$0")/.runner"
-else
-  printf '{"agentId":987654,"agentName":"disk-arcana-stage"}\n' >"$(dirname "$0")/.runner"
-fi
+printf 'expired runner token path was invoked\n' >&2
+exit 42
 EOF
 chmod 0755 "$bootstrap_recovery_runner/config.sh"
+cat >"$bootstrap_recovery_runner/svc.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$1" == uninstall ]]
+printf 'svc-uninstall\n' >>"$DISK_ARCANA_STAGE_TEST_RECOVERY_LOG"
+EOF
+chmod 0755 "$bootstrap_recovery_runner/svc.sh"
+cat >"$bootstrap_recovery_bin/curl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+args="$*"
+if [[ "$args" == *'-X DELETE'* ]]; then
+  printf 'api-delete\n' >>"$DISK_ARCANA_STAGE_TEST_RECOVERY_LOG"
+  printf '204'
+elif [[ "$args" == *'/runner-groups/8/runners'* ]]; then
+  printf '%s\n' '{"total_count":1,"runners":[{"id":987654,"name":"disk-arcana-stage","status":"offline","busy":false,"labels":[{"name":"self-hosted"},{"name":"Linux"},{"name":"X64"},{"name":"disk-arcana-stage"}]}]}'
+else
+  printf '%s\n' '{"total_count":1,"runners":[{"id":987654,"name":"disk-arcana-stage","status":"offline","busy":false,"labels":[{"name":"self-hosted"},{"name":"Linux"},{"name":"X64"},{"name":"disk-arcana-stage"}]}]}'
+fi
+EOF
+chmod 0755 "$bootstrap_recovery_bin/curl"
 run_expect 0 'recovery=ok runner_name=disk-arcana-stage prior_phase=REGISTRATION_INTENT' \
-  'guest bootstrap recovery consumes the durable journal and revokes the runner' \
-  env DISK_ARCANA_STAGE_BOOTSTRAP_TESTING=1 \
+  'guest recovery uses fresh API authority after runner tokens expire' \
+  env PATH="$bootstrap_recovery_bin:$PATH" \
+    DISK_ARCANA_STAGE_BOOTSTRAP_TESTING=1 \
     DISK_ARCANA_STAGE_BOOTSTRAP_STATE_ROOT="$bootstrap_recovery_state" \
     DISK_ARCANA_STAGE_BOOTSTRAP_RUNNER_ROOT="$bootstrap_recovery_runner" \
-    DISK_ARCANA_STAGE_TEST_CONFIG_LOG="$fixture_root/bootstrap-recovery-config.log" \
+    DISK_ARCANA_STAGE_TEST_RECOVERY_LOG="$fixture_root/bootstrap-recovery.log" \
     bash "$GUEST_BOOTSTRAP" \
       --bootstrap-root "$bootstrap_recovery_root" \
       --expected-commit "$expected_commit" \
       --expected-hostname disk-arcana-stage \
+      --github-token-file "$bootstrap_recovery_state/github-token" \
       --recover-only
-grep -Fx remove "$fixture_root/bootstrap-recovery-config.log" >/dev/null ||
-  fail 'bootstrap recovery did not execute runner revocation'
+grep -Fx api-delete "$fixture_root/bootstrap-recovery.log" >/dev/null ||
+  fail 'bootstrap recovery did not execute fresh-authority API revocation'
+grep -Fx svc-uninstall "$fixture_root/bootstrap-recovery.log" >/dev/null ||
+  fail 'bootstrap recovery did not uninstall the local runner service'
 [[ ! -e "$bootstrap_recovery_runner/.runner" &&
-   ! -e "$bootstrap_recovery_state/recovery.env" ]] ||
+   ! -e "$bootstrap_recovery_state/recovery.env" &&
+   ! -e "$bootstrap_recovery_root/registration.env" ]] ||
   fail 'bootstrap recovery retained live runner state or recovery authority'
 grep -Fx 'phase=RECOVERED' "$bootstrap_recovery_state/bootstrap-current" >/dev/null ||
   fail 'bootstrap recovery did not persist its terminal phase'
-printf 'PASS  bootstrap registration crash is behaviorally recoverable\n'
+printf 'PASS  bootstrap recovery is independent of one-hour runner tokens\n'
+
+bootstrap_terminal_root="$fixture_root/bootstrap-terminal-input"
+bootstrap_terminal_state="$fixture_root/bootstrap-terminal-state"
+bootstrap_terminal_runner="$fixture_root/bootstrap-terminal-runner"
+install -d -m 0700 "$bootstrap_terminal_root" "$bootstrap_terminal_state"
+install -d -m 0750 "$bootstrap_terminal_runner"
+{
+  printf 'phase=AUTHORITY_CONSUMED\n'
+  printf 'commit=%s\n' "$expected_commit"
+  printf 'runner_name=disk-arcana-stage\n'
+} >"$bootstrap_terminal_state/bootstrap-current"
+chmod 0600 "$bootstrap_terminal_state/bootstrap-current"
+{
+  printf 'runner_url=https://github.com/Arcanada-one\n'
+  printf 'runner_group=disk-arcana-stage\n'
+  printf 'runner_name=disk-arcana-stage\n'
+  printf 'runner_label=disk-arcana-stage\n'
+  printf 'authority_run_id=31444643689\n'
+} >"$bootstrap_terminal_state/recovery.env"
+chmod 0600 "$bootstrap_terminal_state/recovery.env"
+printf 'fresh-github-api-token-1234567890\n' >"$bootstrap_terminal_state/github-token"
+chmod 0600 "$bootstrap_terminal_state/github-token"
+run_expect 99 'injected interruption after terminal recovery journal' \
+  'recovery journals RECOVERED before deleting authority' \
+  env DISK_ARCANA_STAGE_BOOTSTRAP_TESTING=1 \
+    DISK_ARCANA_STAGE_BOOTSTRAP_STATE_ROOT="$bootstrap_terminal_state" \
+    DISK_ARCANA_STAGE_BOOTSTRAP_RUNNER_ROOT="$bootstrap_terminal_runner" \
+    DISK_ARCANA_STAGE_BOOTSTRAP_FAIL_AFTER_RECOVERED=1 \
+    bash "$GUEST_BOOTSTRAP" \
+      --bootstrap-root "$bootstrap_terminal_root" \
+      --expected-commit "$expected_commit" \
+      --expected-hostname disk-arcana-stage \
+      --github-token-file "$bootstrap_terminal_state/github-token" \
+      --recover-only
+grep -Fx 'phase=RECOVERED' "$bootstrap_terminal_state/bootstrap-current" >/dev/null ||
+  fail 'recovery interruption occurred before terminal journal durability'
+[[ -f "$bootstrap_terminal_state/recovery.env" ]] ||
+  fail 'recovery interruption deleted authority before its terminal journal'
+run_expect 0 'recovery=already-recovered runner_name=disk-arcana-stage' \
+  'terminal recovery retry only revokes lingering bootstrap authority' \
+  env DISK_ARCANA_STAGE_BOOTSTRAP_TESTING=1 \
+    DISK_ARCANA_STAGE_BOOTSTRAP_STATE_ROOT="$bootstrap_terminal_state" \
+    DISK_ARCANA_STAGE_BOOTSTRAP_RUNNER_ROOT="$bootstrap_terminal_runner" \
+    bash "$GUEST_BOOTSTRAP" \
+      --bootstrap-root "$bootstrap_terminal_root" \
+      --expected-commit "$expected_commit" \
+      --expected-hostname disk-arcana-stage \
+      --github-token-file "$bootstrap_terminal_state/github-token" \
+      --recover-only
+[[ ! -e "$bootstrap_terminal_state/recovery.env" ]] ||
+  fail 'terminal recovery retry retained recovery authority'
+printf 'PASS  recovery authority deletion is terminal-journal ordered\n'
+
+bootstrap_full_root="$fixture_root/bootstrap-full"
+bootstrap_full_state="$fixture_root/bootstrap-full-state"
+bootstrap_full_runner="$fixture_root/bootstrap-full-runner"
+bootstrap_full_journal="$fixture_root/bootstrap-full-journal"
+bootstrap_full_import="$fixture_root/bootstrap-full-import"
+bootstrap_full_fake_state="$fixture_root/bootstrap-full-fake-state"
+bootstrap_full_bin="$fixture_root/bootstrap-full-bin"
+install -d -m 0700 "$bootstrap_full_root" "$bootstrap_full_fake_state"
+install -d -m 0755 "$bootstrap_full_bin"
+cp -a "$bootstrap_root/bundle" "$bootstrap_full_root/bundle"
+cat >"$bootstrap_full_root/bundle/install.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'bundle-install\n' >>"$DISK_ARCANA_STAGE_TEST_BOOTSTRAP_LOG"
+EOF
+cat >"$bootstrap_full_root/bundle/provision-deploy-broker.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'broker-install\n' >>"$DISK_ARCANA_STAGE_TEST_BOOTSTRAP_LOG"
+EOF
+chmod 0755 "$bootstrap_full_root/bundle/install.sh" \
+  "$bootstrap_full_root/bundle/provision-deploy-broker.sh"
+rm -f "$bootstrap_full_root/bundle/manifest.sha256"
+bash "$DEPLOY_BUNDLE_VALIDATOR" create \
+  --root "$bootstrap_full_root/bundle" --commit "$expected_commit" >/dev/null
+bootstrap_full_archive_source="$fixture_root/bootstrap-full-archive-source"
+install -d -m 0755 "$bootstrap_full_archive_source"
+cat >"$bootstrap_full_archive_source/config.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == remove ]]; then
+  printf 'config-remove\n' >>"$DISK_ARCANA_STAGE_TEST_BOOTSTRAP_LOG"
+  rm -f -- "$(dirname "$0")/.runner"
+else
+  printf 'config-register\n' >>"$DISK_ARCANA_STAGE_TEST_BOOTSTRAP_LOG"
+  printf '{"agentId":987654,"agentName":"disk-arcana-stage"}\n' >"$(dirname "$0")/.runner"
+fi
+EOF
+cat >"$bootstrap_full_archive_source/svc.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "$1" in
+  install)
+    : >"$DISK_ARCANA_STAGE_TEST_FAKE_STATE/service-installed"
+    printf 'svc-install\n' >>"$DISK_ARCANA_STAGE_TEST_BOOTSTRAP_LOG"
+    ;;
+  uninstall)
+    rm -f -- "$DISK_ARCANA_STAGE_TEST_FAKE_STATE/service-installed"
+    printf 'svc-uninstall\n' >>"$DISK_ARCANA_STAGE_TEST_BOOTSTRAP_LOG"
+    ;;
+  *) exit 2 ;;
+esac
+EOF
+chmod 0755 "$bootstrap_full_archive_source/config.sh" \
+  "$bootstrap_full_archive_source/svc.sh"
+tar -czf "$bootstrap_full_root/runner.tar.gz" \
+  -C "$bootstrap_full_archive_source" config.sh svc.sh
+bootstrap_full_runner_sha="$(sha256sum "$bootstrap_full_root/runner.tar.gz" | awk '{print $1}')"
+printf '%s  runner.tar.gz\n' "$bootstrap_full_runner_sha" \
+  >"$bootstrap_full_root/runner.tar.gz.sha256"
+chmod 0600 "$bootstrap_full_root/runner.tar.gz" \
+  "$bootstrap_full_root/runner.tar.gz.sha256"
+write_bootstrap_registration() {
+  local target="$1"
+  {
+    printf 'runner_url=https://github.com/Arcanada-one\n'
+    printf 'runner_group=disk-arcana-stage\n'
+    printf 'runner_name=disk-arcana-stage\n'
+    printf 'runner_label=disk-arcana-stage\n'
+    printf 'authority_run_id=31444643689\n'
+    printf 'registration_token=%s\n' "$registration_token"
+    printf 'removal_token=%s\n' "$removal_token"
+  } >"$target"
+  chmod 0600 "$target"
+}
+write_bootstrap_registration "$bootstrap_full_root/registration.env"
+
+cat >"$bootstrap_full_bin/hostname" <<'EOF'
+#!/usr/bin/env bash
+printf 'disk-arcana-stage\n'
+EOF
+cat >"$bootstrap_full_bin/id" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == '-u' ]]; then
+  printf '%s\n' "$DISK_ARCANA_STAGE_TEST_UID"
+elif [[ "$*" == '-g' ]]; then
+  printf '%s\n' "$DISK_ARCANA_STAGE_TEST_GID"
+elif [[ "$*" == '-u disk-stage' ]]; then
+  printf '1001\n'
+elif [[ "$*" == 'disk-stage' && -f "$DISK_ARCANA_STAGE_TEST_FAKE_STATE/user-created" ]]; then
+  exit 0
+else
+  exit 1
+fi
+EOF
+cat >"$bootstrap_full_bin/getent" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$*" == 'group disk-arcana-deploy' && -f "$DISK_ARCANA_STAGE_TEST_FAKE_STATE/group-created" ]]
+EOF
+cat >"$bootstrap_full_bin/groupadd" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+: >"$DISK_ARCANA_STAGE_TEST_FAKE_STATE/group-created"
+printf 'groupadd\n' >>"$DISK_ARCANA_STAGE_TEST_BOOTSTRAP_LOG"
+EOF
+cat >"$bootstrap_full_bin/useradd" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+: >"$DISK_ARCANA_STAGE_TEST_FAKE_STATE/user-created"
+printf 'useradd\n' >>"$DISK_ARCANA_STAGE_TEST_BOOTSTRAP_LOG"
+EOF
+cat >"$bootstrap_full_bin/usermod" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "$*" in
+  *--add-subuids*) printf 'disk-stage:200000:65536\n' >>"$DISK_ARCANA_STAGE_TEST_SUBUID" ;;
+  *--add-subgids*) printf 'disk-stage:200000:65536\n' >>"$DISK_ARCANA_STAGE_TEST_SUBGID" ;;
+esac
+printf 'usermod\n' >>"$DISK_ARCANA_STAGE_TEST_BOOTSTRAP_LOG"
+EOF
+cat >"$bootstrap_full_bin/apt-get" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'apt-get\n' >>"$DISK_ARCANA_STAGE_TEST_BOOTSTRAP_LOG"
+EOF
+cat >"$bootstrap_full_bin/loginctl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == show-user ]]; then printf 'yes\n'; else printf 'loginctl\n' >>"$DISK_ARCANA_STAGE_TEST_BOOTSTRAP_LOG"; fi
+EOF
+cat >"$bootstrap_full_bin/runuser" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+while (($#)) && [[ "$1" != -- ]]; do shift; done
+[[ "${1:-}" == -- ]]
+shift
+exec "$@"
+EOF
+cat >"$bootstrap_full_bin/systemctl" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "$1" in
+  list-unit-files)
+    [[ -f "$DISK_ARCANA_STAGE_TEST_FAKE_STATE/service-installed" ]] &&
+      printf 'actions.runner.Arcanada-one.disk-arcana-stage.service enabled\n'
+    ;;
+  is-active)
+    if [[ "$2" == disk-arcana-server.service || -f "$DISK_ARCANA_STAGE_TEST_FAKE_STATE/runner-active" ]]; then
+      printf 'active\n'
+    else
+      printf 'inactive\n'
+    fi
+    ;;
+  is-enabled) printf 'enabled\n' ;;
+  show)
+    case "$*" in
+      *UnitFileState*) printf 'enabled\n' ;;
+      *Restart*) printf 'on-failure\n' ;;
+      *StartLimitIntervalUSec*) printf '2min\n' ;;
+      *StartLimitBurst*) printf '5\n' ;;
+      *) exit 2 ;;
+    esac
+    ;;
+  start)
+    [[ "$2" == actions.runner.* ]] && : >"$DISK_ARCANA_STAGE_TEST_FAKE_STATE/runner-active"
+    printf 'systemctl-start\n' >>"$DISK_ARCANA_STAGE_TEST_BOOTSTRAP_LOG"
+    ;;
+  stop|disable|daemon-reload) : ;;
+  --user) [[ "$2" == show-environment ]] ;;
+  *) exit 2 ;;
+esac
+EOF
+cat >"$bootstrap_full_bin/curl" <<'EOF'
+#!/usr/bin/env bash
+printf 'health-check\n' >>"$DISK_ARCANA_STAGE_TEST_BOOTSTRAP_LOG"
+EOF
+cat >"$bootstrap_full_bin/podman" <<'EOF'
+#!/usr/bin/env bash
+[[ "$1" == info ]] && printf 'true\n'
+EOF
+cat >"$bootstrap_full_bin/unshare" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+cat >"$bootstrap_full_bin/sudo" <<'EOF'
+#!/usr/bin/env bash
+cat <<'OUT'
+User disk-stage may run the following commands on disk-arcana-stage:
+    (root) NOPASSWD: /usr/local/sbin/disk-arcana-deploy-broker --deploy *
+OUT
+EOF
+chmod 0755 "$bootstrap_full_bin"/*
+
+bootstrap_full_subuid="$fixture_root/bootstrap-full-subuid"
+bootstrap_full_subgid="$fixture_root/bootstrap-full-subgid"
+bootstrap_full_socket="$fixture_root/bootstrap-full-docker.sock"
+: >"$bootstrap_full_subuid"
+: >"$bootstrap_full_subgid"
+: >"$bootstrap_full_socket"
+chmod 0600 "$bootstrap_full_subuid" "$bootstrap_full_subgid"
+chmod 0000 "$bootstrap_full_socket"
+bootstrap_full_log="$fixture_root/bootstrap-full.log"
+bootstrap_full_env=(
+  PATH="$bootstrap_full_bin:$PATH"
+  DISK_ARCANA_STAGE_BOOTSTRAP_TESTING=1
+  DISK_ARCANA_STAGE_BOOTSTRAP_FULL_TESTING=1
+  DISK_ARCANA_STAGE_BOOTSTRAP_STATE_ROOT="$bootstrap_full_state"
+  DISK_ARCANA_STAGE_BOOTSTRAP_RUNNER_ROOT="$bootstrap_full_runner"
+  DISK_ARCANA_STAGE_BOOTSTRAP_JOURNAL_ROOT="$bootstrap_full_journal"
+  DISK_ARCANA_STAGE_BOOTSTRAP_IMPORT_ROOT="$bootstrap_full_import"
+  DISK_ARCANA_STAGE_BOOTSTRAP_SUBUID_FILE="$bootstrap_full_subuid"
+  DISK_ARCANA_STAGE_BOOTSTRAP_SUBGID_FILE="$bootstrap_full_subgid"
+  DISK_ARCANA_STAGE_BOOTSTRAP_DOCKER_SOCKET="$bootstrap_full_socket"
+  DISK_ARCANA_STAGE_TEST_UID="$(id -u)"
+  DISK_ARCANA_STAGE_TEST_GID="$(id -g)"
+  DISK_ARCANA_STAGE_TEST_FAKE_STATE="$bootstrap_full_fake_state"
+  DISK_ARCANA_STAGE_TEST_SUBUID="$bootstrap_full_subuid"
+  DISK_ARCANA_STAGE_TEST_SUBGID="$bootstrap_full_subgid"
+  DISK_ARCANA_STAGE_TEST_BOOTSTRAP_LOG="$bootstrap_full_log"
+)
+run_expect 0 'bootstrap=ok commit=1111111111111111111111111111111111111111' \
+  'guest bootstrap executes its isolated privileged mutation path' \
+  env "${bootstrap_full_env[@]}" bash "$GUEST_BOOTSTRAP" \
+    --bootstrap-root "$bootstrap_full_root" \
+    --expected-commit "$expected_commit" \
+    --expected-hostname disk-arcana-stage
+for load_bearing_marker in apt-get config-register svc-install bundle-install broker-install health-check; do
+  grep -Fx "$load_bearing_marker" "$bootstrap_full_log" >/dev/null ||
+    fail "full bootstrap did not execute $load_bearing_marker"
+done
+grep -Fx 'phase=COMMITTED' "$bootstrap_full_state/bootstrap-current" >/dev/null ||
+  fail 'full bootstrap did not persist COMMITTED'
+[[ ! -e "$bootstrap_full_root/registration.env" &&
+   ! -e "$bootstrap_full_state/recovery.env" ]] ||
+  fail 'full bootstrap retained consumed authority'
+printf 'PASS  privileged bootstrap behavior is load-bearing\n'
+
+bootstrap_failure_root="$fixture_root/bootstrap-failure"
+bootstrap_failure_state="$fixture_root/bootstrap-failure-state"
+bootstrap_failure_runner="$fixture_root/bootstrap-failure-runner"
+bootstrap_failure_journal="$fixture_root/bootstrap-failure-journal"
+bootstrap_failure_import="$fixture_root/bootstrap-failure-import"
+bootstrap_failure_fake_state="$fixture_root/bootstrap-failure-fake-state"
+bootstrap_failure_subuid="$fixture_root/bootstrap-failure-subuid"
+bootstrap_failure_subgid="$fixture_root/bootstrap-failure-subgid"
+bootstrap_failure_socket="$fixture_root/bootstrap-failure-docker.sock"
+bootstrap_failure_log="$fixture_root/bootstrap-failure.log"
+install -d -m 0700 "$bootstrap_failure_root" "$bootstrap_failure_fake_state"
+cp -a "$bootstrap_full_root/bundle" "$bootstrap_failure_root/bundle"
+install -m 0600 "$bootstrap_full_root/runner.tar.gz" "$bootstrap_failure_root/runner.tar.gz"
+install -m 0600 "$bootstrap_full_root/runner.tar.gz.sha256" \
+  "$bootstrap_failure_root/runner.tar.gz.sha256"
+write_bootstrap_registration "$bootstrap_failure_root/registration.env"
+: >"$bootstrap_failure_subuid"
+: >"$bootstrap_failure_subgid"
+: >"$bootstrap_failure_socket"
+chmod 0600 "$bootstrap_failure_subuid" "$bootstrap_failure_subgid"
+chmod 0000 "$bootstrap_failure_socket"
+run_expect 99 'injected interruption after runner registration' \
+  'normal bootstrap failure revokes the runner before terminal authority cleanup' \
+  env PATH="$bootstrap_full_bin:$PATH" \
+    DISK_ARCANA_STAGE_BOOTSTRAP_TESTING=1 \
+    DISK_ARCANA_STAGE_BOOTSTRAP_FULL_TESTING=1 \
+    DISK_ARCANA_STAGE_BOOTSTRAP_STATE_ROOT="$bootstrap_failure_state" \
+    DISK_ARCANA_STAGE_BOOTSTRAP_RUNNER_ROOT="$bootstrap_failure_runner" \
+    DISK_ARCANA_STAGE_BOOTSTRAP_JOURNAL_ROOT="$bootstrap_failure_journal" \
+    DISK_ARCANA_STAGE_BOOTSTRAP_IMPORT_ROOT="$bootstrap_failure_import" \
+    DISK_ARCANA_STAGE_BOOTSTRAP_SUBUID_FILE="$bootstrap_failure_subuid" \
+    DISK_ARCANA_STAGE_BOOTSTRAP_SUBGID_FILE="$bootstrap_failure_subgid" \
+    DISK_ARCANA_STAGE_BOOTSTRAP_DOCKER_SOCKET="$bootstrap_failure_socket" \
+    DISK_ARCANA_STAGE_BOOTSTRAP_FAIL_AFTER_REGISTRATION=1 \
+    DISK_ARCANA_STAGE_TEST_UID="$(id -u)" \
+    DISK_ARCANA_STAGE_TEST_GID="$(id -g)" \
+    DISK_ARCANA_STAGE_TEST_FAKE_STATE="$bootstrap_failure_fake_state" \
+    DISK_ARCANA_STAGE_TEST_SUBUID="$bootstrap_failure_subuid" \
+    DISK_ARCANA_STAGE_TEST_SUBGID="$bootstrap_failure_subgid" \
+    DISK_ARCANA_STAGE_TEST_BOOTSTRAP_LOG="$bootstrap_failure_log" \
+    bash "$GUEST_BOOTSTRAP" \
+      --bootstrap-root "$bootstrap_failure_root" \
+      --expected-commit "$expected_commit" \
+      --expected-hostname disk-arcana-stage
+grep -Fx config-remove "$bootstrap_failure_log" >/dev/null ||
+  fail 'normal bootstrap failure did not revoke the runner'
+grep -Fx 'phase=RECOVERED' "$bootstrap_failure_state/bootstrap-current" >/dev/null ||
+  fail 'normal bootstrap failure did not journal terminal recovery'
+[[ ! -e "$bootstrap_failure_root/registration.env" &&
+   ! -e "$bootstrap_failure_state/recovery.env" ]] ||
+  fail 'normal bootstrap failure deleted authority out of terminal order'
+printf 'PASS  normal bootstrap cleanup is behaviorally terminal and revoking\n'
