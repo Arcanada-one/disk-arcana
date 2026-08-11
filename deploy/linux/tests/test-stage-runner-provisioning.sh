@@ -680,6 +680,31 @@ run_expect 65 'recorded host unit is unsafe' \
   fail 'missing-unit phase mismatch created a teardown journal'
 printf 'phase=READY_TO_INSTALL\n' >"$teardown_preinstall_root/phase"
 chmod 0600 "$teardown_preinstall_root/phase"
+printf '{"total_count":1,"runners":[{"id":987654,"name":"disk-arcana-stage","status":"offline","busy":false,"labels":[{"name":"self-hosted"},{"name":"Linux"},{"name":"X64"},{"name":"disk-arcana-stage"}]}]}\n' \
+  >"$teardown_preinstall_parent/group-api-response.json"
+printf '{"total_count":1,"runners":[{"id":987654,"name":"disk-arcana-stage","status":"offline","busy":false,"labels":[{"name":"self-hosted"},{"name":"Linux"},{"name":"X64"},{"name":"disk-arcana-stage"}]}]}\n' \
+  >"$teardown_preinstall_parent/org-api-response.json"
+rm -f -- "$teardown_preinstall_parent/delete.log"
+run_expect 66 'pre-unit-install recovery found an unexpected runner identity' \
+  'pre-unit-install recovery rejects an unexpected exact runner without deletion' \
+  env PATH="$teardown_delete_bin:$PATH" \
+    DISK_ARCANA_STAGE_TEARDOWN_TESTING=1 \
+    DISK_ARCANA_STAGE_TEARDOWN_GROUP_API_RESPONSE="$teardown_preinstall_parent/group-api-response.json" \
+    DISK_ARCANA_STAGE_TEARDOWN_ORG_API_RESPONSE="$teardown_preinstall_parent/org-api-response.json" \
+    DISK_ARCANA_STAGE_TEARDOWN_UNIT_PATH="$teardown_preinstall_unit" \
+    DISK_ARCANA_STAGE_TEARDOWN_DIAGNOSTICS_ROOT="$teardown_preinstall_diagnostics" \
+    DISK_ARCANA_STAGE_TEST_DELETE_LOG="$teardown_preinstall_parent/delete.log" \
+    bash "$HOST_TEARDOWN" \
+      --state-root "$teardown_preinstall_root" \
+      --github-token-file "$teardown_preinstall_parent/token"
+[[ -e "$teardown_preinstall_root" && ! -e "$teardown_preinstall_unit" ]] ||
+  fail 'pre-unit-install runner mismatch did not retain the canonical recovery state'
+[[ ! -s "$teardown_preinstall_parent/delete.log" ]] ||
+  fail 'pre-unit-install runner mismatch invoked runner deletion'
+printf '{"total_count":0,"runners":[]}\n' \
+  >"$teardown_preinstall_parent/group-api-response.json"
+printf '{"total_count":0,"runners":[]}\n' \
+  >"$teardown_preinstall_parent/org-api-response.json"
 run_expect 0 'teardown=ok runner_id=UNREGISTERED' \
   'teardown recovers a host crash after state install but before unit install' \
   env DISK_ARCANA_STAGE_TEARDOWN_TESTING=1 \

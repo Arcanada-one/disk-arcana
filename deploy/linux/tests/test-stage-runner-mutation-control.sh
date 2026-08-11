@@ -205,8 +205,19 @@ chmod 0755 "$teardown_preinstall_mutant"
 cmp -s "$teardown_preinstall_mutant" "$REPO_ROOT/deploy/linux/teardown-stage-runner-host.sh" &&
   fail 'teardown preinstall recovery mutant was not applied'
 require_killed_mutant 'pre-unit-install host recovery' \
-  'teardown recovers a host crash after state install but before unit install status=65 expected=0' \
+  'pre-unit-install recovery rejects an unexpected exact runner without deletion status=65 expected=66' \
   env HOST_TEARDOWN_OVERRIDE="$teardown_preinstall_mutant" bash "$SUITE"
+
+teardown_preinstall_runner_mutant="$TMP/teardown-stage-runner-preinstall-runner-mutant.sh"
+# shellcheck disable=SC2016 # The sed program matches literal shell variables.
+sed '/^if \[\[ "$preinstall_recovery" == true && "$api_status" != 404 \]\]; then$/,/^fi$/c\# unexpected-runner rejection removed' \
+  "$REPO_ROOT/deploy/linux/teardown-stage-runner-host.sh" >"$teardown_preinstall_runner_mutant"
+chmod 0755 "$teardown_preinstall_runner_mutant"
+cmp -s "$teardown_preinstall_runner_mutant" "$REPO_ROOT/deploy/linux/teardown-stage-runner-host.sh" &&
+  fail 'teardown preinstall unexpected-runner mutant was not applied'
+require_killed_mutant 'pre-unit-install unexpected runner' \
+  'pre-unit-install recovery rejects an unexpected exact runner without deletion status=0 expected=66' \
+  env HOST_TEARDOWN_OVERRIDE="$teardown_preinstall_runner_mutant" bash "$SUITE"
 
 teardown_symlink_mutant="$TMP/teardown-stage-runner-symlink-mutant.sh"
 # shellcheck disable=SC2016 # The sed programs match literal shell variables.
