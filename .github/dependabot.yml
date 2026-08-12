@@ -22,3 +22,15 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+  - package-ecosystem: "npm"
+    directory: "/plugins/obsidian"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    # Transitive security fixes need the lockfile refreshed, not package.json
+    # edited, so indirect updates must be allowed or scheduled runs simply fail.
+    allow:
+      - dependency-type: "all"
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
