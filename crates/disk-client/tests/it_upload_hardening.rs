@@ -522,6 +522,48 @@ async fn receive_only_share_never_calls_delta_upload() {
     );
 }
 
+/// DISK-0098: a server-directed local deletion is destructive and therefore
+/// blocked on receive-only shares.  The file remains available for an
+/// operator-led repair decision instead of being removed by the sync loop.
+#[tokio::test]
+async fn receive_only_share_never_applies_to_delete() {
+    let scan_root = tempdir().expect("tempdir");
+    let local_path = scan_root.path().join(PROBE_PATH);
+    std::fs::write(&local_path, FILE_CONTENT).expect("write sentinel");
+
+    let cycle = SyncStateResponse {
+        to_delete: vec![FileMetadata {
+            path: PROBE_PATH.into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let fx = spawn_stub(vec![cycle], /* reject_uploads */ false).await;
+    let client = connect(&fx).await;
+
+    let mut transport = RemoteSync::with_scan_root(
+        &client,
+        SHARE_NAME,
+        scan_root.path().to_path_buf(),
+        "receive-only-delete-node",
+    )
+    .with_declared_direction(disk_client::config::schema::Direction::ReceiveOnly);
+
+    let outcome = transport.execute().await;
+    assert!(
+        matches!(
+            outcome,
+            Err(disk_client::sync_loop::LoopError::ReceiveOnlySafetyBlocked { entries: 1 })
+        ),
+        "to_delete must be reported as a safety block, got {outcome:?}"
+    );
+    assert_eq!(
+        std::fs::read(&local_path).unwrap(),
+        FILE_CONTENT,
+        "receive_only to_delete must leave local bytes untouched"
+    );
+}
+
 /// The guard must be narrow: a bidirectional share still uploads. Without this
 /// the previous test could be satisfied by breaking uploads outright.
 #[tokio::test]

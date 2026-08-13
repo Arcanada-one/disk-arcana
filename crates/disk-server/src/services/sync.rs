@@ -976,6 +976,27 @@ impl SyncService for SyncServiceImpl {
                 );
                 continue;
             }
+
+            // DISK-0098: receive-only is a read direction.  A missing or
+            // extra local path on that client is not authority to mutate the
+            // server's canonical index, and must not become a server-directed
+            // local delete or an upload request.  Older clients are also
+            // protected by suppressing these actions at the server boundary.
+            if matches!(caller_role, Some(EnforcedRole::ReceiveOnly))
+                && matches!(
+                    action.action,
+                    ActionType::Download | ActionType::DeleteLocal | ActionType::DeleteRemote
+                )
+            {
+                tracing::warn!(
+                    share = %share,
+                    node_id = %node_id,
+                    path = %action.path.display(),
+                    action = ?action.action,
+                    "receive_only action suppressed: client state cannot mutate canonical files"
+                );
+                continue;
+            }
             match action.action {
                 // Server has file; client should download it.
                 ActionType::Upload => {
@@ -1116,7 +1137,9 @@ impl SyncService for SyncServiceImpl {
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
             for action in &actions {
-                if action.action == ActionType::DeleteLocal {
+                if !matches!(caller_role, Some(EnforcedRole::ReceiveOnly))
+                    && action.action == ActionType::DeleteLocal
+                {
                     if let Some(m) = server_files.iter().find(|m| m.path == action.path) {
                         if m.deleted {
                             continue;
@@ -1149,7 +1172,11 @@ impl SyncService for SyncServiceImpl {
         // upsert_node_baselines (single tx). A failure here returns an error to
         // the client; no silent fallback to an empty baseline (which would
         // re-introduce the original empty-indexed bug on the next sync pass).
-        let new_baseline = build_post_sync_baseline(&server_files, &actions);
+        let new_baseline = build_post_sync_baseline(
+            &server_files,
+            &actions,
+            matches!(caller_role, Some(EnforcedRole::ReceiveOnly)),
+        );
         db.upsert_node_baselines_scoped(tenant.as_deref(), &node_id, vault_id, &new_baseline)
             .await
             .map_err(|e| Status::internal(format!("baseline writeback: {e}")))?;
@@ -1175,6 +1202,11 @@ impl SyncService for SyncServiceImpl {
         }
         to_upload = Self::filter_proto_paths(to_upload, &includes);
         to_delete = Self::filter_proto_paths(to_delete, &includes);
+        // Defensive final gate for older or future action variants: a
+        // receive-only response must never carry a local deletion.
+        if matches!(caller_role, Some(EnforcedRole::ReceiveOnly)) {
+            to_delete.clear();
+        }
 
         Ok(Response::new(SyncStateResponse {
             to_upload,
@@ -1238,6 +1270,7 @@ fn suggested_resolution_for(kind: disk_core::types::ConflictKind) -> &'static st
 fn build_post_sync_baseline(
     server_files: &[FileMeta],
     actions: &[disk_core::types::SyncAction],
+    receive_only: bool,
 ) -> Vec<FileMeta> {
     use disk_core::types::ActionType;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1254,10 +1287,12 @@ fn build_post_sync_baseline(
                 // Find the server's version for this path.
                 server_files.iter().find(|m| m.path == action.path).cloned()
             }
+            ActionType::Download if receive_only => None,
             ActionType::Download => {
                 // Client has a file the server lacks — baseline the client's version.
                 action.server_version.clone()
             }
+            ActionType::DeleteLocal | ActionType::DeleteRemote if receive_only => None,
             ActionType::DeleteLocal | ActionType::DeleteRemote => {
                 // Client was told to delete this path — record a tombstone in the
                 // baseline so the path is not re-emitted as to_download or to_delete

@@ -53,8 +53,15 @@ struct StubConflict {
     remote_bytes: Vec<u8>,
 }
 
+#[derive(Clone, Copy)]
+enum StubResponse {
+    Conflict,
+    Download,
+}
+
 struct StubSyncServer {
     conflict: StubConflict,
+    response: StubResponse,
 }
 
 #[tonic::async_trait]
@@ -66,6 +73,18 @@ impl SyncService for StubSyncServer {
         &self,
         _req: Request<SyncStateRequest>,
     ) -> Result<Response<SyncStateResponse>, Status> {
+        if matches!(self.response, StubResponse::Download) {
+            return Ok(Response::new(SyncStateResponse {
+                to_download: vec![FileMetadata {
+                    path: self.conflict.conflict_path.to_owned(),
+                    content_hash: blake3::hash(&self.conflict.remote_bytes)
+                        .as_bytes()
+                        .to_vec(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }));
+        }
         // Return a single ConflictReport for the test path.
         let report = ConflictReport {
             path: self.conflict.conflict_path.to_owned(),
@@ -134,6 +153,10 @@ struct Fixture {
 }
 
 async fn spawn_stub(remote_bytes: Vec<u8>) -> Fixture {
+    spawn_stub_with_response(remote_bytes, StubResponse::Conflict).await
+}
+
+async fn spawn_stub_with_response(remote_bytes: Vec<u8>, response: StubResponse) -> Fixture {
     disk_client::ensure_rustls_crypto_provider();
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind 0");
     let port = listener.local_addr().expect("local_addr").port();
@@ -154,6 +177,7 @@ async fn spawn_stub(remote_bytes: Vec<u8>) -> Fixture {
             conflict_path: CONFLICT_PATH,
             remote_bytes,
         },
+        response,
     };
 
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
@@ -348,6 +372,80 @@ async fn cycle_forks_when_overlap_despite_baseline() {
     assert_eq!(
         fork_bytes, remote_edit,
         "fork must contain the remote bytes"
+    );
+}
+
+/// DISK-0098: a stale or mixed-version server may still send a conflict to a
+/// receive-only client.  The client must refuse the old server-wins behavior,
+/// leave the operator's local bytes untouched, and surface a safety error.
+#[tokio::test]
+async fn receive_only_conflict_never_overwrites_local_file() {
+    let local: &[u8] = b"operator-local-version\n";
+    let remote: &[u8] = b"server-canonical-version\n";
+    let fx = spawn_stub(remote.to_vec()).await;
+    let client = connect(&fx).await;
+
+    let vault_dir = tempfile::tempdir().unwrap();
+    let docs_dir = vault_dir.path().join("docs");
+    std::fs::create_dir_all(&docs_dir).unwrap();
+    let live = docs_dir.join("notes.md");
+    std::fs::write(&live, local).unwrap();
+
+    let mut transport =
+        RemoteSync::with_scan_root(&client, SHARE_NAME, vault_dir.path().to_path_buf(), NODE_ID)
+            .with_declared_direction(disk_client::config::schema::Direction::ReceiveOnly);
+
+    let outcome = transport.execute().await;
+    assert!(
+        matches!(
+            outcome,
+            Err(disk_client::sync_loop::LoopError::ReceiveOnlySafetyBlocked { entries: 1 })
+        ),
+        "unexpected conflicts must be surfaced as a safety block, got {outcome:?}"
+    );
+    assert_eq!(
+        std::fs::read(&live).unwrap(),
+        local,
+        "receive_only conflict handling must never overwrite local bytes"
+    );
+    assert_eq!(
+        file_count_in(&docs_dir),
+        1,
+        "no implicit server-wins/fork write"
+    );
+}
+
+/// DISK-0098: a receive-only download may replace an unchanged baseline, but
+/// an existing file with no trusted baseline must remain untouched.
+#[tokio::test]
+async fn receive_only_download_refuses_unknown_existing_file() {
+    let local: &[u8] = b"operator-local-version\n";
+    let remote: &[u8] = b"server-canonical-version\n";
+    let fx = spawn_stub_with_response(remote.to_vec(), StubResponse::Download).await;
+    let client = connect(&fx).await;
+
+    let vault_dir = tempfile::tempdir().unwrap();
+    let docs_dir = vault_dir.path().join("docs");
+    std::fs::create_dir_all(&docs_dir).unwrap();
+    let live = docs_dir.join("notes.md");
+    std::fs::write(&live, local).unwrap();
+
+    let mut transport =
+        RemoteSync::with_scan_root(&client, SHARE_NAME, vault_dir.path().to_path_buf(), NODE_ID)
+            .with_declared_direction(disk_client::config::schema::Direction::ReceiveOnly);
+
+    let outcome = transport.execute().await;
+    assert!(
+        matches!(
+            outcome,
+            Err(disk_client::sync_loop::LoopError::ReceiveOnlySafetyBlocked { entries: 1 })
+        ),
+        "divergent existing file must be a safety block, got {outcome:?}"
+    );
+    assert_eq!(
+        std::fs::read(&live).unwrap(),
+        local,
+        "receive_only download must not overwrite an untrusted local file"
     );
 }
 

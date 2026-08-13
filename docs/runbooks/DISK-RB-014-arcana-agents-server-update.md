@@ -86,3 +86,25 @@ DISK-0071:
 
 Verify replication by writing a probe file into canon and checking it appears on
 the follower — not by reading either counter.
+
+## Receive-only safety gate (DISK-0098)
+
+`receive_only` is a read direction, not permission for a peer to erase or
+overwrite operator data. The repaired client and server therefore enforce all
+of the following before any future enablement:
+
+- the server does not treat a receive-only client's missing path as delete
+  authority and emits no `to_delete` work for that role;
+- the client refuses `to_delete` and unexpected conflict responses on a
+  receive-only share, leaves the local file untouched, and reports
+  `receive_only.safety_blocked`;
+- a `to_download` update may replace an existing local file only when its
+  bytes match the trusted last-synced baseline (or already match the remote
+  bytes); an unknown or divergent local file is left untouched and requires
+  operator repair.
+
+Do not re-enable an older binary that still logs `server-wins` for a
+receive-only conflict. Confirm the running binary contains the DISK-0098 tests,
+take a fresh MetaDB/filesystem backup, and run a dry-run reconciliation before
+any live repair. The server and client hold from the 2026-08-13 incident remain
+the default until those gates pass.

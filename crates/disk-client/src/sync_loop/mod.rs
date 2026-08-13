@@ -106,6 +106,15 @@ pub enum LoopError {
     /// timestamp advancing is indistinguishable from health.
     #[error("cycle.deadline_exceeded — sync cycle exceeded {secs}s and was abandoned")]
     CycleDeadlineExceeded { secs: u64 },
+
+    /// A receive-only client refused a destructive or ambiguous server
+    /// instruction because applying it would overwrite or delete local data.
+    ///
+    /// Receive-only is a read direction, not an operator-authorized delete
+    /// or overwrite capability.  The client remains fail-closed until the
+    /// local divergence is inspected and repaired explicitly.
+    #[error("receive_only.safety_blocked — refused {entries} destructive or ambiguous server instruction(s)")]
+    ReceiveOnlySafetyBlocked { entries: usize },
 }
 
 impl LoopError {
@@ -116,7 +125,8 @@ impl LoopError {
             LoopError::ShareUnknown
             | LoopError::TransportUnavailable
             | LoopError::AllTransfersFailed { .. }
-            | LoopError::CycleDeadlineExceeded { .. } => true,
+            | LoopError::CycleDeadlineExceeded { .. }
+            | LoopError::ReceiveOnlySafetyBlocked { .. } => true,
             LoopError::AclRoleMismatch => false,
         }
     }
@@ -323,7 +333,8 @@ impl SyncLoop {
                     // "unknown_share", which would misname the cause. A cycle
                     // that moved nothing is an error, and must read as one.
                     LoopError::AllTransfersFailed { .. }
-                    | LoopError::CycleDeadlineExceeded { .. } => LoopState::Error,
+                    | LoopError::CycleDeadlineExceeded { .. }
+                    | LoopError::ReceiveOnlySafetyBlocked { .. } => LoopState::Error,
                     _ => LoopState::Backoff,
                 };
                 self.backoff_until = Some(now + delay);
@@ -506,6 +517,27 @@ mod tests {
             failed: 12
         }
         .should_backoff());
+    }
+
+    #[test]
+    fn receive_only_safety_block_is_retryable_and_error_state() {
+        assert!(LoopError::ReceiveOnlySafetyBlocked { entries: 1 }.should_backoff());
+
+        let mut s = SyncLoop::new();
+        let mut rng = rng_seed();
+        let now = Instant::now();
+        s.begin_sync(now, LoopTrigger::Tick);
+        s.finish_sync(
+            Err(LoopError::ReceiveOnlySafetyBlocked { entries: 3 }),
+            now,
+            &mut rng,
+        );
+
+        assert_eq!(s.state(), LoopState::Error);
+        assert_eq!(
+            s.last_error(),
+            Some(LoopError::ReceiveOnlySafetyBlocked { entries: 3 })
+        );
     }
 
     #[test]

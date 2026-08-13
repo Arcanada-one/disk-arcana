@@ -528,6 +528,15 @@ impl<'a> SyncTransport for RemoteSync<'a> {
         let mut downloads_attempted: usize = 0;
         let mut downloads_failed: usize = 0;
         let mut first_download_error: Option<String> = None;
+        // DISK-0098: receive-only is fail-closed for destructive or
+        // ambiguous updates.  A server response must never erase an
+        // operator's local copy merely because the peer's index is stale or
+        // the ACL direction was misapplied.
+        let receive_only = matches!(
+            self.declared_direction,
+            Some(crate::config::schema::Direction::ReceiveOnly)
+        );
+        let mut safety_blocked = 0usize;
         // DISK-0078: set when the server rejects the session mid-cycle.
         let mut session_rejected = false;
         // ── Scan ────────────────────────────────────────────────────────
@@ -791,6 +800,58 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                 if let Some(parent) = dest.parent() {
                     let _ = std::fs::create_dir_all(parent);
                 }
+
+                // DISK-0098: a receive-only update may be applied in place
+                // only when the current local bytes are known to be the last
+                // synced baseline (or already equal to the remote bytes).
+                // An existing divergent file is operator data, not disposable
+                // cache.  Leave it untouched and surface a repair-required
+                // error instead of silently implementing server-wins.
+                if receive_only && dest.exists() {
+                    let local_bytes = match std::fs::read(&dest) {
+                        Ok(bytes) => bytes,
+                        Err(e) => {
+                            safety_blocked += 1;
+                            tracing::error!(
+                                share = %self.share,
+                                path = %to_download.path,
+                                error = %e,
+                                "receive_only safety block: cannot verify existing local file before download"
+                            );
+                            continue;
+                        }
+                    };
+                    let local_hash = *blake3::hash(&local_bytes).as_bytes();
+                    let remote_hash = *blake3::hash(&plaintext).as_bytes();
+                    let baseline_matches = self
+                        .baselines
+                        .get(&to_download.path)
+                        .map(|baseline_hash| {
+                            *baseline_hash == local_hash
+                                || self
+                                    .blob_cache
+                                    .as_ref()
+                                    .and_then(|cache| cache.get(baseline_hash))
+                                    .as_deref()
+                                    == Some(local_bytes.as_slice())
+                        })
+                        .unwrap_or(false);
+                    if local_hash == remote_hash {
+                        // Idempotent no-op: the desired bytes are already
+                        // present and no write is necessary.
+                        downloads_attempted += 1;
+                        continue;
+                    }
+                    if !baseline_matches {
+                        safety_blocked += 1;
+                        tracing::error!(
+                            share = %self.share,
+                            path = %to_download.path,
+                            "receive_only safety block: refusing to overwrite divergent local file; operator repair required"
+                        );
+                        continue;
+                    }
+                }
                 if let Err(e) = std::fs::write(&dest, &plaintext) {
                     tracing::warn!(
                         path = %to_download.path,
@@ -884,24 +945,6 @@ impl<'a> SyncTransport for RemoteSync<'a> {
             //
             // Non-fatal: a failure to resolve a single conflict is logged and
             // skipped so that the remainder of the sync iteration can proceed.
-            let receive_only_conflicts = matches!(
-                self.declared_direction,
-                Some(crate::config::schema::Direction::ReceiveOnly)
-            );
-            if receive_only_conflicts && !response.conflicts.is_empty() {
-                tracing::warn!(
-                    share = %self.share,
-                    entries = response.conflicts.len(),
-                    "server sent conflicts for a receive_only share — applying server-wins (no fork)"
-                );
-                if response.conflicts.len() > 50 {
-                    tracing::error!(
-                        share = %self.share,
-                        entries = response.conflicts.len(),
-                        "receive_only conflict storm detected — circuit breaker active (server-wins only)"
-                    );
-                }
-            }
             for conflict in &response.conflicts {
                 let rel_path = std::path::Path::new(&conflict.path);
                 if disk_core::filter::is_sync_ephemeral_marker(rel_path) {
@@ -909,6 +952,22 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                         share = %self.share,
                         path = %conflict.path,
                         "skipping conflict apply for sync ephemeral marker"
+                    );
+                    continue;
+                }
+
+                // DISK-0098: an unexpected conflict on a receive-only share
+                // is a protocol/ACL failure, never permission to replace the
+                // local file with server bytes.  The server's normal
+                // receive-only path already converts conflicts into a
+                // to_download action; this guard protects against stale or
+                // mixed-version peers as well.
+                if receive_only {
+                    safety_blocked += 1;
+                    tracing::error!(
+                        share = %self.share,
+                        path = %conflict.path,
+                        "receive_only safety block: refusing unexpected conflict apply; operator repair required"
                     );
                     continue;
                 }
@@ -960,27 +1019,6 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                     Some(p) => p,
                     None => continue,
                 };
-
-                // DISK-0094: receive-only followers never fork — canon wins.
-                if receive_only_conflicts {
-                    let dest = self.scan_root.join(rel_path);
-                    if let Some(parent) = dest.parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                    }
-                    if let Err(e) = std::fs::write(&dest, &remote_plain) {
-                        tracing::warn!(
-                            path = %conflict.path,
-                            error = %e,
-                            "receive_only server-wins: cannot write remote copy"
-                        );
-                    } else {
-                        tracing::info!(
-                            path = %conflict.path,
-                            "receive_only server-wins: local file replaced with canon copy"
-                        );
-                    }
-                    continue;
-                }
 
                 // Resolve the base (common-ancestor) bytes from the blob cache.
                 //
@@ -1090,7 +1128,16 @@ impl<'a> SyncTransport for RemoteSync<'a> {
             //
             // Non-fatal: a failure to delete one file is logged and skipped so
             // that the rest of the sync iteration proceeds.
-            if !response.to_delete.is_empty() {
+            if receive_only && !response.to_delete.is_empty() {
+                safety_blocked += response.to_delete.len();
+                for to_delete in &response.to_delete {
+                    tracing::error!(
+                        share = %self.share,
+                        path = %to_delete.path,
+                        "receive_only safety block: refusing server-directed local deletion; operator repair required"
+                    );
+                }
+            } else if !response.to_delete.is_empty() {
                 let mut delete_baselines: Vec<disk_core::types::FileMeta> = Vec::new();
 
                 for to_delete in &response.to_delete {
@@ -1169,6 +1216,11 @@ impl<'a> SyncTransport for RemoteSync<'a> {
             return Err(LoopError::AllTransfersFailed {
                 attempted: downloads_attempted,
                 failed: downloads_failed,
+            });
+        }
+        if safety_blocked > 0 {
+            return Err(LoopError::ReceiveOnlySafetyBlocked {
+                entries: safety_blocked,
             });
         }
         Ok(())

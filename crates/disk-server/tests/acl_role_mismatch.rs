@@ -252,10 +252,11 @@ async fn receive_only_caller_is_never_given_upload_work() {
     );
 }
 
-/// DISK-0094: a receive-only follower must not be told to fork on conflict.
-/// Canon wins — the server copy is routed as `to_download`, `conflicts` empty.
+/// DISK-0094/DISK-0098: a receive-only follower must not be told to fork on
+/// conflict. The server exposes the canonical copy as `to_download`; the
+/// receive-only client performs its own baseline safety check before writing.
 #[tokio::test]
-async fn receive_only_conflict_is_server_wins_not_fork() {
+async fn receive_only_conflict_routes_canonical_copy_as_download() {
     let der = fake_cert_der(0xCD);
     let fp = cert_fp_from_der(&der);
 
@@ -365,13 +366,105 @@ async fn receive_only_conflict_is_server_wins_not_fork() {
     assert_eq!(
         resp.to_download.len(),
         1,
-        "receive_only conflict must become server-wins download"
+        "receive_only conflict must become a canonical download candidate"
     );
     assert_eq!(resp.to_download[0].path, "shared.md");
     assert_eq!(
         resp.to_download[0].content_hash.as_slice(),
         &[0xAA; 32],
         "download must carry the server hash"
+    );
+}
+
+/// DISK-0098: a receive-only client's missing local path is not delete
+/// authority.  The server must neither emit `to_delete` nor tombstone its
+/// canonical row when the client reports an absent file.
+#[tokio::test]
+async fn receive_only_missing_local_file_cannot_delete_canon() {
+    let der = fake_cert_der(0xCF);
+    let fp = cert_fp_from_der(&der);
+
+    let mut table = EnforcementTable::new(1);
+    table.insert(fp, "default", EnforcedRole::ReceiveOnly);
+    let enforcer = AclEnforcer::new_loaded(table);
+
+    let pool = make_in_memory_pool().await;
+    let audit = AuditEmitter::new(pool);
+    let root = tempdir().unwrap();
+    let store = AuthStore::new();
+    let db_dir = tempdir().unwrap();
+    let db = disk_core::MetaDb::open(&db_dir.path().join("meta.sqlite"))
+        .await
+        .expect("open meta db");
+    let svc = SyncServiceImpl::with_acl(store.clone(), root.path().to_path_buf(), enforcer, audit)
+        .with_meta_db(db, "server");
+
+    let key = store
+        .register_node("receive-only-delete-node", "N", "test", None)
+        .unwrap();
+    let (token, _) = store
+        .authenticate("receive-only-delete-node", key.as_str())
+        .unwrap();
+
+    let server_file = disk_core::types::FileMeta {
+        path: std::path::PathBuf::from("keep.md"),
+        content_hash: [0xEF; 32],
+        size: 10,
+        mtime_ns: 1_700_000_002_000_000_000,
+        inode: None,
+        vector_clock: disk_core::VectorClock::new(),
+        deleted: false,
+        deleted_at: None,
+        node_id: "server".into(),
+        encryption_nonce: None,
+        version_id: None,
+        parent_version_id: None,
+    };
+    let db = svc.meta_router.as_ref().unwrap().control();
+    db.upsert_file_scoped(None, "default", &server_file)
+        .await
+        .unwrap();
+    db.upsert_node_baselines(
+        "receive-only-delete-node",
+        "default",
+        std::slice::from_ref(&server_file),
+    )
+    .await
+    .unwrap();
+
+    let mut req = Request::new(SyncStateRequest {
+        files: vec![],
+        ..Default::default()
+    });
+    req.metadata_mut().insert(
+        "authorization",
+        format!("Bearer {}", token.as_str()).parse().unwrap(),
+    );
+    req.metadata_mut()
+        .insert("x-disk-share", "default".parse().unwrap());
+    req.extensions_mut().insert(CertificateDer::from(der));
+
+    let resp = svc
+        .exchange_state(req)
+        .await
+        .expect("exchange_state")
+        .into_inner();
+    assert!(
+        resp.to_delete.is_empty(),
+        "receive_only must never receive destructive delete work: {:?}",
+        resp.to_delete
+    );
+
+    let row = db
+        .list_all_files()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|m| m.path == server_file.path)
+        .expect("canonical row must remain present");
+    assert!(
+        !row.deleted,
+        "receive_only absence must not tombstone canon"
     );
 }
 
