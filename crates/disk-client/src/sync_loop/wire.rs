@@ -538,10 +538,39 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                 Ok(f) => f,
                 Err(_) => return Ok(()), // filter error is non-fatal; skip this iteration
             };
+            // DISK-0078: feed the scanner its size+mtime cache.
+            //
+            // `FileScanner` skips re-hashing a file whose (size, mtime_ns) match
+            // a `last_known` row (see `fast_path_hash`). Passing an empty map
+            // disabled that fast path entirely, so every cycle streamed and
+            // blake3'd the whole tree — 13k files on the Mac follower's
+            // datarim-kb share. That is the CPU-bound work behind the 99.3%
+            // CPU measured while a cycle appeared stuck, and behind cycles
+            // running minutes instead of seconds.
+            //
+            // The rows are already loaded a few lines below to overlay version
+            // ids; loading them once here and reusing them costs nothing extra.
+            let last_known: HashMap<std::path::PathBuf, FileMeta> = match &self.meta_db {
+                Some(db) => match db.list_all_files().await {
+                    Ok(rows) => rows
+                        .into_iter()
+                        .map(|row| (row.path.clone(), row))
+                        .collect(),
+                    Err(e) => {
+                        tracing::warn!(
+                            share = %self.share,
+                            error = %e,
+                            "scan cache unavailable; falling back to full re-hash this cycle"
+                        );
+                        HashMap::new()
+                    }
+                },
+                None => HashMap::new(),
+            };
             let scanner = FileScanner::new(
                 self.scan_root.clone(),
                 filter,
-                HashMap::new(),
+                last_known,
                 self.node_id.clone(),
             );
             match scanner.scan() {
