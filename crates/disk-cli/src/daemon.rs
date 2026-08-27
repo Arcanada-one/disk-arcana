@@ -434,6 +434,7 @@ pub async fn run_start(args: DaemonStartArgs) -> Result<()> {
                     baselines,
                     meta_db.clone(),
                     lan_fetch_for_loop.clone(),
+                    declared_direction,
                 );
                 if let Some(ref key) = e2ee_key {
                     transport = transport.with_e2ee_key(key.clone());
@@ -720,9 +721,14 @@ pub(crate) fn build_remote_sync_for_share<'a>(
     baselines: HashMap<String, [u8; 32]>,
     meta_db: Option<Arc<MetaDb>>,
     lan_fetch: Option<LanFetchContext>,
+    declared_direction: Direction,
 ) -> RemoteSync<'a> {
+    // DISK-0079: hand the transport the direction so it can refuse uploads on
+    // a receive_only share. The setting already existed in config and in
+    // /status, but was never consulted on the upload path.
     let transport = RemoteSync::with_scan_root(client, share_name, share_path, node_id)
-        .with_blob_cache(blob_cache, baselines);
+        .with_blob_cache(blob_cache, baselines)
+        .with_declared_direction(declared_direction);
     let transport = if let Some(ctx) = lan_fetch {
         transport.with_lan_fetch(ctx)
     } else {
@@ -1090,6 +1096,7 @@ client_key  = "/b"
             baselines,
             None,
             None,
+            Direction::Bidirectional,
         );
 
         // Assert the blob cache is attached.
@@ -1219,6 +1226,7 @@ client_key  = "/b"
             HashMap::new(),
             Some(Arc::clone(&db)),
             None,
+            Direction::Bidirectional,
         );
 
         assert!(

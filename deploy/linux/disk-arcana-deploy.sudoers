@@ -1,0 +1,3 @@
+# INFRA-0370: the CI runner may invoke only the reviewed deployment broker.
+# The broker accepts a fixed verb and validates every argument before mutation.
+%disk-arcana-deploy ALL=(root) NOPASSWD: /usr/local/sbin/disk-arcana-deploy-broker --deploy *

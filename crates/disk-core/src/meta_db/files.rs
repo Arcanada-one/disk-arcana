@@ -13,6 +13,26 @@ const VAULT_DEFAULT: &str = "default";
 
 impl MetaDb {
     /// Insert or update a file row keyed by `(tenant_id, vault_id, path)` — single-tenant default.
+    ///
+    /// # Do not use from production code
+    ///
+    /// This wrapper silently substitutes `vault_id = "default"`. DISK-0080: one
+    /// such call in the client's E2EE index writer put its rows under
+    /// `"default"` while every other writer used the share name, producing TWO
+    /// rows per path with different content hashes. The server then advertised
+    /// metadata from one row while serving bytes matching the other; the
+    /// client's hash check correctly rejected the download and retried it
+    /// forever, because a hash mismatch is not transient.
+    ///
+    /// Call [`upsert_file_scoped`] with the real share instead. This wrapper is
+    /// kept for tests that genuinely do not care which vault they write to.
+    ///
+    /// [`upsert_file_scoped`]: Self::upsert_file_scoped
+    #[deprecated(
+        note = "unscoped: writes vault_id=\"default\" and creates duplicate rows \
+                for a path that any other writer scopes by share (DISK-0080). \
+                Use upsert_file_scoped with the share name."
+    )]
     pub async fn upsert_file(&self, meta: &FileMeta) -> Result<(), MetaDbError> {
         self.upsert_file_scoped(None, VAULT_DEFAULT, meta).await
     }
@@ -225,6 +245,67 @@ fn unix_now() -> i64 {
 
 #[cfg(test)]
 mod tests {
+
+    /// DISK-0080: the unscoped wrapper and a share-scoped write must not
+    /// collide on the same path — and when they do, the duplicate is exactly
+    /// the defect that broke delivery.
+    ///
+    /// Measured on the canon host: `.kb-last-push` had two rows, 71A1F033…
+    /// under `datarim-kb` (the file's real blake3) and a stale CEFDE447… under
+    /// `default`, both live. The server advertised metadata from one and served
+    /// bytes matching the other, so the client's hash check rejected every
+    /// download and retried forever — a hash mismatch is never transient.
+    ///
+    /// This pins the mechanism: same path, two vaults, two independent rows.
+    /// If someone removes the `#[deprecated]` guard and a production caller
+    /// reaches for `upsert_file` again, this is the shape they will recreate.
+    #[tokio::test]
+    async fn unscoped_and_scoped_writes_create_separate_rows_for_one_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("meta.sqlite")).await.unwrap();
+
+        let mut meta = FileMeta {
+            path: PathBuf::from("notes/probe.md"),
+            content_hash: [0xAA; 32],
+            size: 3,
+            mtime_ns: 1,
+            inode: None,
+            vector_clock: VectorClock::default(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "n1".into(),
+            encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
+        };
+
+        // The share-scoped write: what every correct writer does.
+        db.upsert_file_scoped(None, "datarim-kb", &meta)
+            .await
+            .unwrap();
+
+        // The unscoped write, with DIFFERENT content — the stale-hash shape.
+        meta.content_hash = [0xBB; 32];
+        #[allow(deprecated)]
+        db.upsert_file(&meta).await.unwrap();
+
+        let scoped = db.list_files_scoped(None, "datarim-kb").await.unwrap();
+        let defaulted = db.list_files_scoped(None, VAULT_DEFAULT).await.unwrap();
+
+        assert_eq!(scoped.len(), 1, "share-scoped row must exist on its own");
+        assert_eq!(
+            defaulted.len(),
+            1,
+            "the unscoped write lands in a SEPARATE vault, not on top of the scoped row"
+        );
+        assert_eq!(
+            scoped[0].content_hash, [0xAA; 32],
+            "the share-scoped row must keep its own hash — this divergence is what \
+             made the server advertise one hash while serving bytes for another"
+        );
+        assert_eq!(defaulted[0].content_hash, [0xBB; 32]);
+    }
+
     use super::*;
     use crate::types::FileMeta;
     use std::path::PathBuf;

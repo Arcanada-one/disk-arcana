@@ -416,7 +416,11 @@ fn translate_notify_event(ev: &notify::Event, vault_id: &str, root: &Path) -> Ve
     ev.paths
         .iter()
         .enumerate()
-        .filter(|(_, p)| p.starts_with(root))
+        // DISK-0077: drop events for the server's own stores before they ever
+        // reach the index — the watcher would otherwise index the very files
+        // the server writes while serving, and that write stream is what
+        // starved the MetaDb lock.
+        .filter(|(_, p)| p.starts_with(root) && !is_internal_path(root, p))
         .map(|(i, p)| {
             let per_path_kind = match ev.kind {
                 EventKind::Modify(ModifyKind::Name(RenameMode::From)) => IndexEventKind::Tombstone,
@@ -548,13 +552,49 @@ async fn run_index_loop(
 /// Fail-closed: any `read_dir`, `file_type`, or iteration error aborts the
 /// entire walk with a typed [`ShareIndexError`] so reconciliation cannot
 /// silently miss a subtree.
+/// Directory names the server itself writes inside a share root. They must
+/// never enter the index.
+///
+/// DISK-0077: `.version-blobs` is the server's own content-addressed version
+/// store, constructed as `cfg.sync_root.join(".version-blobs")` (see
+/// `main.rs`) — i.e. *inside* the tree the share-index watcher observes. Every
+/// version the server wrote produced a file under the watched root, the
+/// watcher indexed it, and the index grew on its own exhaust: measured on the
+/// canon host, a 60s window added 22 rows of which all 22 were
+/// `.version-blobs` paths while real content added none, and the store grew
+/// ~660MB/hour unbounded. That write stream exhausted SQLite's
+/// `busy_timeout` (37 of 129 statements ended at exactly 5.004-5.006s, i.e.
+/// they never ran), which starved the client's sync cycle while `/status`
+/// still reported `state=syncing, last_error=null`.
+///
+/// Relocating the store would strand the versions already written under
+/// existing roots, so the boundary is drawn here instead: the store stays put
+/// and the index refuses to look at it.
+const INTERNAL_DIR_NAMES: &[&str] = &[".version-blobs"];
+
+/// True when `path` lies inside one of the server's internal directories
+/// relative to `root`.
+///
+/// Compares path *components* rather than a string prefix: a user file named
+/// `.version-blobs-notes.md` must stay indexed, and only a real directory
+/// boundary counts.
+fn is_internal_path(root: &Path, path: &Path) -> bool {
+    let Ok(rel) = path.strip_prefix(root) else {
+        return false;
+    };
+    rel.components().any(|c| {
+        matches!(c, std::path::Component::Normal(name)
+            if INTERNAL_DIR_NAMES.iter().any(|d| name == std::ffi::OsStr::new(d)))
+    })
+}
+
 fn walk_files(root: &Path) -> Result<Vec<PathBuf>, ShareIndexError> {
     let mut files = Vec::new();
-    walk_files_impl(root, &mut files)?;
+    walk_files_impl(root, root, &mut files)?;
     Ok(files)
 }
 
-fn walk_files_impl(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), ShareIndexError> {
+fn walk_files_impl(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), ShareIndexError> {
     let iter = std::fs::read_dir(dir).map_err(|source| ShareIndexError::Io {
         path: dir.to_path_buf(),
         source,
@@ -574,6 +614,11 @@ fn walk_files_impl(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), ShareIndexE
         // Never follow symlinks — filesystem index must reflect only
         // regular files physically under the configured root.
         if ft.is_symlink() {
+            continue;
+        }
+
+        // DISK-0077: never descend into (or index) the server's own stores.
+        if is_internal_path(root, &entry.path()) {
             continue;
         }
 
@@ -612,7 +657,7 @@ fn walk_files_impl(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), ShareIndexE
                 );
                 continue;
             }
-            walk_files_impl(&canonical, out)?;
+            walk_files_impl(root, &canonical, out)?;
         }
         // else: skip block devices, FIFOs, sockets, etc.
     }
@@ -635,6 +680,79 @@ fn walk_files_impl(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), ShareIndexE
 /// callback that could not `try_send` because the bounded channel was full.
 /// Returns the number of rows that claimed `deleted=1` while their file was
 /// present on disk — silently undeliverable paths this pass revived (DISK-0071).
+/// DISK-0080: drop legacy `vault_id = "default"` rows that shadow a configured
+/// share.
+///
+/// `MetaDb::upsert_file()` — the unscoped wrapper — silently wrote
+/// `vault_id="default"`. One production caller used it (the client's E2EE wire
+/// index, fixed in #171) while every other writer scoped by share name, so a
+/// path could end up with two live rows carrying different content hashes. The
+/// server then advertised metadata from one row while serving bytes matching
+/// the other, and the client's hash check rejected every download and retried
+/// forever, because a hash mismatch is never transient.
+///
+/// Measured on the canon host before this sweep: 669 paths lived under both
+/// `datarim-kb` and `default`, of which 6 disagreed on `content_hash`. For all
+/// six the share-scoped row matched the bytes on disk — verified by blake3, not
+/// by size alone — and the `default` row was an older copy (smaller, and with
+/// an earlier mtime in every case).
+///
+/// The rule is deliberately narrow: a `default` row is removed **only** when
+/// the same path also exists under a configured share. A `default` row for a
+/// path no share claims is left untouched, because this function cannot know
+/// whether some other deployment owns it. Removing rows we cannot attribute
+/// would trade a delivery bug for data loss.
+async fn sweep_shadowed_default_rows(
+    meta_db: &MetaDb,
+    canonical_roots: &HashMap<String, PathBuf>,
+) -> Result<usize, ShareIndexError> {
+    const LEGACY_VAULT: &str = "default";
+
+    // A configured share literally named "default" is its own owner — nothing
+    // to sweep, and sweeping would delete live rows.
+    if canonical_roots.contains_key(LEGACY_VAULT) {
+        return Ok(0);
+    }
+
+    let legacy_rows = meta_db.list_files_scoped(None, LEGACY_VAULT).await?;
+    if legacy_rows.is_empty() {
+        return Ok(0);
+    }
+
+    // Paths claimed by a configured share.
+    let mut claimed: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for vault_id in canonical_roots.keys() {
+        for row in meta_db.list_files_scoped(None, vault_id).await? {
+            claimed.insert(row.path.to_string_lossy().to_string());
+        }
+    }
+
+    let mut removed = 0usize;
+    for row in legacy_rows {
+        let path = row.path.to_string_lossy().to_string();
+        if !claimed.contains(&path) {
+            continue; // not ours to judge
+        }
+        if let Err(e) = meta_db.delete_file_scoped(None, LEGACY_VAULT, &path).await {
+            tracing::warn!(
+                path = %path,
+                error = %e,
+                "share_index: could not remove shadowed legacy row"
+            );
+            continue;
+        }
+        removed += 1;
+    }
+
+    if removed > 0 {
+        tracing::warn!(
+            removed,
+            "share_index removed legacy vault_id=\"default\" rows shadowing a configured share (DISK-0080)"
+        );
+    }
+    Ok(removed)
+}
+
 async fn full_reconcile(
     meta_db: &MetaDb,
     node_id: &str,
@@ -654,6 +772,9 @@ async fn full_reconcile(
     }
 
     // ── Phase 2: apply mutations ──
+    // DISK-0080: clear legacy shadow rows first, so the reconcile below sees a
+    // single row per path and cannot re-derive a conflicting hash.
+    let _swept = sweep_shadowed_default_rows(meta_db, canonical_roots).await?;
     let mut revived_total = 0usize;
     for (vault_id, root) in canonical_roots {
         let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
@@ -700,6 +821,28 @@ async fn full_reconcile(
                 }
                 let abs = root.join(&file_meta.path);
                 if !seen.contains(&abs) {
+                    // DISK-0081: absence from `seen` is not proof the file is
+                    // gone — it only means this walk did not reach it. Confirm
+                    // against the filesystem before writing a tombstone, because
+                    // a tombstone propagates and the follower DELETES the file.
+                    //
+                    // This cost real data: after the DISK-0080 sweep removed
+                    // index rows, the next reconcile tombstoned 210 insights and
+                    // 3319 qa paths, the follower executed those deletions, and
+                    // canon went from 174 insights / 2528 qa files to 0 / 9.
+                    // The watcher's Tombstone arm has had this exact guard since
+                    // DISK-0071 (`resolve_present_file`); the reconcile arm never
+                    // got it, and a guard that exists on only one of two paths to
+                    // the same destructive operation is not a guard.
+                    if resolve_present_file(root, &abs).is_some() {
+                        tracing::warn!(
+                            vault_id = %vault_id,
+                            path = %abs.display(),
+                            "share_index reconcile skipped a tombstone: the walk did not \
+                             see this path but the file is on disk (DISK-0081)"
+                        );
+                        continue;
+                    }
                     if let Err(e) =
                         tombstone_local_file(meta_db, vault_id, node_id, root, &abs).await
                     {
@@ -895,6 +1038,267 @@ fn unix_now_secs() -> i64 {
 
 #[cfg(test)]
 mod tests {
+
+    /// DISK-0081: a reconcile must never tombstone a path whose file is on disk.
+    ///
+    /// This reproduces the data loss I caused. The DISK-0080 sweep removed index
+    /// rows; the next reconcile saw rows its walk did not match and wrote
+    /// tombstones; the follower executed them and canon went from 174 insights /
+    /// 2528 qa files to 0 / 9.
+    ///
+    /// My DISK-0080 tests asserted the sweep removed the right ROWS and spared
+    /// unclaimed ones — both true, and both useless here, because nothing
+    /// asserted what the reconciler DOES next. This asserts the consequence.
+    ///
+    /// The divergence is staged the only way it can occur in practice: a row
+    /// exists for a path the walk does not return. `.version-blobs` is skipped
+    /// by `walk_files` (DISK-0077) while its files are plainly on disk, so a row
+    /// pointing there is present-but-unseen — exactly the shape that turned into
+    /// a tombstone.
+    #[tokio::test]
+    async fn reconcile_never_tombstones_a_path_whose_file_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("meta.sqlite")).await.unwrap();
+        let root = dir.path().join("kb");
+        std::fs::create_dir_all(root.join(".version-blobs/ab")).unwrap();
+        let root = std::fs::canonicalize(&root).unwrap();
+
+        // A file the walk WILL see, so the reconcile has normal work to do.
+        std::fs::write(root.join("plain.md"), b"ordinary").unwrap();
+
+        // A file that exists but the walk skips.
+        let hidden_rel = ".version-blobs/ab/deadbeef";
+        let hidden = root.join(hidden_rel);
+        std::fs::write(&hidden, b"present but unseen").unwrap();
+
+        // Index a live row for that unseen path.
+        let row = FileMeta {
+            path: PathBuf::from(hidden_rel),
+            content_hash: [0xEE; 32],
+            size: 18,
+            mtime_ns: 1,
+            inode: None,
+            vector_clock: disk_core::VectorClock::default(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "seed".into(),
+            encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
+        };
+        db.upsert_file_scoped(None, "kb", &row).await.unwrap();
+
+        let mut roots = HashMap::new();
+        roots.insert("kb".to_string(), root.clone());
+
+        full_reconcile(&db, "node", &roots).await.unwrap();
+
+        let after = db.list_files_scoped(None, "kb").await.unwrap();
+        let hidden_row = after
+            .iter()
+            .find(|r| r.path.as_os_str() == hidden_rel)
+            .expect("the row must still exist");
+        assert!(
+            !hidden_row.deleted,
+            "a path whose file is on disk must never be tombstoned — that tombstone \
+             propagates and the follower DELETES the file"
+        );
+        assert!(hidden.exists(), "the file itself must be untouched");
+    }
+
+    // ── DISK-0080: legacy shadow rows ──────────────────────────────────────
+
+    async fn seed_row(db: &MetaDb, vault: &str, path: &str, hash: [u8; 32], size: u64) {
+        let meta = disk_core::types::FileMeta {
+            path: PathBuf::from(path),
+            content_hash: hash,
+            size,
+            mtime_ns: 1,
+            inode: None,
+            vector_clock: disk_core::VectorClock::default(),
+            deleted: false,
+            deleted_at: None,
+            node_id: "seed".into(),
+            encryption_nonce: None,
+            version_id: None,
+            parent_version_id: None,
+        };
+        db.upsert_file_scoped(None, vault, &meta).await.unwrap();
+    }
+
+    /// A `default` row that shadows a path a configured share also holds is the
+    /// exact shape that broke delivery: two live rows, different hashes, so the
+    /// server advertised one and served the other and the client retried
+    /// forever. It must go.
+    #[tokio::test]
+    async fn sweep_removes_a_default_row_shadowing_a_configured_share() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("meta.sqlite")).await.unwrap();
+        let root = dir.path().join("kb");
+        std::fs::create_dir_all(&root).unwrap();
+        let root = std::fs::canonicalize(&root).unwrap();
+
+        seed_row(&db, "kb", "notes/a.md", [0xAA; 32], 10).await;
+        seed_row(&db, "default", "notes/a.md", [0xBB; 32], 7).await;
+
+        let mut roots = HashMap::new();
+        roots.insert("kb".to_string(), root);
+
+        let removed = sweep_shadowed_default_rows(&db, &roots).await.unwrap();
+        assert_eq!(removed, 1, "the shadowing row must be removed");
+
+        let left = db.list_files_scoped(None, "default").await.unwrap();
+        assert!(left.is_empty(), "no shadow row may survive: {left:?}");
+
+        let kept = db.list_files_scoped(None, "kb").await.unwrap();
+        assert_eq!(kept.len(), 1, "the share-scoped row must survive untouched");
+        assert_eq!(
+            kept[0].content_hash, [0xAA; 32],
+            "the surviving row must be the share's own, not the legacy copy"
+        );
+    }
+
+    /// The sweep must NOT touch a `default` row for a path no configured share
+    /// claims. This function cannot know whether another deployment owns it,
+    /// and deleting what we cannot attribute would trade a delivery bug for
+    /// data loss.
+    #[tokio::test]
+    async fn sweep_leaves_unclaimed_default_rows_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("meta.sqlite")).await.unwrap();
+        let root = dir.path().join("kb");
+        std::fs::create_dir_all(&root).unwrap();
+        let root = std::fs::canonicalize(&root).unwrap();
+
+        seed_row(&db, "kb", "notes/a.md", [0xAA; 32], 10).await;
+        seed_row(&db, "default", "somewhere/else.md", [0xCC; 32], 5).await;
+
+        let mut roots = HashMap::new();
+        roots.insert("kb".to_string(), root);
+
+        let removed = sweep_shadowed_default_rows(&db, &roots).await.unwrap();
+        assert_eq!(removed, 0, "an unclaimed legacy row must not be removed");
+        assert_eq!(
+            db.list_files_scoped(None, "default").await.unwrap().len(),
+            1,
+            "the unclaimed row must still be there"
+        );
+    }
+
+    /// If a share is genuinely named "default" it owns those rows, and sweeping
+    /// would delete live data.
+    #[tokio::test]
+    async fn sweep_is_a_noop_when_default_is_itself_a_configured_share() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = MetaDb::open(&dir.path().join("meta.sqlite")).await.unwrap();
+        let root = dir.path().join("default");
+        std::fs::create_dir_all(&root).unwrap();
+        let root = std::fs::canonicalize(&root).unwrap();
+
+        seed_row(&db, "default", "notes/a.md", [0xAA; 32], 10).await;
+
+        let mut roots = HashMap::new();
+        roots.insert("default".to_string(), root);
+
+        let removed = sweep_shadowed_default_rows(&db, &roots).await.unwrap();
+        assert_eq!(removed, 0);
+        assert_eq!(
+            db.list_files_scoped(None, "default").await.unwrap().len(),
+            1,
+            "a configured share named default must keep its rows"
+        );
+    }
+
+    // ── DISK-0077: the server's own stores must never enter the index ──
+
+    #[test]
+    fn walk_files_skips_the_servers_own_version_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+
+        // Real content: must be indexed.
+        std::fs::write(root.join("note.md"), b"real").unwrap();
+        std::fs::create_dir_all(root.join("qa/run-1")).unwrap();
+        std::fs::write(root.join("qa/run-1/shot.png"), b"png").unwrap();
+
+        // The server's own version store, nested exactly as main.rs builds it.
+        std::fs::create_dir_all(root.join(".version-blobs/ab")).unwrap();
+        std::fs::write(root.join(".version-blobs/ab/deadbeef"), b"blob").unwrap();
+        std::fs::create_dir_all(root.join(".version-blobs/cd")).unwrap();
+        std::fs::write(root.join(".version-blobs/cd/cafebabe"), b"blob").unwrap();
+
+        let found = walk_files(&root).unwrap();
+        let rel: Vec<String> = found
+            .iter()
+            .map(|p| {
+                p.strip_prefix(&root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect();
+
+        // Without the filter this walk returns 4 entries and the assertion below
+        // fails on the two blob paths — that failure is the point of the test.
+        assert!(
+            rel.contains(&"note.md".to_string()),
+            "real content dropped: {rel:?}"
+        );
+        assert!(
+            rel.contains(&"qa/run-1/shot.png".to_string()),
+            "nested real content dropped: {rel:?}"
+        );
+        assert!(
+            !rel.iter().any(|r| r.starts_with(".version-blobs/")),
+            "server version store leaked into the index: {rel:?}"
+        );
+        assert_eq!(rel.len(), 2, "unexpected entries: {rel:?}");
+    }
+
+    #[test]
+    fn watcher_events_for_the_version_store_are_dropped() {
+        use notify::event::{CreateKind, EventKind};
+
+        let root = PathBuf::from("/share");
+        let blob = root.join(".version-blobs/ab/deadbeef");
+        let real = root.join("qa/shot.png");
+
+        let ev = notify::Event {
+            kind: EventKind::Create(CreateKind::File),
+            paths: vec![blob, real.clone()],
+            attrs: notify::event::EventAttributes::default(),
+        };
+
+        let out = translate_notify_event(&ev, "v", &root);
+        assert_eq!(
+            out.len(),
+            1,
+            "expected only the real path to survive: {out:?}"
+        );
+        assert_eq!(out[0].abs_path, real);
+    }
+
+    #[test]
+    fn a_user_file_named_like_the_store_is_still_indexed() {
+        // The filter compares path components, not string prefixes: a file whose
+        // name merely begins with the store's name is user content.
+        let root = PathBuf::from("/share");
+        assert!(is_internal_path(&root, &root.join(".version-blobs/ab/x")));
+        assert!(!is_internal_path(
+            &root,
+            &root.join(".version-blobs-notes.md")
+        ));
+        assert!(!is_internal_path(
+            &root,
+            &root.join("qa/.version-blobs-report.md")
+        ));
+        // A path outside the root is not ours to judge.
+        assert!(!is_internal_path(
+            &root,
+            &PathBuf::from("/elsewhere/.version-blobs/x")
+        ));
+    }
+
     use super::*;
     use std::cell::Cell;
 

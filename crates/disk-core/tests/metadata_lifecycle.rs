@@ -1,3 +1,9 @@
+// DISK-0080: these tests deliberately use the unscoped `upsert_file`, which
+// is deprecated for production code because it writes vault_id="default"
+// and produced duplicate rows per path. Here the vault genuinely does not
+// matter, so the deprecation is silenced locally rather than by weakening
+// the guard that catches the next production caller.
+#![allow(deprecated)]
 #![allow(clippy::cmp_owned)]
 //! Lifecycle / CRUD coverage for `MetaDb` files / tombstones / conflicts.
 

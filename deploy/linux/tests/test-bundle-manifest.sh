@@ -15,6 +15,7 @@ EXPECTED_COMMIT="0123456789abcdef0123456789abcdef01234567"
 MEMBERS=(
   disk-arcana-server
   disk-arcana-server.service
+  install.sh
   deploy-server.sh
   deploy-server-broker.sh
   provision-deploy-broker.sh
@@ -244,7 +245,7 @@ expect_rejected_without_mutation "manifest unknown member"
 expect_reason "manifest unknown member" "manifest names an unknown member"
 
 clone_case
-awk 'NR == 7 { sub(/  provision-deploy-broker\.sh$/, "  commit") } { print }' \
+awk '/  provision-deploy-broker\.sh$/ { sub(/  provision-deploy-broker\.sh$/, "  commit") } { print }' \
   "$CASE/manifest.sha256" >"$CASE/manifest.tmp"
 mv "$CASE/manifest.tmp" "$CASE/manifest.sha256"
 expect_rejected_without_mutation "manifest duplicate member"

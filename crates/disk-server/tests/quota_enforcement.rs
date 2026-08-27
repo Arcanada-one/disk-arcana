@@ -1,5 +1,12 @@
 //! Integration tests for storage quota enforcement (DISK-0018).
 
+// DISK-0080: these tests deliberately use the unscoped `upsert_file`, which
+// is deprecated for production code because it writes vault_id="default"
+// and produced duplicate rows per path. Here the vault genuinely does not
+// matter, so the deprecation is silenced locally rather than by weakening
+// the guard that catches the next production caller.
+#![allow(deprecated)]
+
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -90,6 +97,7 @@ async fn spawn_server_with_quota(
     meta_db: MetaDb,
     limits: QuotaLimits,
 ) -> (u16, String) {
+    disk_server::ensure_rustls_crypto_provider();
     let store = AuthStore::new();
     let CertifiedKey {
         cert,

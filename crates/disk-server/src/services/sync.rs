@@ -318,6 +318,28 @@ impl SyncServiceImpl {
     /// - Enforcer resolves a role in `allowed_roles`.
     ///
     /// Returns `Err(PermissionDenied)` on mismatch and emits an audit row.
+    /// DISK-0079: resolve the caller's enforced role, when one is knowable.
+    ///
+    /// `check_acl_by_cert` resolves the role and then throws it away, so the
+    /// reconciler had no idea it was talking to a receive-only follower and
+    /// happily told it to upload. Measured on the Mac follower: a share
+    /// declared `receive_only` was handed a `to_upload` list, and the client
+    /// executed it — 230 upload attempts against the canonical host.
+    ///
+    /// Returns `None` when the role cannot be established (no ACL enforcer, no
+    /// client certificate, or an unresolvable fingerprint). `None` must mean
+    /// "unconstrained", never "deny": the legacy bearer-token path has no cert
+    /// and must keep working exactly as before.
+    async fn resolved_role(
+        &self,
+        cert_id: Option<&CertIdentity>,
+        share: &str,
+    ) -> Option<EnforcedRole> {
+        let enforcer = self.acl_enforcer.as_ref()?;
+        let fp: CertFingerprint = cert_id?.fingerprint;
+        enforcer.resolve(&fp, share).await.ok()
+    }
+
     async fn check_acl_by_cert(
         &self,
         cert_id: Option<&CertIdentity>,
@@ -497,8 +519,9 @@ impl SyncService for SyncServiceImpl {
         self.check_acl_by_cert(cert_id.as_ref(), &share, WRITE_ROLES, "send_only")
             .await?;
         let mut stream = request.into_inner();
+        let share_root = self.root_for(&share);
 
-        let mut assembled: Vec<u8> = Vec::new();
+        let mut spool: Option<UploadSpool> = None;
         let mut expected_hash: Option<Vec<u8>> = None;
         let mut last_path: Option<String> = None;
         #[cfg(feature = "publisher-verify")]
@@ -511,7 +534,7 @@ impl SyncService for SyncServiceImpl {
             if last_path.is_none() {
                 Self::require_selective_path(&req.path, &includes)?;
                 let candidate = std::path::Path::new(&req.path);
-                path_guard::validate(candidate, self.root_for(&share))
+                path_guard::validate(candidate, share_root)
                     .map_err(|e| Status::invalid_argument(format!("path guard: {e}")))?;
                 last_path = Some(req.path.clone());
                 expected_hash = Some(req.content_hash.clone());
@@ -534,25 +557,36 @@ impl SyncService for SyncServiceImpl {
                         return Err(Status::data_loss("chunk integrity failure (T-Tampering)"));
                     }
                 }
-                assembled.extend_from_slice(&chunk.data);
+                if spool.is_none() {
+                    spool = Some(UploadSpool::create(share_root)?);
+                }
+                spool.as_mut().unwrap().append(&chunk.data)?;
             }
         }
+
+        let (resulting_hash, file_size, staged_tmp) = match spool {
+            Some(s) => {
+                let (hash, path, size) = s.finalize()?;
+                (hash, size, Some(path))
+            }
+            None => (disk_core::delta::blake3_hash(&[]), 0, None),
+        };
 
         // Verify final content hash.
         if let Some(ref expected) = expected_hash {
             if !expected.is_empty() {
-                let actual: [u8; 32] = disk_core::delta::blake3_hash(&assembled);
                 let expected_arr: [u8; 32] = expected
                     .as_slice()
                     .try_into()
                     .map_err(|_| Status::invalid_argument("invalid content_hash length"))?;
-                if actual != expected_arr {
-                    return Err(Status::data_loss("content_hash mismatch after assembly"));
+                if resulting_hash != expected_arr {
+                    if let Some(ref tmp) = staged_tmp {
+                        let _ = std::fs::remove_file(tmp);
+                    }
+                    return Err(Status::data_loss("content_hash mismatch"));
                 }
             }
         }
-
-        let resulting_hash = disk_core::delta::blake3_hash(&assembled);
 
         // ── Publisher verification gate (P4b step 15) ──────────────────────
         // Only compiled when `publisher-verify` feature is enabled.
@@ -596,7 +630,11 @@ impl SyncService for SyncServiceImpl {
                             if let Some(parent) = qpath.parent() {
                                 let _ = std::fs::create_dir_all(parent);
                             }
-                            let _ = std::fs::write(&qpath, &assembled);
+                            if let Some(ref src) = staged_tmp {
+                                let _ = std::fs::copy(src, &qpath);
+                            } else {
+                                let _ = std::fs::write(&qpath, []);
+                            }
 
                             // Audit row.
                             if let Some(ref audit) = self.audit {
@@ -625,11 +663,11 @@ impl SyncService for SyncServiceImpl {
         // ── Storage quota gate (DISK-0018) ─────────────────────────────────
         if let (Some(enforcer), Some(file_path)) = (&self.quota_enforcer, last_path.as_deref()) {
             enforcer
-                .check_upload(tenant.as_deref(), &share, file_path, assembled.len() as u64)
+                .check_upload(tenant.as_deref(), &share, file_path, file_size)
                 .await?;
         }
 
-        // ── Commit assembled bytes to sync_root (DISK-0043) ────────────────
+        // ── Commit staged bytes to sync_root (DISK-0043 / DISK-0077 spool) ─
         //
         // SRE write-order (binding): bytes DURABLE first, then MetaDb row.
         // Crash between rename and upsert → next sync re-derives row from
@@ -641,7 +679,6 @@ impl SyncService for SyncServiceImpl {
         // check is co-located with the write (defence-in-depth).
         if let Some(file_path) = last_path.as_deref() {
             let candidate = std::path::Path::new(file_path);
-            let share_root = self.root_for(&share);
 
             // Security: path_guard::validate BEFORE any write (V-AC-6 binding).
             let target = path_guard::validate(candidate, share_root)
@@ -669,14 +706,20 @@ impl SyncService for SyncServiceImpl {
                     .map_err(|e| Status::internal(format!("create parent dir: {e}")))?;
             }
 
-            // 1. Write to a temp file inside sync_root (same device → atomic rename).
-            let tmp_name = format!(".tmp-{}", rand::random::<u64>());
-            let tmp_path = share_root.join(&tmp_name);
-            std::fs::write(&tmp_path, &assembled)
-                .map_err(|e| Status::internal(format!("write temp: {e}")))?;
+            // 1. Use spool temp file, or create an empty staging file.
+            let empty_upload = staged_tmp.is_none();
+            let tmp_path = if let Some(path) = staged_tmp {
+                path
+            } else {
+                let tmp_name = format!(".tmp-{}", rand::random::<u64>());
+                let path = share_root.join(&tmp_name);
+                std::fs::File::create(&path)
+                    .map_err(|e| Status::internal(format!("create empty temp: {e}")))?;
+                path
+            };
 
-            // 2. fsync the temp file for durability.
-            {
+            // 2. fsync empty staging files (spool path already fsynced in finalize).
+            if empty_upload {
                 let f = std::fs::OpenOptions::new()
                     .write(true)
                     .open(&tmp_path)
@@ -704,8 +747,6 @@ impl SyncService for SyncServiceImpl {
                     })
                     .map(|d| d.as_nanos() as i64)
                     .unwrap_or(0);
-
-                let file_size = assembled.len() as u64;
 
                 // Advance the server's vector clock for this write.
                 let mut vc = VectorClock::new();
@@ -855,6 +896,8 @@ impl SyncService for SyncServiceImpl {
             "bidirectional",
         )
         .await?;
+        // DISK-0079: a receive-only follower must never be asked to upload.
+        let caller_role = self.resolved_role(cert_id.as_ref(), &share).await;
         let req = request.into_inner();
 
         // Build the server's current state.
@@ -883,8 +926,16 @@ impl SyncService for SyncServiceImpl {
             let server = db
                 .list_files_scoped(tenant.as_deref(), &share)
                 .await
-                .map_err(|e| Status::internal(format!("meta_db list_files_scoped: {e}")))?;
-            let client: Vec<FileMeta> = req.files.iter().map(proto_to_file_meta).collect();
+                .map_err(|e| Status::internal(format!("meta_db list_files_scoped: {e}")))?
+                .into_iter()
+                .filter(|m| !disk_core::filter::is_sync_ephemeral_marker(&m.path))
+                .collect::<Vec<_>>();
+            let client: Vec<FileMeta> = req
+                .files
+                .iter()
+                .map(proto_to_file_meta)
+                .filter(|m| !disk_core::filter::is_sync_ephemeral_marker(&m.path))
+                .collect();
             (server, client, db)
         } else {
             // No MetaDb wired — return empty response (legacy / test mode
@@ -897,7 +948,10 @@ impl SyncService for SyncServiceImpl {
         let baseline = db
             .load_node_baseline_scoped(tenant.as_deref(), &node_id, vault_id)
             .await
-            .map_err(|e| Status::internal(format!("baseline load: {e}")))?;
+            .map_err(|e| Status::internal(format!("baseline load: {e}")))?
+            .into_iter()
+            .filter(|m| !disk_core::filter::is_sync_ephemeral_marker(&m.path))
+            .collect::<Vec<_>>();
 
         let engine = ReconciliationEngine::new(self.server_node_id.clone());
         let actions = engine
@@ -910,6 +964,18 @@ impl SyncService for SyncServiceImpl {
         let mut conflict_reports: Vec<disk_proto::disk::ConflictReport> = Vec::new();
 
         for action in &actions {
+            // DISK-0094: sync sentinels (e.g. `.kb-last-push`) are local-only and must
+            // never participate in reconcile for any ACL role. Measured on the Mac
+            // follower: datarim-kb is bidirectional on agents, so the receive_only
+            // server-wins path did not apply; the marker still forked every cycle.
+            if disk_core::filter::is_sync_ephemeral_marker(&action.path) {
+                tracing::debug!(
+                    share = %share,
+                    path = %action.path.display(),
+                    "skipping reconcile action for sync ephemeral marker"
+                );
+                continue;
+            }
             match action.action {
                 // Server has file; client should download it.
                 ActionType::Upload => {
@@ -938,6 +1004,21 @@ impl SyncService for SyncServiceImpl {
                 // Conflict detected — surface in response and persist to meta_db.
                 ActionType::ConflictFork | ActionType::ConflictMerge => {
                     let path_str = action.path.to_string_lossy().to_string();
+
+                    // DISK-0094: receive-only followers must never fork. Canon wins;
+                    // route the server copy as a download instead of a conflict.
+                    if matches!(caller_role, Some(EnforcedRole::ReceiveOnly)) {
+                        if let Some(m) = server_files.iter().find(|m| m.path == action.path) {
+                            to_download.push(file_meta_to_proto(m));
+                        }
+                        tracing::debug!(
+                            share = %share,
+                            node_id = %node_id,
+                            path = %path_str,
+                            "receive_only conflict suppressed — server-wins via to_download"
+                        );
+                        continue;
+                    }
 
                     // Determine the suggested resolution from the conflict kind.
                     let suggested = action
@@ -1077,6 +1158,21 @@ impl SyncService for SyncServiceImpl {
             .selective_includes_for_node(tenant.as_deref(), &node_id, vault_id)
             .await?;
         to_download = Self::filter_proto_paths(to_download, &includes);
+        // DISK-0079: never hand upload work to a receive-only follower.
+        //
+        // The client now refuses such a list on its own (PR #168), but a
+        // guarantee enforced on only one side is one deployment away from
+        // being no guarantee at all — an older or third-party client would
+        // still obey. Dropping it here means the follower is never asked.
+        if matches!(caller_role, Some(EnforcedRole::ReceiveOnly)) && !to_upload.is_empty() {
+            tracing::warn!(
+                share = %share,
+                node_id = %node_id,
+                entries = to_upload.len(),
+                "reconciler produced upload work for a receive_only caller — dropping it"
+            );
+            to_upload.clear();
+        }
         to_upload = Self::filter_proto_paths(to_upload, &includes);
         to_delete = Self::filter_proto_paths(to_delete, &includes);
 
@@ -1248,7 +1344,69 @@ fn file_meta_to_proto(m: &FileMeta) -> FileMetadata {
     }
 }
 
+/// Streams incoming upload chunks to a temp file with incremental blake3 (DISK-0077).
+///
+/// Avoids holding the full object in RAM; bounded memory per connection.
+struct UploadSpool {
+    path: std::path::PathBuf,
+    file: std::fs::File,
+    hasher: blake3::Hasher,
+    size: u64,
+    keep_on_drop: bool,
+}
+
+impl UploadSpool {
+    fn create(share_root: &std::path::Path) -> Result<Self, Status> {
+        let tmp_name = format!(".tmp-{}", rand::random::<u64>());
+        let path = share_root.join(&tmp_name);
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|e| Status::internal(format!("create upload spool: {e}")))?;
+        Ok(Self {
+            path,
+            file,
+            hasher: blake3::Hasher::new(),
+            size: 0,
+            keep_on_drop: false,
+        })
+    }
+
+    fn append(&mut self, data: &[u8]) -> Result<(), Status> {
+        use std::io::Write;
+        self.file
+            .write_all(data)
+            .map_err(|e| Status::internal(format!("spool write: {e}")))?;
+        self.hasher.update(data);
+        self.size += data.len() as u64;
+        Ok(())
+    }
+
+    fn finalize(mut self) -> Result<([u8; 32], std::path::PathBuf, u64), Status> {
+        self.file
+            .sync_all()
+            .map_err(|e| Status::internal(format!("spool fsync: {e}")))?;
+        let hash = *self.hasher.finalize().as_bytes();
+        self.keep_on_drop = true;
+        let path = std::mem::take(&mut self.path);
+        Ok((hash, path, self.size))
+    }
+}
+
+impl Drop for UploadSpool {
+    fn drop(&mut self) {
+        if !self.keep_on_drop && !self.path.as_os_str().is_empty() {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
 #[cfg(test)]
+// DISK-0080: this module uses the unscoped `upsert_file`, deprecated for
+// production because it writes vault_id="default" and produced duplicate
+// rows per path. These tests do not care which vault they write to.
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use tempfile::tempdir;

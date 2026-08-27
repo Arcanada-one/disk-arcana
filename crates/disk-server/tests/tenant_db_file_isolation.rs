@@ -34,6 +34,7 @@ async fn connect(port: u16, cert_pem: &str) -> tonic::transport::Channel {
 }
 
 async fn spawn_split_server(sync_root: PathBuf, router: TenantMetaRouter) -> (u16, String) {
+    disk_server::ensure_rustls_crypto_provider();
     let store = AuthStore::new();
     let CertifiedKey {
         cert,

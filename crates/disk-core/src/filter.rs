@@ -20,6 +20,25 @@ use crate::error::FilterError;
 /// `.dreamer` — Agent Dreamer runtime state (DISK-0011 / ADR-0001 workflow exclusion).
 const HARDCODED_DENY_SEGMENTS: &[&str] = &[".git", ".disk-archive", ".dreamer"];
 
+/// Basenames of local-only sync sentinels that must never enter reconcile.
+///
+/// Measured on the Mac follower (DISK-0094): `datarim/.kb-last-push` diverged
+/// from canon and drove ~15k conflict forks at ~79% CPU. The file is a
+/// gitignored freshness marker written by launchd/rsync — not KB content.
+const SYNC_EPHEMERAL_MARKER_BASENAMES: &[&str] = &[".kb-last-push"];
+
+/// `true` when `rel_path` is a local sync sentinel (never replicated).
+pub fn is_sync_ephemeral_marker(rel_path: &Path) -> bool {
+    rel_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|name| {
+            SYNC_EPHEMERAL_MARKER_BASENAMES
+                .iter()
+                .any(|marker| name.eq_ignore_ascii_case(marker))
+        })
+}
+
 /// User-tunable filter rules.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct FilterRules {
@@ -71,6 +90,10 @@ impl Filter {
 
     /// `true` when `rel_path` must be skipped by the scanner.
     pub fn is_excluded(&self, rel_path: &Path) -> bool {
+        if is_sync_ephemeral_marker(rel_path) {
+            return true;
+        }
+
         for component in rel_path.components() {
             if let Component::Normal(segment) = component {
                 let segment_str = segment.to_string_lossy();
@@ -205,5 +228,13 @@ mod tests {
         };
         let f = Filter::from_config(&cfg).unwrap();
         assert!(f.is_excluded(Path::new("project/node_modules/x.js")));
+    }
+
+    #[test]
+    fn sync_ephemeral_marker_kb_last_push_excluded() {
+        let f = Filter::from_config(&FilterRules::default()).unwrap();
+        assert!(f.is_excluded(Path::new("datarim/.kb-last-push")));
+        assert!(f.is_excluded(Path::new(".kb-last-push")));
+        assert!(!f.is_excluded(Path::new("datarim/tasks.md")));
     }
 }

@@ -16,6 +16,7 @@ pub mod keychain;
 pub mod lan_sync;
 pub mod mtls;
 pub mod rest_api;
+pub mod rustls_provider;
 pub mod sync_loop;
 pub mod telemetry;
 pub mod vault_key;
@@ -52,6 +53,7 @@ pub use rest_api::{
     AcceptedResponse, ConflictListItem, DaemonState, ResolveRequest, RestApiError, ShareSnapshot,
     StatusResponse, StatusShare, DEFAULT_PORT, LOOPBACK_BIND_PREFIX,
 };
+pub use rustls_provider::ensure_rustls_crypto_provider;
 pub use sync_loop::{
     classify_client_error, classify_tonic_status, Backoff, LoopError, LoopState, LoopTrigger,
     RemoteSync, SyncLoop, SyncTransport, BACKOFF_BASE, BACKOFF_CAP, BACKOFF_JITTER, POLL_INTERVAL,

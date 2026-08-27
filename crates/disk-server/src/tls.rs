@@ -23,10 +23,27 @@
 //! and cert-identity extraction in `auth::cert_identity`.
 
 use std::sync::Arc;
+use std::sync::Once;
 
 use rcgen::{generate_simple_self_signed, CertifiedKey};
 use rustls::ServerConfig;
 use thiserror::Error;
+
+static RUSTLS_PROVIDER: Once = Once::new();
+
+/// Install the ring-backed rustls provider once per process (DISK-0074).
+///
+/// Required when both `ring` (tonic) and `aws-lc-rs` (aws-sdk-s3) are linked.
+pub fn ensure_rustls_crypto_provider() {
+    RUSTLS_PROVIDER.call_once(|| {
+        use rustls::crypto::CryptoProvider;
+        if CryptoProvider::get_default().is_none() {
+            rustls::crypto::ring::default_provider()
+                .install_default()
+                .expect("install rustls ring CryptoProvider");
+        }
+    });
+}
 
 /// Errors from TLS provider construction.
 #[derive(Debug, Error)]
@@ -135,6 +152,7 @@ fn tls13_server_config(
     certs: Vec<rustls::pki_types::CertificateDer<'static>>,
     key: rustls::pki_types::PrivateKeyDer<'static>,
 ) -> Result<Arc<ServerConfig>, TlsError> {
+    ensure_rustls_crypto_provider();
     let mut cfg = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
         .with_no_client_auth()
         .with_single_cert(certs, key)?;
@@ -153,6 +171,7 @@ pub fn tls13_mtls_server_config(
     server_key: rustls::pki_types::PrivateKeyDer<'static>,
     ca_root_pem: &[u8],
 ) -> Result<Arc<ServerConfig>, TlsError> {
+    ensure_rustls_crypto_provider();
     let ca_certs = parse_cert_pem(ca_root_pem)?;
     let mut root_store = rustls::RootCertStore::empty();
     for ca_cert in ca_certs {

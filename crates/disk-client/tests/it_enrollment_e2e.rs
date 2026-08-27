@@ -114,6 +114,7 @@ struct Fixture {
 }
 
 async fn spawn_stub_server() -> Fixture {
+    disk_client::ensure_rustls_crypto_provider();
     // Loopback-bound listener with auto-assigned port. We resolve the port
     // first so the URL is known before the server task starts polling.
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind 0");
