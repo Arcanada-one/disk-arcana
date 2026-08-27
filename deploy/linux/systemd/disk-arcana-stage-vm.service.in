@@ -1,0 +1,52 @@
+[Unit]
+Description=Disk Arcana dedicated staging KVM guest
+After=network-online.target
+Wants=network-online.target
+ConditionPathIsReadWrite=@STATE_ROOT@
+ConditionPathIsRegular=@STATE_ROOT@/disk.qcow2
+ConditionPathIsRegular=@STATE_ROOT@/seed.img
+StartLimitIntervalSec=2min
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/qemu-system-x86_64 \
+  -name disk-arcana-stage \
+  -enable-kvm \
+  -machine q35,accel=kvm \
+  -cpu host \
+  -smp 4 \
+  -m 8192 \
+  -drive if=virtio,format=qcow2,file=@STATE_ROOT@/disk.qcow2,cache=none,aio=native \
+  -drive if=virtio,format=raw,readonly=on,file=@STATE_ROOT@/seed.img \
+  -nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:@MANAGEMENT_PORT@-:22 \
+  -display none \
+  -serial mon:stdio \
+  -no-reboot
+Restart=on-failure
+RestartSec=10s
+NoNewPrivileges=yes
+PrivateTmp=yes
+DevicePolicy=closed
+DeviceAllow=/dev/kvm rw
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+ReadWritePaths=@STATE_ROOT@
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

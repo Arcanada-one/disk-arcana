@@ -165,6 +165,10 @@ jobs:
         run: bash deploy/linux/tests/test-deploy-broker.sh
       - name: staging-first release workflow contract (INFRA-0370)
         run: bash deploy/linux/tests/test-release-deploy-contract.sh
+      - name: isolated staging runner provisioning contract (INFRA-0370)
+        run: bash deploy/linux/tests/test-stage-runner-provisioning.sh
+      - name: isolated staging runner mutation controls (INFRA-0370)
+        run: bash deploy/linux/tests/test-stage-runner-mutation-control.sh
       - name: fresh-main delivery negative (INFRA-0370)
         run: bash deploy/linux/tests/test-fresh-main-gate.sh
 
