@@ -89,6 +89,14 @@ if [[ "$failures" -eq 0 ]]; then
     canonical_rc=0
     canonical_output="$(systemd-analyze verify "$canonical_probe" 2>&1)" || canonical_rc=$?
     fixture_output="$(systemd-analyze verify "$fixture_probe" 2>&1 || true)"
+    # systemd-analyze verify loads the host's full unit graph, so its output can
+    # carry diagnostics about UNRELATED units installed on the runner (measured:
+    # a runner's /etc/systemd/system/fleet-tmux.service KillMode=none deprecation
+    # warning turned this check red on a docs-only PR). Only lines that mention
+    # the probe unit itself are evidence about the unit under test; everything
+    # else is host state this contract does not own.
+    canonical_output="$(grep -F "$(basename "$canonical_probe")" <<<"$canonical_output" || true)"
+    fixture_output="$(grep -F "$(basename "$fixture_probe")" <<<"$fixture_output" || true)"
     systemd_major="$(
       systemd-analyze --version 2>/dev/null |
         sed -n 's/^systemd \([0-9][0-9]*\).*/\1/p' |
