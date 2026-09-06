@@ -1,7 +1,7 @@
 {
  "schema": "AdmissionGatePolicy/v1",
  "id": "admission-gate.v1",
- "portion_id": "AUP-GRAPH-006:gate1",
+ "portion_id": "AUP-GRAPH-006:gate2b",
  "epic": "AUP-E29",
  "decision_ref": "DEC-AUP-0008",
  "process_ref": "DEC-AUP-0007",
@@ -38,7 +38,8 @@
    "Arcanada-one/arcanada-publisher",
    "Arcanada-one/disk-arcana"
   ],
-  "ci_scope_rule": "`ci_required_repositories` are the repositories where the `graph-admission` job is a REQUIRED-for-merge check. `ci_proposed_repositories` carry a proposal pull request that adds the same job as NON-required (dark launch): the owner's broker decides promotion, and per AUP-GRAPH-009's method clause a repository is promoted only after a GRAPH-007 mutation calibration of its own language/population. A repository being here is never by itself a merge condition."
+  "ci_scope_rule": "`ci_required_repositories` are the repositories where the `graph-admission` job is a REQUIRED-for-merge check. `ci_proposed_repositories` carry a proposal pull request that adds the same job as NON-required (dark launch): the owner's broker decides promotion, and per AUP-GRAPH-009's method clause a repository is promoted only after a GRAPH-007 mutation calibration of its own language/population. A repository being here is never by itself a merge condition.",
+  "ci_promotion_rule": "A repository MUST NOT be promoted to `ci_required_repositories` while its row in retrofit-registry.v1.json has `calibration.status != \"verified\"`. AUP-GRAPH-009's method clause requires a per-language AUP-GRAPH-007 mutation calibration before the gate is made required on a repository: without a measured proxy recall the gate's red is of unknown value, and a required check of unknown value is a tax, not a control. `not_measured` is not a pass (DEC-AUP-0008 I4)."
  },
  "gate_verdicts": {
   "admit": "exit 0 — merge allowed",
@@ -149,6 +150,20 @@
    "verdict": "paused_safe",
    "order": 13,
    "rule": "The receipt must be attached to a Work Item as an evidence attachment (WorkItemEvidenceAttachment/v1) — receipt.work_item plus a ledger entry whose digest matches the receipt bytes. Enforcement level is work_item_evidence.enforcement below."
+  },
+  {
+   "id": "C14",
+   "code": "AUTOMATED_AUTHOR_RECEIPT_ISSUED",
+   "verdict": "admit",
+   "order": 14,
+   "rule": "Informational, never raising the verdict. The pull request is authored by an automated author listed in `automated_authors.authors` (identity read from the pull_request EVENT PAYLOAD), its diff touches only that author's `path_allowlist`, and the gate therefore AUTHORED a ChangeAdmissionReceipt/v1 itself. That receipt is then subjected to every other check in this list — schema conformance (C04), binding to the range (C05), change-set coverage (C06), freshness (C07), failed/not_measured entities (C08/C09), exemption admissibility (C10). The automated path changes WHO writes the receipt; it never changes what has to be true for the change to be admitted."
+  },
+  {
+   "id": "C15",
+   "code": "AUTOMATED_AUTHOR_NOT_ELIGIBLE",
+   "verdict": "admit",
+   "order": 15,
+   "rule": "Informational, never raising the verdict — it only names WHY no receipt was authored, so that the refusal the change still gets (C03) is legible. Eligibility fails when: the event payload is absent or is not a pull_request event; the author's login/id/type does not match a registered automated author (a `dependabot/...` BRANCH NAME is never evidence — the head branch name is chosen by whoever opens the pull request); the diff touches a path outside the author's `path_allowlist`; or the author is registered but the repository's required verifier job did not conclude. A pull request refused here is refused by the ordinary rule, with the ordinary code."
   }
  ],
  "work_item_evidence": {
@@ -434,8 +449,126 @@
     "Arcanada-one/disk-arcana": 218
    },
    "own_verdict": "each proposal's own `graph-admission` check is RED (paused_safe): the change is almost entirely new files, so the impact set is empty, verify.py yields zero entity verdicts, and zero verdicts is paused_safe. The gate cannot admit its own installation — recorded as an open hole, not hidden, and harmless while the job is non-required.",
-   "promotion_precondition": "a per-repository AUP-GRAPH-007 mutation calibration; until then the job stays non-required and branch protection is untouched."
+   "promotion_precondition": "a per-repository AUP-GRAPH-007 mutation calibration; until then the job stays non-required and branch protection is untouched.",
+   "installation_shape": "a standalone `.github/workflows/graph-admission-call.yml` in the caller repository — never an edit to its ci.yml. Measured reason: a pinned-action contract (auth-arcana) and prettier gates (arcanada-publisher, prompt-assembly) make an appended job red, and a proposal must leave every existing workflow byte-identical.",
+   "caller_requirements_learned": [
+    "a `GOVERNANCE-CHANGE:` line in the pull-request body wherever the shared governance-diff-guard runs (scrutator, model-connector, arcanada-publisher)",
+    "`.prettierignore` must exclude the digest-pinned bundle wherever prettier gates the repository — reformatting it would break the sha256 values the job verifies",
+    "the caller workflow itself must be prettier-formatted with the repository's own resolved prettier version"
+   ]
+  },
+  "bundle_signature": {
+   "status": "NORMATIVE_DRAFT — AUP-GRAPH-006:gate2b, 2026-09-06",
+   "problem": "Hole 2 of REPORT-GRAPH-RETROFIT1: BUNDLE.json is a TRIPWIRE, not a signature. It records a sha256 per vendored file, but a change that rewrites a tool AND its manifest entry keeps that map perfectly consistent. gate1 caught that with `BUNDLE_MODIFIED_BY_PR` — a rule about the SHAPE OF THE DIFF, which is blind to a tamper that is already in the base tree.",
+   "mechanism": {
+    "signed_object": "BUNDLE.json (it carries every file's sha256, so signing it binds the whole vendored set)",
+    "algorithm": "Ed25519, OpenSSH SSHSIG detached signature (PROTOCOL.sshsig), hashalg sha512",
+    "namespace": "graph-admission-bundle",
+    "signature_file": ".github/graph-admission/BUNDLE.json.sig",
+    "public_key_in_the_bundle": ".github/graph-admission/SIGNING-KEY.pub",
+    "public_key_in_the_program_repo": "contracts/graph-verified-change/bundle-signing-key.pub",
+    "public_key_fingerprint": "SHA256:9QFqysn44UjA8rXyfHjItP3b2Oadhnbf1bDNqXrsCig",
+    "private_key": "outside every repository, on the signing host, mode 600. It is never committed, never printed and never passed through an environment variable.",
+    "signer": "`ssh-keygen -Y sign` (OpenSSH 9.6p1 on arcana-devs)",
+    "verifier": "tools/graph/sshsig.py — Ed25519 + SSHSIG verification in Python 3.12 STDLIB. It is written rather than shelled out to because the gate runs on whatever runner the caller has, and a missing binary must never degrade into 'assume valid'. It is cross-checked BOTH WAYS against the real ssh-keygen in --selftest, and records not_measured where that binary is absent.",
+    "why_ssh_keygen": "of the signing tools present on this host — ssh-keygen (OpenSSH 9.6p1), gpg 2.4.4, openssl 3.0.13 — SSHSIG was chosen because it is a detached, namespaced, single-file-key format whose verification is ~200 lines of stdlib Python, whose keys GitHub already understands, and which carries no keyring, no trust database and no web-of-trust state to synchronise. minisign, age and signify are NOT installed here."
+   },
+   "order": "the signature is verified BEFORE any sha256 in BUNDLE.json is believed. A manifest signs nothing for itself.",
+   "fingerprint_pinning": {
+    "rule": "the caller passes the trusted fingerprint as the reusable workflow's `signing_key_fingerprint` input, set in the caller's OWN workflow file — deliberately OUTSIDE the bundle directory.",
+    "unpinned_is_not_a_pass": "without it the gate still verifies the signature but emits BUNDLE_SIGNATURE_UNPINNED with verdict `not_measured`: what is proven is that the bundle agrees with the key shipped beside it, which is self-consistency, not provenance."
+   },
+   "what_this_proves": [
+    "the vendored bytes are the bytes the program repository signed, for any tamper that does not have the key",
+    "a tamper already present in the BASE tree is caught — the diff-shape rule cannot see one",
+    "a signature made for another purpose (another SSHSIG namespace, e.g. a git commit signature) is refused",
+    "a non-Ed25519 signature is refused rather than accepted as a weaker algorithm the signature file chose",
+    "a non-canonical S value is refused (Ed25519 malleability)"
+   ],
+   "what_this_does_NOT_prove": [
+    "an attacker who can change the caller's own workflow file can change the pinned fingerprint, swap SIGNING-KEY.pub and re-sign with their own key. This is MEASURED, not argued: the gate2b battery includes that exact attack and records that it is refused WITH a pin and NOT refused without one. What it costs the attacker is a second, human-legible edit in a governance-guarded file (`.github/**` needs a GOVERNANCE-CHANGE line in muneral) on top of a bundle edit that BUNDLE_MODIFIED_BY_PR already refuses.",
+    "nothing at all against whoever HOLDS the private key. The layer that still stands there is BUNDLE_MODIFIED_BY_PR, proven independent by mutant (j2): the same tamper, correctly re-signed with the trusted key, is still refused.",
+    "the key is a single key on a single host with no rotation, revocation or transparency log. There is no way for a caller to learn that a key was compromised other than being told.",
+    "it says nothing about WHAT the tools do — only that they are the bytes the program signed."
+   ],
+   "rotation": "changing the key means re-bundling every caller and updating both the committed public key and every caller's pinned fingerprint. No automation exists for that yet: recorded as a cost, not as a solved problem."
   }
  },
- "updated_at_utc": "2026-09-06T09:07:47Z"
+ "updated_at_utc": "2026-09-06T11:02:48Z",
+ "automated_authors": {
+  "status": "NORMATIVE_DRAFT — AUP-GRAPH-006:gate2a, 2026-09-06",
+  "purpose": "Close the operational hole the required check opened: a repository that auto-merged its dependency updates suddenly needed a human on every one of them, because a dependency bot cannot author a ChangeAdmissionReceipt/v1. The rule is not relaxed — the RECEIPT AUTHOR is typed. The gate itself authors the receipt for a registered automated author, over the identical impact computation, and the receipt is then subject to every check that any other receipt is subject to.",
+  "what_the_exemption_is_about": "`AUTOMATED_DEPENDENCY_UPDATE` carries exactly one entity — the missing agent-authored receipt (`receipt_authorship:<repo>@<head>`). It NEVER carries an entity that a verifier failed to verify, and it never suppresses a verifier. A lockfile or manifest change triggers the global fallback (impact = whole_repository, the Bazel/Nx rule of DEC-AUP-0008), and the repository's OWN test job is the verifier for it: if that job did not conclude success, the repository entity is `failed` or `not_measured` without an exemption and the change is refused or paused. Green here means the repository's own suite was green, never that verification was skipped.",
+  "identity_rule": "The author is read ONLY from the pull_request event payload delivered by GitHub (`pull_request.user.login`, `pull_request.user.id`, `pull_request.user.type`), all three of which must match. The head BRANCH NAME is never evidence of authorship: anyone who can open a pull request can name their branch `dependabot/whatever`. `pull_request.head.ref` is recorded in the receipt as `claimed`, and is not consulted for the decision.",
+  "identity_note": "`user.id` is the decisive field: a login can be renamed, an id cannot. 49699333 is the GitHub App user id of `dependabot[bot]`; it is recorded here so that the check is a comparison against a constant, not a string the event could talk the gate into.",
+  "receipt_author_marker": "A receipt authored by this path carries `authored_by.path = \"automated_author\"` and the evidence it matched on, so an audit can separate machine-authored receipts from agent-authored ones without re-deriving anything.",
+  "required_verifier_job": {
+   "rule": "The consuming repository names the job whose conclusion is the verifier of the whole-repository impact (muneral: `lint-and-test`). The workflow passes that job's `result` in, via `needs:` + `if: always()`; the gate maps success → verified, failure/cancelled/timed_out → failed, anything else (skipped, absent, not concluded) → not_measured. There is no default that means 'assume green': an unnamed or unreported job is `not_measured`, which pauses.",
+   "conclusion_map": {
+    "success": "verified",
+    "failure": "failed",
+    "cancelled": "failed",
+    "timed_out": "failed",
+    "skipped": "not_measured",
+    "": "not_measured"
+   }
+  },
+  "authors": [
+   {
+    "id": "dependabot",
+    "login": "dependabot[bot]",
+    "user_id": 49699333,
+    "user_type": "Bot",
+    "exemption_code": "AUTOMATED_DEPENDENCY_UPDATE",
+    "exemption_owner": "AUP-E29 AUP-GRAPH-006 owner (the program repository), on behalf of the consuming repository's maintainers",
+    "exemption_ttl_days": 30,
+    "path_allowlist": [
+     "package.json",
+     "*/package.json",
+     "*/*/package.json",
+     "*/*/*/package.json",
+     "pnpm-lock.yaml",
+     "*/pnpm-lock.yaml",
+     "*/*/pnpm-lock.yaml",
+     "package-lock.json",
+     "*/package-lock.json",
+     "*/*/package-lock.json",
+     "npm-shrinkwrap.json",
+     "*/npm-shrinkwrap.json",
+     "yarn.lock",
+     "*/yarn.lock",
+     "*/*/yarn.lock",
+     "bun.lock",
+     "bun.lockb",
+     "pnpm-workspace.yaml",
+     "Cargo.toml",
+     "*/Cargo.toml",
+     "*/*/Cargo.toml",
+     "Cargo.lock",
+     "pyproject.toml",
+     "*/pyproject.toml",
+     "poetry.lock",
+     "uv.lock",
+     "requirements.txt",
+     "requirements-*.txt",
+     "*/requirements.txt",
+     "Pipfile",
+     "Pipfile.lock",
+     "go.mod",
+     "go.sum",
+     "Gemfile",
+     "Gemfile.lock",
+     "composer.json",
+     "composer.lock"
+    ],
+    "path_allowlist_rule": "Dependency manifests and lockfiles only, matched with fnmatch against the full repository-relative path (`*` does not cross `/`, so the depth is explicit rather than open-ended). A pull request that touches ONE path outside this list gets no exemption and stays red, whatever its author.",
+    "deliberately_excluded": {
+     ".github/workflows/**": "A GitHub-Actions version bump edits a workflow file. A dependency bot must not rewrite CI unremarked — muneral's own `dependabot-auto-merge.yml` already refuses those for the same reason, and the graph gate does not overrule a repository's stricter rule.",
+     "Dockerfile / *.Dockerfile": "A base-image bump is a runtime change, not a manifest edit: `node:22-alpine → node:26-alpine` changes the interpreter under every node in the graph. It stays with a human.",
+     ".github/CODEOWNERS, branch protection, credential and execution-boundary paths": "Ownership and privilege boundaries are never a dependency update."
+    }
+   }
+  ],
+  "residual_risk": "What this does NOT protect against, stated so it is not mistaken for a stronger claim: (1) a malicious upstream release — the gate verifies that the repository's suite is green on the new dependency, not that the dependency is benign; that is the supply-chain problem, out of scope here and unchanged by this rule. (2) An attacker who can make GitHub deliver an event payload with `user.id == 49699333` — i.e. who controls the Actions event stream, which is a full CI compromise. (3) The `path_allowlist` admits `package.json`, whose `scripts` block is executable; dependabot does not edit it, but the gate does not diff the JSON structure, so a hypothetical bot compromise that rewrote a script would be admitted if the repository's suite still passed."
+ }
 }

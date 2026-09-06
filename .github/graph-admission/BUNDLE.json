@@ -1,16 +1,16 @@
 {
- "bundle_digest": "sha256:180589836904d15c0606bfc6a611ac830b932758c2de38dc6c9040cdd7e515f9",
+ "bundle_digest": "sha256:cf45fdc5e0851308245bd35c403f8a0b2c47f084dd4712bb718871e10f1ce2a6",
  "files": [
   {
    "note": "the workflow file itself; it is already running by the time the job checks the bundle",
    "path": ".github/workflows/graph-admission.yml",
-   "sha256": "sha256:ab3a384418c9f8e5039046651abad8d11eba60ee054fd455948ecab73611c543",
+   "sha256": "sha256:e9fb01448d40fe067c0b91adcb3506b587068d03e7404fb35c7ac7078b71edcc",
    "vendored_to": "graph-admission.yml",
    "verified_by_the_job": false
   },
   {
    "path": "tools/graph/admit_change.py",
-   "sha256": "sha256:03beac69bab5aa0abe8692cfef8ec5f505c12640897247d2be63c59f09614702"
+   "sha256": "sha256:13319ae601b79a37026b5aa81a927928d90b4061102348b2ff81f1b23e5e7cb7"
   },
   {
    "path": "tools/graph/schema_check.py",
@@ -18,15 +18,23 @@
   },
   {
    "path": "tools/graph/build_graph.py",
-   "sha256": "sha256:04894597429247883dd33b39065430e4e72f26fe5016ff56c059382c763fe3b7"
+   "sha256": "sha256:7714ddb87f2d9bf80115ef291c35e596ec4a4f4b674577ff42e0dfa9726bb1bc"
+  },
+  {
+   "path": "tools/graph/impact.py",
+   "sha256": "sha256:38f99a00b54d47bca59635dbfe03d30710d17df9963bfcfa775ce5397caa1d5a"
+  },
+  {
+   "path": "tools/graph/sshsig.py",
+   "sha256": "sha256:c599bd4a27a19aa975cef8a208e5f629ba9f8bfee61e4c13168322ca02ef59ff"
   },
   {
    "path": "tools/graph/ci_gate.py",
-   "sha256": "sha256:2cf6e2336d0a068f8ad01e7b941231ad563a9b81d2d7de19e3c103c1226caec5"
+   "sha256": "sha256:3336a0746ab2d02285d4e91d4acd8675ef0f66856be138d3ef1806487ddcd2a3"
   },
   {
    "path": "contracts/graph-verified-change/admission-gate.v1.json",
-   "sha256": "sha256:490c0299ec7fecc9edfa2e63047334675712227fbb52468bc6a3f676077e4ead"
+   "sha256": "sha256:8e1c6c9b93b7e596f5914ebb13252fa5a0730a9e1cad0e80a7b3c7daddb43e90"
   },
   {
    "path": "contracts/graph-verified-change/relationship-graph.v1.json",
@@ -46,7 +54,7 @@
   "tool": "tools/graph/ci_gate.py",
   "version": "1.0.0"
  },
- "program_ref": "0caeec0ac8cd4984024a5ce396f994c827adc023",
+ "program_ref": "b893af8f7782766187f6484d93cdd10559629927",
  "program_repo": "Arcanada-one/arcanada-universal-program",
  "provisional_until_fable_review": true,
  "rule": "The workflow refuses unless every file's sha256 matches this manifest AND the caller's `program_ref` input matches `program_ref` here. The bundle is a VENDORED copy of one pinned program-repo SHA (the program repository is private and no shared credential exists to check it out from a caller's CI). A pull request that changes anything under the bundle directory is refused by the gate job \u2014 a bundle refresh is its own pull request.",

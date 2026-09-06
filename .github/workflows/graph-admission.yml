@@ -60,6 +60,34 @@ on:
         required: false
         default: 'ubuntu-latest'
         type: string
+      verifier_job:
+        description: >-
+          AUP-GRAPH-006:gate2a. Name of the caller's OWN test job. A dependency-manifest / lockfile change
+          triggers the global fallback (impact = the whole repository), and this job is the verifier for it.
+          Required for the automated-author path; without it that path records `not_measured` and pauses.
+        required: false
+        default: ''
+        type: string
+      signing_key_fingerprint:
+        description: >-
+          AUP-GRAPH-006:gate2b. The `SHA256:…` fingerprint of the Ed25519 key the caller trusts to sign
+          `BUNDLE.json`. It is set HERE, in the caller's own workflow file, deliberately OUTSIDE the bundle
+          directory: a fingerprint stored inside the bundle would be replaced by the same change that
+          replaces the key, and would prove only that the bundle agrees with itself. Leave it empty and the
+          gate still verifies the signature, but reports `BUNDLE_SIGNATURE_UNPINNED` as `not_measured` —
+          self-consistency, not provenance. `not_measured` is never a pass.
+        required: false
+        default: ''
+        type: string
+      verifier_conclusion:
+        description: >-
+          AUP-GRAPH-006:gate2a. That job's `result` — the caller passes `needs.<job>.result` with
+          `if: always()` so the gate sees `failure` as well as `success`. success → verified;
+          failure/cancelled/timed_out → failed; anything else, including an empty value, → not_measured.
+          There is NO value that means "assume green".
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -124,6 +152,15 @@ jobs:
           REPO_NAME: ${{ github.repository }}
           RANGE_BASE: ${{ steps.range.outputs.base }}
           RANGE_HEAD: ${{ steps.range.outputs.head }}
+          # AUP-GRAPH-006:gate2a — the automated-author path. GITHUB_EVENT_PATH is the payload GitHub
+          # itself delivered; it is the ONLY source of author identity the gate consults. The head
+          # branch name is never consulted: anyone who can open a pull request can name their branch
+          # `dependabot/anything`.
+          EVENT_PATH: ${{ github.event_path }}
+          VERIFIER_JOB: ${{ inputs.verifier_job }}
+          VERIFIER_CONCLUSION: ${{ inputs.verifier_conclusion }}
+          VERIFIER_OUTPUT_REF: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SIGNING_KEY_FINGERPRINT: ${{ inputs.signing_key_fingerprint }}
         run: |
           set -uo pipefail
           # NOT `set -e`: the gate's non-zero exit is a VERDICT, not a crash. The step must still
@@ -133,6 +170,11 @@ jobs:
           ARGS=()
           while IFS= read -r g; do [ -n "$g" ] && ARGS+=(--receipt-glob "$g"); done <<< "$RECEIPT_GLOBS"
           if [ "$BUILD_GRAPH" = "true" ]; then ARGS+=(--build-graph); fi
+          if [ -n "${EVENT_PATH:-}" ] && [ -f "$EVENT_PATH" ]; then ARGS+=(--event-file "$EVENT_PATH"); fi
+          if [ -n "${VERIFIER_JOB:-}" ]; then ARGS+=(--verifier-job "$VERIFIER_JOB"); fi
+          if [ -n "${VERIFIER_CONCLUSION:-}" ]; then ARGS+=(--verifier-conclusion "$VERIFIER_CONCLUSION"); fi
+          ARGS+=(--verifier-output-ref "$VERIFIER_OUTPUT_REF")
+          if [ -n "${SIGNING_KEY_FINGERPRINT:-}" ]; then ARGS+=(--signing-key-fingerprint "$SIGNING_KEY_FINGERPRINT"); fi
           python3 "${TOOLS_PATH}/tools/graph/ci_gate.py" run \
             --repo . \
             --repo-name "$REPO_NAME" \

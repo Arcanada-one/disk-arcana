@@ -94,6 +94,17 @@ ADAPTER_EXPECTED_PATH = ADAPTER_FIXTURE_DIR / "EXPECTED.json"
 ROOT_APP_FIXTURE_DIR = ROOT / "contracts" / "graph-verified-change" / "fixtures" / "root-app-mini"
 ROOT_APP_EXPECTED_PATH = ROOT_APP_FIXTURE_DIR / "EXPECTED.json"
 FIXED_BUILT_AT = "2026-09-05T00:00:00Z"
+VENDORED_BUNDLE_FIXTURE_DIR = ROOT / "contracts" / "graph-verified-change" / "fixtures" / "vendored-bundle-mini"
+VENDORED_BUNDLE_EXPECTED_PATH = VENDORED_BUNDLE_FIXTURE_DIR / "EXPECTED.json"
+
+# AUP-GRAPH-006:gate3b (hole H7) — a directory that carries a `GraphAdmissionBundle/v1` manifest holds a
+# VENDORED copy of another repository's code. The files exist in this tree, so they get nodes; they are not
+# this repository's code, so they are marked `attrs.vendored` with the owning repository recorded, and a
+# verifier that attributes a property to the OWNER of a file (config_schema: "the keys this repository reads
+# must be declared by this repository") must not attribute theirs to the caller. Detection is by the
+# manifest's CONTENT — a directory merely named like a bundle is not vendored.
+VENDOR_MANIFEST_NAME = "BUNDLE.json"
+VENDOR_MANIFEST_SCHEMA = "GraphAdmissionBundle/v1"
 
 
 # ----------------------------------------------------------------------------------------------- helpers
@@ -296,6 +307,42 @@ class Tree:
         return [p for p in self.paths if d == "" or p.startswith(d + "/")]
 
 
+def vendored_bundle_roots(tree: Tree) -> dict[str, dict]:
+    """{root directory ('' = repo root) → {owner, manifest, program_ref}} for every vendored bundle in the tree.
+
+    AUP-GRAPH-006:gate3b. The test is the manifest's `schema` field, never the directory name: a repository
+    can call a directory `graph-admission` without vendoring anything, and a vendored bundle can sit anywhere.
+    Deterministic: the map is keyed and consumed in sorted order and depends only on the tree bytes.
+    """
+    roots: dict[str, dict] = {}
+    for p in tree.paths:
+        if os.path.basename(p) != VENDOR_MANIFEST_NAME:
+            continue
+        try:
+            doc = json.loads(tree.text(p))
+        except (ValueError, json.JSONDecodeError):
+            continue
+        if not (isinstance(doc, dict) and doc.get("schema") == VENDOR_MANIFEST_SCHEMA):
+            continue
+        owner = doc.get("program_repo")
+        if not isinstance(owner, str) or not owner:
+            continue
+        d = os.path.dirname(p)
+        roots[d] = {"root": d, "owner": owner, "manifest": p,
+                    "program_ref": doc.get("program_ref") if isinstance(doc.get("program_ref"), str) else None}
+    return roots
+
+
+def vendor_owner_of(path: str, roots: dict[str, dict]) -> dict | None:
+    """The bundle a path belongs to, or None. Longest root wins, so a bundle nested in a bundle is attributed once."""
+    best = None
+    for d, rec in roots.items():
+        if path == d or (path.startswith(d + "/") if d else True):
+            if best is None or len(d) > len(best["root"]):
+                best = rec
+    return best
+
+
 def source_repo_name(repo: Path) -> str:
     try:
         url = git(["remote", "get-url", "origin"], repo).strip()
@@ -488,6 +535,8 @@ class Builder:
         self.external_packages: set[str] = set()
         self.queue_producers: list[tuple[str, str]] = []
         self.queue_consumers: list[tuple[str, str]] = []
+        # AUP-GRAPH-006:gate3b — {directory → {owner, manifest, program_ref}} of vendored GraphAdmissionBundle/v1 copies
+        self.vendored_roots: dict[str, dict] = vendored_bundle_roots(tree)
 
     def on(self, name: str) -> bool:
         return name not in self.disabled
@@ -1260,6 +1309,22 @@ class Builder:
             if self.on(name):
                 fn()
         nodes, edges = self.g.finalize()
+        # AUP-GRAPH-006:gate3b (hole H7) — attribution, applied once over the finished node list so that EVERY
+        # file-scoped node type (code_unit, document, contract, route, receipt, deployable_unit) is covered by one
+        # rule. Nothing is removed and no edge changes: the files exist, so their nodes and their `reads_config`
+        # edges exist. What changes is WHOSE code they are, which is what a verifier needs to know before it
+        # attributes a finding to this repository.
+        vendored_nodes = 0
+        for n in nodes:
+            rec = vendor_owner_of(n["path"], self.vendored_roots) if n.get("path") else None
+            if rec is None:
+                continue
+            attrs = dict(n.get("attrs") or {})
+            attrs.update({"vendored": True, "vendored_from": rec["owner"], "vendor_bundle": rec["manifest"]})
+            if rec["program_ref"]:
+                attrs["vendor_ref"] = rec["program_ref"]
+            n["attrs"] = attrs
+            vendored_nodes += 1
         by_node: dict[str, int] = {}
         for n in nodes:
             by_node[n["type"]] = by_node.get(n["type"], 0) + 1
@@ -1309,6 +1374,12 @@ class Builder:
                       "http_client_unmatched": self.unmatched_http},
             "graph_digest": None,
         }
+        if self.vendored_roots:
+            manifest["vendored_bundles"] = [
+                {"root": d or ".", "owner": self.vendored_roots[d]["owner"], "manifest": self.vendored_roots[d]["manifest"],
+                 "program_ref": self.vendored_roots[d]["program_ref"], "schema": VENDOR_MANIFEST_SCHEMA}
+                for d in sorted(self.vendored_roots)]
+            manifest["stats"]["vendored_nodes"] = vendored_nodes
         if manifest["source_subdir"] is None:
             del manifest["source_subdir"]
         doc = {"schema": "RelationshipGraph/v1", "manifest": manifest, "nodes": nodes, "edges": edges}
@@ -1469,6 +1540,39 @@ def selftest(receipt_out: Path | None, pilot: Path | None, pilot_graph_out: Path
     check("root-app-mini: the root's own sources carry deploys_to the root unit", not ra_missing, missing=ra_missing)
     check("root-app-mini: a member's file deploys to the member only, never also to the root", not ra_forbidden, present=ra_forbidden)
     check("root-app-mini graph is RelationshipGraph/v1 conformant", _classify(ra, ignore_dirty=True)["verdict"] == "conformant")
+
+    # AUP-GRAPH-006:gate3b (hole H7) — a vendored GraphAdmissionBundle/v1 directory is foreign code (fixture: vendored-bundle-mini)
+    vb_exp = json.loads(VENDORED_BUNDLE_EXPECTED_PATH.read_text())
+    vb = build(VENDORED_BUNDLE_FIXTURE_DIR, worktree=True, built_at=FIXED_BUILT_AT)
+    vb_nodes = {n["id"]: n for n in vb["nodes"]}
+    vb_edges = _edge_set(vb)
+    vb_bundles = [{k: b[k] for k in ("root", "owner", "manifest")} for b in vb["manifest"].get("vendored_bundles", [])]
+    vb_marked = sorted(nid for nid, n in vb_nodes.items() if (n.get("attrs") or {}).get("vendored"))
+    vb_wrong_owner = {nid: (vb_nodes[nid].get("attrs") or {}).get("vendored_from") for nid in vb_exp["expected_vendored_nodes"]
+                      if (vb_nodes.get(nid, {}).get("attrs") or {}).get("vendored_from") != vb_exp["expected_vendored_bundles"][0]["owner"]}
+    vb_leaked = [nid for nid in vb_exp["expected_not_vendored_nodes"] if (vb_nodes.get(nid, {}).get("attrs") or {}).get("vendored")]
+    vb_missing_edges = [e for e in vb_exp["expected_edges_still_built"] if tuple(e) not in vb_edges]
+    res["vendored_bundle_fixture"] = {"path": str(VENDORED_BUNDLE_FIXTURE_DIR.relative_to(ROOT)), "bundles": vb_bundles,
+                                      "vendored_nodes": vb_marked, "vendored_node_count": vb["manifest"]["stats"].get("vendored_nodes"),
+                                      "leaked_onto_own_code": vb_leaked, "wrong_owner": vb_wrong_owner,
+                                      "missing_edges": vb_missing_edges, "fails_before_gate3b": vb_exp["fails_before_gate3b"]}
+    check("vendored-bundle-mini: the directory carrying a GraphAdmissionBundle/v1 manifest is detected, with its owning repository",
+          vb_bundles == vb_exp["expected_vendored_bundles"], got=vb_bundles, expected=vb_exp["expected_vendored_bundles"])
+    check("vendored-bundle-mini: every vendored file gets a node marked attrs.vendored with attrs.vendored_from = the owning repository",
+          vb_marked == vb_exp["expected_vendored_nodes"] and not vb_wrong_owner, got=vb_marked, wrong_owner=vb_wrong_owner)
+    check("vendored-bundle-mini NEGATIVE CONTROL: a directory merely NAMED like a bundle, whose BUNDLE.json is not "
+          "GraphAdmissionBundle/v1, is NOT vendored — and neither is the caller's own code", not vb_leaked, leaked=vb_leaked)
+    check("vendored-bundle-mini: the vendored files still get their nodes AND their reads_config edges (they exist; only the "
+          "attribution changes)", not vb_missing_edges, missing=vb_missing_edges)
+    check("vendored-bundle-mini graph is RelationshipGraph/v1 conformant", _classify(vb, ignore_dirty=True)["verdict"] == "conformant",
+          **_classify(vb, ignore_dirty=True))
+    vb_again = dump_graph(build(VENDORED_BUNDLE_FIXTURE_DIR, worktree=True, built_at=FIXED_BUILT_AT))
+    check("vendored-bundle-mini: rebuild with the same --built-at is byte-identical", vb_again == dump_graph(vb))
+    check("a repository with NO vendored bundle keeps a byte-identical graph (the manifest key and the stat appear only when a "
+          "bundle is present, so the eight other registered repositories cannot move)",
+          "vendored_bundles" not in full["manifest"] and "vendored_nodes" not in full["manifest"]["stats"]
+          and full["manifest"]["graph_digest"] == vb_exp["ts_mini_graph_digest_unchanged_by_gate3b"],
+          digest=full["manifest"]["graph_digest"])
 
     # negative controls of the selftest itself
     bogus = ("code_unit:apps/api/src/tasks/tasks.service.ts", "imports", "code_unit:does/not/exist.ts", "deterministic")

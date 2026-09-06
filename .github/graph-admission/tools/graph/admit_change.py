@@ -29,7 +29,7 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -43,7 +43,16 @@ POLICY_PATH = PROGRAM_ROOT / "contracts/graph-verified-change/admission-gate.v1.
 FIXTURE_DIR = PROGRAM_ROOT / "contracts/graph-verified-change/fixtures/admission"
 LEDGER_DIR = PROGRAM_ROOT / "receipts/graph/work-item-evidence"
 
+# The BLOCKING checks: the mutation battery disables each one and demands that at least one blocked
+# fixture then gets through — a check that cannot be killed that way is a check that never blocked.
 CHECK_IDS = ["C01", "C02", "C03", "C04", "C05", "C06", "C07", "C08", "C09", "C10", "C11", "C12", "C13"]
+# AUP-GRAPH-006:gate2a. C14/C15 are INFORMATIONAL: they name why the gate did or did not author a
+# receipt on the automated-author path, and they never raise the verdict (their policy verdict is
+# `admit`, rank 0). Disabling one therefore cannot let anything through, so the disabled-check battery
+# would report a permanent survivor for a check that does not block by design. They are held to the
+# property instead — asserted in the selftest — and their behaviour is measured by the dedicated
+# gate2a mutation battery in ci_gate.py, where the four mutants of the card each flip the verdict.
+INFORMATIONAL_CHECK_IDS = ["C14", "C15"]
 VERDICT_RANK = {"admit": 0, "paused_safe": 1, "refuse": 2}
 EXIT_OF = {"admit": 0, "paused_safe": 3, "refuse": 5}
 
@@ -159,10 +168,208 @@ def receipt_binds(repo: Path, doc: dict, base: str, head: str, commits: set[str]
 
 
 # ------------------------------------------------------------------ the gate
+# ------------------------------------------------------------------ AUP-GRAPH-006:gate2a
+# The typed automated-author path: a dependency bot cannot author a ChangeAdmissionReceipt/v1, so
+# making the gate a required check made every dependabot pull request need a human. The rule is not
+# relaxed — the RECEIPT AUTHOR is typed. For a pull request whose author matches a registered
+# automated author IN THE EVENT PAYLOAD, and whose diff touches only that author's path allowlist,
+# the gate computes the impact set the same way as for anyone else and authors the receipt itself,
+# with the typed exemption AUTOMATED_DEPENDENCY_UPDATE over ONE entity: the missing agent-authored
+# receipt. Verification is never exempted: a lockfile/manifest change triggers the global fallback
+# (impact = whole repository) and the repository's OWN test job is the verifier for it.
+
+CONCLUSION_TO_VERDICT = {"success": "verified", "failure": "failed", "cancelled": "failed",
+                         "timed_out": "failed", "action_required": "failed"}
+
+
+def event_author(event: dict) -> dict:
+    """The author fields the decision may look at — all from the payload GitHub delivered."""
+    pr = event.get("pull_request") if isinstance(event.get("pull_request"), dict) else {}
+    user = pr.get("user") if isinstance(pr.get("user"), dict) else {}
+    head = pr.get("head") if isinstance(pr.get("head"), dict) else {}
+    return {"login": user.get("login"), "id": user.get("id"), "type": user.get("type"),
+            "author_association": pr.get("author_association"),
+            # recorded, never consulted: the head branch name is chosen by whoever opens the PR
+            "claimed_head_ref": head.get("ref"), "is_pull_request": bool(pr)}
+
+
+def match_automated_author(policy: dict, event: dict | None) -> tuple[dict | None, dict]:
+    """→ (author spec or None, evidence). Identity comes from the event payload, never the branch."""
+    spec = policy.get("automated_authors") or {}
+    authors = spec.get("authors") or []
+    if not isinstance(event, dict) or not event:
+        return None, {"matched": False, "reason": "no pull_request event payload was supplied to the gate"}
+    who = event_author(event)
+    if not who["is_pull_request"]:
+        return None, {"matched": False, "reason": "the event payload carries no `pull_request` object", "author": who}
+    for au in authors:
+        if who["login"] == au.get("login") and who["id"] == au.get("user_id") and who["type"] == au.get("user_type"):
+            return au, {"matched": True, "author_id": au.get("id"), "author": who,
+                        "matched_on": ["pull_request.user.login", "pull_request.user.id", "pull_request.user.type"],
+                        "branch_name_used": False}
+    return None, {"matched": False, "author": who,
+                  "reason": (f"login/id/type {who['login']!r}/{who['id']!r}/{who['type']!r} matches no registered "
+                             f"automated author ({', '.join(str(a.get('login')) for a in authors) or 'none'}); "
+                             f"the head branch name {who['claimed_head_ref']!r} is not evidence of authorship"),
+                  "branch_name_used": False}
+
+
+def allowlist_split(paths: list[str], globs: list[str]) -> tuple[list[str], list[str]]:
+    inside = [p for p in paths if any(fnmatch.fnmatch(p, g) for g in globs)]
+    return inside, [p for p in paths if p not in set(inside)]
+
+
+def build_graph_at(repo: Path, rev: str, out: Path) -> dict | None:
+    """Build the caller repository's graph at `rev` with the bundled builder (stdlib, deterministic)."""
+    script = Path(__file__).resolve().parent / "build_graph.py"
+    r = subprocess.run([sys.executable, str(script), str(repo), "--rev", rev, "--out", str(out)],
+                       capture_output=True, text=True,
+                       env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    if r.returncode != 0 or not out.exists():
+        return None
+    try:
+        return json.loads(out.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def synthesize_automated_receipt(repo: Path, base: str, head: str, files: list[dict], author: dict,
+                                 policy: dict, *, repo_name: str, verifier_job: str | None,
+                                 verifier_conclusion: str | None, verifier_output_ref: str | None,
+                                 workdir: Path, event_evidence: dict) -> tuple[dict | None, str]:
+    """The gate authors the receipt. → (receipt, note). None means the impact set could not be computed."""
+    import impact as impact_mod  # sibling tool, reused as a library (bundled)
+
+    gp = workdir / f"graph-{base[:12]}.json"
+    graph = build_graph_at(repo, base, gp)
+    if graph is None:
+        return None, f"the graph could not be built at {base[:12]} — nothing to compute an impact set from"
+    man = graph["manifest"]
+
+    cs_files, fallback_files = [], []
+    for f in files:
+        kind = impact_mod.classify_file(f["path"], None)
+        cs_files.append({"path": f["path"], "status": f["status"], "kind": kind, "node_id": None})
+        if kind in impact_mod.FALLBACK_KINDS:
+            fallback_files.append(f["path"])
+    if not fallback_files:
+        return None, ("no changed path classifies as a lockfile or a global config, so the whole-repository "
+                      "fallback does not apply and this path has no impact set to stand on")
+
+    total_nodes = len(graph.get("nodes") or [])
+    captured = datetime.now(timezone.utc)
+    ttl = int(author.get("exemption_ttl_days") or 30)
+    expires = (captured + timedelta(days=ttl)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    repo_entity = f"repository:{repo_name}"
+    authorship_entity = f"receipt_authorship:{repo_name}@{head[:12]}"
+
+    concl = (verifier_conclusion or "").strip().lower()
+    repo_verdict = CONCLUSION_TO_VERDICT.get(concl, "not_measured")
+    exit_code = 0 if repo_verdict == "verified" else (1 if repo_verdict == "failed" else None)
+    verifier = {
+        "id": "repo-own-test-job",
+        "kind": "other",
+        "command": (f"GitHub Actions job {verifier_job!r} on {head[:12]} — the repository's OWN suite"
+                    if verifier_job else "the repository's own test job — NOT NAMED by the caller"),
+        "entities": [repo_entity],
+        "exit_code": exit_code if exit_code is not None else 125,
+        "output_ref": verifier_output_ref or f"github-actions:{repo_name}@{head[:12]}:{verifier_job or 'unnamed'}",
+        "conclusion": concl or None,
+        "note": ("verifier-matrix.v1.json defines `targeted_test` as tests covering the affected node, «never the "
+                 "whole suite» — this is the whole suite, so it is recorded as kind `other`, which is what it is. "
+                 "It is the verifier DEC-AUP-0008 prescribes for a global fallback (the Bazel/Nx rule): the "
+                 "blast radius is the repository, so the repository's own suite is what must be green."),
+    }
+    verdicts = [
+        {"entity": repo_entity, "verdict": repo_verdict,
+         **({"verifier_ids": ["repo-own-test-job"]} if repo_verdict == "verified" else {}),
+         "reason": (f"the repository's own test job {verifier_job!r} concluded {concl!r}"
+                    if concl else
+                    "the caller named no required verifier job, or its conclusion was not reported to the gate — "
+                    "an unreported job is not a green one (DEC-AUP-0008 I4)")},
+        {"entity": authorship_entity, "verdict": "not_measured",
+         "reason": ("no agent-authored ChangeAdmissionReceipt/v1 exists for this change: it was opened by a "
+                    f"registered automated author ({author.get('login')}), which cannot run the graph tooling. "
+                    "This entity is the MISSING AUTHOR, not a missing measurement of the code.")},
+    ]
+    exemptions = [{
+        "entity": authorship_entity,
+        "code": author.get("exemption_code") or "AUTOMATED_DEPENDENCY_UPDATE",
+        "owner": (policy.get("automated_authors") or {}).get("authors", [{}])[0].get("exemption_owner")
+                 or author.get("exemption_owner") or "",
+        "expires_at_utc": expires,
+        "reason": ((policy.get("automated_authors") or {}).get("what_the_exemption_is_about") or "")
+                  or "the receipt author is typed; verification is not exempted",
+        "scope": ("receipt AUTHORSHIP only. It does not carry, and must never be extended to carry, "
+                  f"{repo_entity} — if the repository's own test job is not green that entity is failed or "
+                  "not_measured on its own and the change is refused or paused."),
+        "evidence": event_evidence,
+    }]
+    adm = "admitted_with_exemptions" if repo_verdict == "verified" else (
+        "refused" if repo_verdict == "failed" else "paused_safe")
+    receipt = {
+        "schema": "ChangeAdmissionReceipt/v1",
+        "receipt_id": f"car-automated-{head[:12]}-{captured.strftime('%Y%m%dT%H%M%SZ')}",
+        "captured_at_utc": captured.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "producer": {"tool": TOOL, "version": VERSION, "path": "automated_author"},
+        "model": MODEL,
+        "provisional_until_fable_review": True,
+        "decision_ref": "DEC-AUP-0008",
+        "portion_id": "AUP-GRAPH-006:gate2a",
+        "work_item": None,
+        "authored_by": {
+            "path": "automated_author",
+            "rule": (policy.get("automated_authors") or {}).get("identity_rule", ""),
+            **event_evidence,
+        },
+        "repo": {"name": repo_name, "path": str(repo)},
+        "graph": {"source_commit": base, "graph_digest": man["graph_digest"],
+                  "builder_version": man.get("builder_version") or man.get("version") or "unknown",
+                  "built_at_utc": man.get("built_at_utc") or captured.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                  "nodes": total_nodes, "edges": len(graph.get("edges") or [])},
+        "tree": {"commit": head, "dirty": False},
+        "staleness": {"method": "the graph is built here, from git objects, at change_set.base",
+                      "verdict": "fresh", "mismatched_nodes": []},
+        "change_set": {"mode": "diff", "base": base, "head": head, "files": cs_files},
+        "impact_set": {
+            "method": ("global fallback: a lockfile / global-config change makes every node of the graph affected "
+                       "(DEC-AUP-0008, the Bazel/Nx rule). The entities are NOT enumerated here: the verifier for "
+                       "this impact is the repository's own test job, which makes one statement about the whole "
+                       "repository, not one statement per node — enumerating would dress a single measurement up "
+                       f"as {total_nodes} of them."),
+            "scope": "whole_repository",
+            "enumerated": False,
+            "deterministic_core": [],
+            "inferred_tail": [],
+            "global_fallback": {"triggered": True, "files": fallback_files, "scope": "whole_repository",
+                                "total_nodes": total_nodes,
+                                "reason": (f"{', '.join(fallback_files)} changed ⇒ every node affected "
+                                           f"(lockfile / global config: safe fallback, Bazel/Nx practice); "
+                                           f"{total_nodes} nodes in the graph at {base[:12]}")},
+            "total": total_nodes,
+        },
+        "verifiers": [verifier],
+        "verdicts": verdicts,
+        "exemptions": exemptions,
+        "admission": {
+            "verdict": adm,
+            "rule": ("admitted_with_exemptions requires every non-verified entity to carry a valid exemption "
+                     "(owner + expiry). Here exactly one entity is exempted — the missing agent-authored receipt. "
+                     "The repository entity is never exempted: it is verified by the repository's own test job, "
+                     "or it is failed / not_measured and this receipt refuses or pauses the change itself."),
+        },
+    }
+    return receipt, (f"authored for {author.get('login')}: {len(cs_files)} allowlisted path(s), "
+                     f"global fallback over {total_nodes} nodes, repository entity {repo_verdict}")
+
+
 def gate(repo: Path, base: str, head: str, receipt_paths: list[Path], policy: dict, *,
          description: str = "", bypass_flag: bool = False, disabled: frozenset[str] = frozenset(),
          work_item_enforcement: str | None = None, ledger_dir: Path = LEDGER_DIR,
-         repo_name: str | None = None, explicit_receipts: bool = True) -> dict:
+         repo_name: str | None = None, explicit_receipts: bool = True,
+         event: dict | None = None, verifier_job: str | None = None,
+         verifier_conclusion: str | None = None, verifier_output_ref: str | None = None,
+         automated_workdir: Path | None = None) -> dict:
     checks: list[dict] = []
     enforcement = work_item_enforcement or policy["work_item_evidence"]["enforcement"]
     pol_checks = {c["id"]: c for c in policy["checks"]}
@@ -186,6 +393,46 @@ def gate(repo: Path, base: str, head: str, receipt_paths: list[Path], policy: di
     commits = range_commits(repo, base, head)
     files = range_files(repo, base, head)
     changed = {f["path"] for f in files}
+
+    # --- AUP-GRAPH-006:gate2a — the typed automated-author path -------------------------------
+    # It runs BEFORE the receipt binding, and its only effect is to ADD a receipt to the list that
+    # every downstream check then examines. Nothing downstream knows or cares who wrote a receipt.
+    automated = {"eligible": False, "receipt_path": None}
+    au_spec, au_evidence = match_automated_author(policy, event)
+    automated["author_match"] = au_evidence
+    if au_spec is not None:
+        allowed = au_spec.get("path_allowlist") or []
+        inside, outside = allowlist_split(sorted(changed), allowed)
+        automated["path_allowlist"] = {"inside": inside, "outside": outside}
+        if outside:
+            add("C15", f"{au_spec.get('login')} authored this pull request, but {len(outside)} changed path(s) are "
+                       f"outside the dependency-manifest allowlist ({', '.join(outside[:4])}"
+                       f"{' …' if len(outside) > 4 else ''}) — no exemption is issued and the ordinary rule applies")
+        else:
+            wd = Path(automated_workdir) if automated_workdir else Path(tempfile.mkdtemp(prefix="gate2a-"))
+            wd.mkdir(parents=True, exist_ok=True)
+            rec_doc, note = synthesize_automated_receipt(
+                repo, base, head, files, au_spec, policy,
+                repo_name=repo_name or repo_remote_name(repo), verifier_job=verifier_job,
+                verifier_conclusion=verifier_conclusion, verifier_output_ref=verifier_output_ref,
+                workdir=wd, event_evidence=au_evidence)
+            automated["note"] = note
+            if rec_doc is None:
+                add("C15", f"{au_spec.get('login')}: the gate could not author a receipt — {note}")
+            else:
+                rp = wd / "automated-author-receipt.json"
+                write_json(rp, rec_doc)
+                receipt_paths = list(receipt_paths) + [rp]
+                automated.update({"eligible": True, "receipt_path": str(rp),
+                                  "receipt_id": rec_doc["receipt_id"],
+                                  "admission": rec_doc["admission"]["verdict"],
+                                  "exemption_code": rec_doc["exemptions"][0]["code"]})
+                add("C14", f"{au_spec.get('login')} is a registered automated author (matched on "
+                           f"pull_request.user.login+id+type, NOT on the branch name "
+                           f"{au_evidence.get('author', {}).get('claimed_head_ref')!r}); {note}. The receipt the "
+                           f"gate authored is checked exactly like any other receipt below.")
+    elif event is not None and au_evidence.get("reason"):
+        add("C15", au_evidence["reason"])
 
     # bind receipts
     bound, unbound = [], []
@@ -346,6 +593,7 @@ def gate(repo: Path, base: str, head: str, receipt_paths: list[Path], policy: di
         "receipts": [{k: v for k, v in r.items() if not k.startswith("_")} for r in bound + unbound],
         "checks": checks,
         "work_item_evidence": evidence,
+        "automated_author": automated,
         "verdict": verdict,
         "reason_codes": sorted({c["code"] for c in checks}),
         "exit_code": EXIT_OF[verdict],
@@ -1028,6 +1276,26 @@ def selftest(receipt_out: Path | None, keep: bool = False) -> int:
             results.append({"case": f"mutant:{cid}", "ok": killed, "silenced": silenced[:6], "relaxed": relaxed[:6]})
             passed, failed = (passed + 1, failed) if killed else (passed, failed + 1)
 
+        # 4b. the informational checks must in fact be informational (AUP-GRAPH-006:gate2a).
+        # This is the property that exempts them from the disable battery, so it is asserted, not assumed.
+        by_id = {c["id"]: c for c in policy["checks"]}
+        for cid in INFORMATIONAL_CHECK_IDS:
+            spec = by_id.get(cid)
+            ok = bool(spec) and spec["verdict"] == "admit" and VERDICT_RANK[spec["verdict"]] == 0
+            results.append({"case": f"informational:{cid}", "ok": ok,
+                            "verdict": (spec or {}).get("verdict"), "code": (spec or {}).get("code"),
+                            "rule": "an informational check never raises the gate verdict"})
+            passed, failed = (passed + 1, failed) if ok else (passed, failed + 1)
+        # and no check id may be in both lists
+        overlap = sorted(set(CHECK_IDS) & set(INFORMATIONAL_CHECK_IDS))
+        results.append({"case": "informational:disjoint", "ok": not overlap, "overlap": overlap})
+        passed, failed = (passed + 1, failed) if not overlap else (passed, failed + 1)
+        # every check in the policy is classified as one or the other
+        unclassified = sorted({c["id"] for c in policy["checks"]} - set(CHECK_IDS) - set(INFORMATIONAL_CHECK_IDS))
+        results.append({"case": "informational:policy-fully-classified", "ok": not unclassified,
+                        "unclassified": unclassified})
+        passed, failed = (passed + 1, failed) if not unclassified else (passed, failed + 1)
+
         # 5. charter-scan classification unit checks
         cls_cases = [
             ("/home/x/.claude/agents/developer.md", "- Write tests (TDD).", "mandate_default"),
@@ -1104,9 +1372,20 @@ def cmd_gate(a) -> int:
         desc += "\n" + Path(a.description_file).read_text(encoding="utf-8")
     search = [Path(p) if Path(p).is_absolute() else repo / p for p in (a.receipt_dir or ["receipts"])]
     paths = [Path(p) for p in (a.receipt or [])] or discover_receipts(search)
+    event = None
+    if a.event_file:
+        ep = Path(a.event_file)
+        if ep.exists():
+            try:
+                event = json.loads(ep.read_text(encoding="utf-8", errors="replace"))
+            except json.JSONDecodeError as e:
+                event = {"_unparsable": str(e)}
     doc = gate(repo, base, head, paths, policy, description=desc, bypass_flag=a.skip_receipt,
                work_item_enforcement=a.enforcement, explicit_receipts=bool(a.receipt),
-               ledger_dir=Path(a.ledger_dir) if a.ledger_dir else LEDGER_DIR)
+               ledger_dir=Path(a.ledger_dir) if a.ledger_dir else LEDGER_DIR,
+               repo_name=a.repo_name, event=event, verifier_job=a.verifier_job,
+               verifier_conclusion=a.verifier_conclusion, verifier_output_ref=a.verifier_output_ref,
+               automated_workdir=Path(a.workdir) if a.workdir else None)
     if a.out:
         write_json(Path(a.out), doc)
     if a.json:
@@ -1142,6 +1421,15 @@ def main(argv=None) -> int:
     g.add_argument("--policy", type=Path)
     g.add_argument("--out")
     g.add_argument("--json", action="store_true")
+    g.add_argument("--repo-name")
+    g.add_argument("--event-file", help="the GitHub `pull_request` event payload (GITHUB_EVENT_PATH). The ONLY "
+                                        "source of author identity for the automated-author path — never the branch name.")
+    g.add_argument("--verifier-job", help="name of the repository's own test job, the verifier of a whole-repository "
+                                          "(global fallback) impact")
+    g.add_argument("--verifier-conclusion", help="that job's conclusion (success|failure|cancelled|timed_out|skipped); "
+                                                 "anything else, or absent, is not_measured — never an assumed pass")
+    g.add_argument("--verifier-output-ref", help="a URL or id the verdict can be traced to (the workflow run)")
+    g.add_argument("--workdir", help="scratch directory for the graph build and an authored receipt")
     g.set_defaults(fn=cmd_gate)
 
     at = sub.add_parser("attach", help="attach a receipt to a Work Item as evidence (never a status)")
