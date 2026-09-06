@@ -1,0 +1,273 @@
+{
+ "schema": "ChangeAdmissionReceiptSchema/v1",
+ "id": "change-admission-receipt.v1",
+ "portion_id": "AUP-GRAPH-001:schema0",
+ "epic": "AUP-E29",
+ "decision_ref": "DEC-AUP-0008",
+ "normative_text": "contracts/graph-verified-change/relationship-graph.v1.md",
+ "document_schema_name": "ChangeAdmissionReceipt/v1",
+ "status": "NORMATIVE_DRAFT — binding for every program-owned repository from R00 (DEC-AUP-0008); provisional receipts written before this schema (e.g. receipts/acceptance/change-admission-20260905T064425Z.json) are asserted, not validated (I14)",
+ "purpose": "The receipt is the admission gate: it proves which graph (commit, digest, freshness) selected the verification, what changed, what the graph predicted as affected (with the provenance of every path), which verifiers actually ran with their outputs, and a tri-valued verdict for every affected entity. A receipt cannot be issued on a stale graph; an empty impact set on a non-documentation change must be explained; exemptions need an owner and an expiry.",
+ "charter_rule_text": "Проверка изменения кода по умолчанию — graph-verified change: обновить/проверить свежесть графа связей, вычислить множество влияния, исполнить обязательные верификаторы для каждой затронутой сущности, выдать receipt с тривалентными вердиктами. Тесты — выбираемый верификатор, TDD — opt-in клиентских пространств. Граф выбирает проверку, он её не заменяет: пустое множество влияния — предсказание, требующее объяснения, не одобрение.",
+ "fields": {
+  "required": [
+   "schema",
+   "receipt_id",
+   "captured_at_utc",
+   "producer",
+   "decision_ref",
+   "repo",
+   "graph",
+   "tree",
+   "staleness",
+   "change_set",
+   "impact_set",
+   "verifiers",
+   "verdicts",
+   "exemptions",
+   "admission"
+  ],
+  "optional": [
+   "empty_impact_explanation",
+   "host",
+   "work_item",
+   "notes",
+   "canaries"
+  ],
+  "producer": {
+   "required": [
+    "tool",
+    "version"
+   ]
+  },
+  "repo": {
+   "required": [
+    "name"
+   ],
+   "optional": [
+    "url",
+    "path"
+   ]
+  },
+  "graph": {
+   "required": [
+    "source_commit",
+    "graph_digest",
+    "builder_version",
+    "built_at_utc"
+   ],
+   "optional": [
+    "ref",
+    "path"
+   ]
+  },
+  "tree": {
+   "required": [
+    "commit",
+    "dirty"
+   ]
+  },
+  "staleness": {
+   "required": [
+    "method",
+    "verdict"
+   ],
+   "verdict_values": [
+    "fresh",
+    "stale",
+    "not_checked"
+   ],
+   "optional": [
+    "mismatched_nodes",
+    "checked_at_utc"
+   ],
+   "rule": "verdict fresh requires graph.source_commit == tree.commit (worktree mode) or == change_set.base (diff mode), tree.dirty consistent with change_set.mode, and 0 mismatched_nodes"
+  },
+  "change_set": {
+   "required": [
+    "mode",
+    "files"
+   ],
+   "mode_values": [
+    "worktree",
+    "diff"
+   ],
+   "conditional": {
+    "base": "required in diff mode",
+    "head": "required in diff mode"
+   },
+   "file": {
+    "required": [
+     "path",
+     "status",
+     "kind"
+    ],
+    "status_values": [
+     "A",
+     "M",
+     "D",
+     "R"
+    ],
+    "kind_values": [
+     "code",
+     "contract",
+     "route",
+     "data_model",
+     "config",
+     "doc",
+     "lockfile",
+     "global_config",
+     "test",
+     "receipt",
+     "other"
+    ]
+   }
+  },
+  "impact_set": {
+   "required": [
+    "method",
+    "deterministic_core",
+    "inferred_tail",
+    "global_fallback"
+   ],
+   "optional": [
+    "max_depth",
+    "edge_types",
+    "total"
+   ],
+   "entry": {
+    "required": [
+     "entity",
+     "depth",
+     "path"
+    ],
+    "optional": [
+     "boundary",
+     "node_type"
+    ],
+    "path_hop": {
+     "required": [
+      "from",
+      "to",
+      "edge_type",
+      "provenance"
+     ]
+    }
+   },
+   "global_fallback": {
+    "required": [
+     "triggered"
+    ],
+    "conditional": {
+     "reason": "required when triggered"
+    }
+   }
+  },
+  "empty_impact_explanation": {
+   "required": [
+    "reason",
+    "graph_metadata"
+   ],
+   "graph_metadata": "which extractors ran, language coverage, and why the changed nodes have no reverse edges (e.g. leaf unit, new file, unsupported language); an explanation may not simply say 'no impact'"
+  },
+  "verifier": {
+   "required": [
+    "id",
+    "kind",
+    "command",
+    "entities",
+    "exit_code",
+    "output_ref"
+   ],
+   "kind_values": [
+    "contract_diff",
+    "type_check",
+    "schema_diff",
+    "config_schema",
+    "fitness_rules",
+    "targeted_test",
+    "property_check",
+    "canary",
+    "doc_reference",
+    "manual_review",
+    "other"
+   ],
+   "optional": [
+    "started_at_utc",
+    "duration_s",
+    "summary"
+   ]
+  },
+  "verdict": {
+   "required": [
+    "entity",
+    "verdict"
+   ],
+   "verdict_values": [
+    "verified",
+    "failed",
+    "not_measured"
+   ],
+   "optional": [
+    "verifier_ids",
+    "reason"
+   ],
+   "rule": "every impact entry (core and tail) and every changed node has exactly one verdict; verified requires ≥ 1 verifier_id; not_measured requires a reason"
+  },
+  "exemption": {
+   "required": [
+    "entity",
+    "reason",
+    "owner",
+    "expires_at_utc"
+   ],
+   "optional": [
+    "ref"
+   ],
+   "rule": "owner is a role or person from the registry, never empty; expires_at_utc must be after captured_at_utc"
+  },
+  "admission": {
+   "required": [
+    "verdict",
+    "rule"
+   ],
+   "verdict_values": [
+    "admitted",
+    "admitted_with_exemptions",
+    "refused",
+    "paused_safe"
+   ],
+   "rule": "admitted requires every verdict = verified; admitted_with_exemptions requires every non-verified entity to have an unexpired exemption; failed without exemption ⇒ refused; not_measured without exemption ⇒ paused_safe or refused"
+  }
+ },
+ "rules": {
+  "RECEIPT_SCHEMA_MISMATCH": "document schema is not ChangeAdmissionReceipt/v1",
+  "RECEIPT_MISSING_FIELD": "a required top-level or nested field is absent",
+  "RECEIPT_WITHOUT_GRAPH_COMMIT": "graph.source_commit absent or not a 40-hex sha",
+  "RECEIPT_WITHOUT_GRAPH_DIGEST": "graph.graph_digest absent or not sha256:<64 hex>",
+  "RECEIPT_ON_STALE_GRAPH": "staleness.verdict ≠ fresh, or graph.source_commit ≠ the commit the change set is measured against, or tree.dirty in diff mode, or mismatched_nodes non-empty",
+  "STALENESS_NOT_CHECKED": "staleness.verdict = not_checked (a receipt cannot be issued without the check)",
+  "CHANGE_SET_EMPTY": "change_set.files is empty",
+  "CHANGE_SET_FILE_INVALID": "a change_set file lacks path/status/kind or uses a value outside the enums",
+  "EMPTY_IMPACT_WITHOUT_EXPLANATION": "deterministic_core and inferred_tail are both empty, global_fallback not triggered, at least one changed file is not kind doc/receipt, and empty_impact_explanation is absent or lacks graph_metadata",
+  "IMPACT_ENTRY_WITHOUT_PROVENANCE": "an impact entry path hop lacks provenance, or an entry has an empty path",
+  "IMPACT_ENTRY_MISPLACED": "an entry whose path contains an inferred/observed hop sits in deterministic_core, or a fully deterministic path sits in inferred_tail",
+  "GLOBAL_FALLBACK_WITHOUT_REASON": "global_fallback.triggered = true without reason",
+  "INFERRED_BOUNDARY_WITHOUT_CANARY": "an impact entry reached through an inferred/observed hop with boundary = service (or repo) has no verifier of kind canary listing it and no valid exemption, while its verdict is verified or the admission verdict is admitted/admitted_with_exemptions (an honest not_measured with paused_safe/refused is conformant)",
+  "VERIFIER_WITHOUT_OUTPUT_REF": "a verifier lacks output_ref (path/URL of the captured output) or exit_code",
+  "VERIFIER_KIND_UNKNOWN": "verifier.kind outside kind_values",
+  "ENTITY_WITHOUT_VERDICT": "an impact entry or changed node has no verdict",
+  "VERDICT_NOT_TRIVALUED": "a verdict value outside {verified, failed, not_measured} (booleans, pass/fail, ok, skipped are all violations)",
+  "VERIFIED_WITHOUT_VERIFIER": "verdict verified with no verifier_ids or with an id that names no verifier",
+  "NOT_MEASURED_WITHOUT_REASON": "verdict not_measured without a reason",
+  "EXEMPTION_WITHOUT_OWNER": "exemption lacks owner (or owner is empty)",
+  "EXEMPTION_WITHOUT_EXPIRY": "exemption lacks expires_at_utc or it is not ISO-8601 UTC",
+  "EXEMPTION_EXPIRED": "exemption.expires_at_utc ≤ captured_at_utc",
+  "ADMISSION_CONTRADICTS_VERDICTS": "admission.verdict admitted with a failed/not_measured verdict; admitted_with_exemptions with a non-verified entity lacking a valid exemption; admitted while global_fallback triggered without every entity verified",
+  "ADMISSION_VERDICT_INVALID": "admission.verdict outside verdict_values"
+ },
+ "verdicts": {
+  "conformant": "0 violations",
+  "violation": "≥ 1 violation code"
+ }
+}
