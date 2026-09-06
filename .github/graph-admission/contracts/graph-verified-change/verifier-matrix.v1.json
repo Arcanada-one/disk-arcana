@@ -1,0 +1,457 @@
+{
+ "acceptance_bindings": {
+  "disabled_mandatory_verifier_is_a_surviving_mutant": "battery: per mandatory verifier a fault fixture caught when enabled (killed) and undetected when disabled (survived) — both must hold",
+  "every_entity_has_a_verdict": "runner selftest asserts |verdicts| == |core| + |tail| + |changed nodes| on every scenario",
+  "fitness_rules_catch_forbidden_import": "fault F-fitness injects `import { PrismaService }` into tasks.controller.ts of ts-mini → FR-01 failed on the controller",
+  "pilot_time_budget": "≥ 10 historical changes of the pilot verified end to end (graph at parent, impact, mandatory verifiers, draft receipt) in ≤ 10 min total wall clock, every entity with a verdict"
+ },
+ "baseline": {
+  "fields": [
+   "schema",
+   "repo",
+   "frozen_at_commit",
+   "frozen_at_utc",
+   "owner",
+   "expires_at_utc",
+   "entries[] {verifier, rule, entity, fingerprint, detail}",
+   "exemptions[] {verifier, rule|null, entity|null, reason, owner, expires_at_utc, ref}"
+  ],
+  "lookup": [
+   "<repo>/.arcana/fitness-baseline.json",
+   "contracts/graph-verified-change/fitness-baseline/<owner>__<repo>.v1.json"
+  ],
+  "rule": "an entry matches a finding by fingerprint = sha256(verifier|rule|entity|detail-key); matched findings are reported as frozen and do not fail the entity while frozen_at/expires_at is valid; expired baseline entries count as new findings; exemptions apply by (verifier, rule, entity) and carry owner + expiry like CAR exemptions",
+  "schema": "FitnessBaseline/v1"
+ },
+ "calibration": {
+  "card": "AUP-GRAPH-007",
+  "consequence": "the epic does NOT release the AUP-GRAPH-006 admission gate from the pilot; canaries become mandatory where the card says «where recall is low»",
+  "model": "claude-opus-5",
+  "pilot": "Arcanada-one/muneral @ ac54a95, 517 valid mutants, ten operators",
+  "preregistration": "science/preregistration/AUP-H-GRAPH-recall.manifest.json",
+  "provisional_until_fable_review": true,
+  "receipt": "receipts/graph/mutcal0-20260905T130900Z.json",
+  "result_class": "inconclusive",
+  "schema": "MatrixCalibration/v1",
+  "why": "two independent preregistered guards fired: the route class had no measurable denominator (13 detected mutants < 20), and the selection oracle's own miss rate 0.1832 exceeded its 0.10 bound, so every pooled recall here is an upper bound, not an estimate"
+ },
+ "decision_ref": "DEC-AUP-0008",
+ "edge_types": {
+  "calls": {
+   "calibration": {
+    "canary": "NOT mandatory: 1.0 pooled (303/303) and 1.0 bias-free (12/12); the strongest class measured.",
+    "detected_mutants": 64,
+    "edge_class": "caller",
+    "gt_pairs": 303,
+    "recall_core": 1.0,
+    "receipt": "receipts/graph/mutcal0-20260905T130900Z.json",
+    "state": "measured",
+    "type_check_stratum_recall": 1.0,
+    "unbiased_gt_pairs": 12,
+    "unbiased_recall_core": 1.0
+   },
+   "mandatory": [
+    "type_check"
+   ],
+   "note": "inferred DI edges across a service/repo boundary additionally need a canary (P6)",
+   "selectable": [
+    "targeted_test",
+    "property_check"
+   ],
+   "target_of_verification": "the caller (edge from)"
+  },
+  "consumes_contract": {
+   "calibration": {
+    "canary": "MANDATORY for inferred contract edges (unchanged), and the class stays IN PILOT: the pooled recall 0.986 is inflated by the selection oracle, whose own miss rate 0.1832 exceeded the preregistered 0.10 bound, and the bias-free subsample reads 0.8713 (88/101) on 15 mutants. The 0.80 threshold is met by that estimate but not on a denominator the manifest accepts, so GRAPH-006 is NOT released from the pilot on this evidence.",
+    "detected_mutants": 207,
+    "edge_class": "contract",
+    "gt_pairs": 1288,
+    "recall_core": 0.986,
+    "receipt": "receipts/graph/mutcal0-20260905T130900Z.json",
+    "state": "measured",
+    "type_check_stratum_recall": 1.0,
+    "unbiased_gt_pairs": 101,
+    "unbiased_recall_core": 0.8713
+   },
+   "mandatory": [
+    "contract_diff",
+    "type_check"
+   ],
+   "note": "consumer ⊆ provider; an inferred http-client binding needs a canary for verified",
+   "selectable": [
+    "targeted_test"
+   ],
+   "target_of_verification": "the consumer (edge from) against the provider at head"
+  },
+  "deploys_to": {
+   "calibration": {
+    "reason": "this edge type carries no code mutation site (document / receipt / deployment edge); the mutation calibration cannot reach it",
+    "receipt": "receipts/graph/mutcal0-20260905T130900Z.json",
+    "state": "not_measured"
+   },
+   "mandatory": [
+    "type_check",
+    "fitness_rules"
+   ],
+   "note": "can-i-deploy gate is GRAPH-008; verify0 compiles the unit and runs the fitness rules over it",
+   "selectable": [],
+   "target_of_verification": "the deployable unit (build of the whole unit)"
+  },
+  "documents": {
+   "calibration": {
+    "reason": "this edge type carries no code mutation site (document / receipt / deployment edge); the mutation calibration cannot reach it",
+    "receipt": "receipts/graph/mutcal0-20260905T130900Z.json",
+    "state": "not_measured"
+   },
+   "mandatory": [
+    "doc_reference"
+   ],
+   "selectable": [],
+   "target_of_verification": "the document (edge from)"
+  },
+  "implements_contract": {
+   "calibration": {
+    "canary": "MANDATORY for inferred contract edges (unchanged), and the class stays IN PILOT: the pooled recall 0.986 is inflated by the selection oracle, whose own miss rate 0.1832 exceeded the preregistered 0.10 bound, and the bias-free subsample reads 0.8713 (88/101) on 15 mutants. The 0.80 threshold is met by that estimate but not on a denominator the manifest accepts, so GRAPH-006 is NOT released from the pilot on this evidence.",
+    "detected_mutants": 207,
+    "edge_class": "contract",
+    "gt_pairs": 1288,
+    "recall_core": 0.986,
+    "receipt": "receipts/graph/mutcal0-20260905T130900Z.json",
+    "state": "measured",
+    "type_check_stratum_recall": 1.0,
+    "unbiased_gt_pairs": 101,
+    "unbiased_recall_core": 0.8713
+   },
+   "mandatory": [
+    "contract_diff",
+    "type_check"
+   ],
+   "note": "contract edge: contract-diff + type-check of both sides",
+   "selectable": [
+    "targeted_test"
+   ],
+   "target_of_verification": "the contract (provider side) and the implementing unit"
+  },
+  "imports": {
+   "calibration": {
+    "canary": "NOT mandatory: 1.0 pooled (303/303) and 1.0 bias-free (12/12); the strongest class measured.",
+    "detected_mutants": 64,
+    "edge_class": "caller",
+    "gt_pairs": 303,
+    "recall_core": 1.0,
+    "receipt": "receipts/graph/mutcal0-20260905T130900Z.json",
+    "state": "measured",
+    "type_check_stratum_recall": 1.0,
+    "unbiased_gt_pairs": 12,
+    "unbiased_recall_core": 1.0
+   },
+   "mandatory": [
+    "type_check"
+   ],
+   "note": "caller edge: compile the affected importers",
+   "selectable": [
+    "targeted_test"
+   ],
+   "target_of_verification": "the importer (edge from)"
+  },
+  "maps_model": {
+   "calibration": {
+    "canary": "NOT mandatory on this evidence: pooled 0.9717 (103/106), but the bias-free subsample is 0.625 on 8 pairs — too thin to release. Re-calibrate with GRAPH-009.",
+    "detected_mutants": 40,
+    "edge_class": "data",
+    "gt_pairs": 106,
+    "recall_core": 0.9717,
+    "receipt": "receipts/graph/mutcal0-20260905T130900Z.json",
+    "state": "measured",
+    "type_check_stratum_recall": 1.0,
+    "unbiased_gt_pairs": 8,
+    "unbiased_recall_core": 0.625
+   },
+   "mandatory": [
+    "schema_diff"
+   ],
+   "note": "data edge: prisma schema-lite diff + prisma validate",
+   "selectable": [
+    "targeted_test"
+   ],
+   "target_of_verification": "the data model and the mapping unit"
+  },
+  "provides_route": {
+   "calibration": {
+    "canary": "MANDATORY. The calibration could not measure this class at all (13 detected mutants against the manifest's minimum of 20) and the selection-bias-free subsample put it at 0.25 (2/8). 50 of the 65 route mutants were path/verb rewrites, which no unit test and no type-checker on the pilot can observe. A change touching a provides_route edge is admitted only with a live canary probe before/after deploy (AUP-GRAPH-008); a receipt without one records the route entity as not_measured.",
+    "detected_mutants": 13,
+    "edge_class": "route",
+    "gt_pairs": 18,
+    "recall_core": null,
+    "receipt": "receipts/graph/mutcal0-20260905T130900Z.json",
+    "state": "not_measured",
+    "type_check_stratum_recall": 0.8,
+    "unbiased_gt_pairs": 8,
+    "unbiased_recall_core": 0.25
+   },
+   "canary_enforcement": "WIRED by AUP-GRAPH-008: `canary` is mandatory for this edge type. Without a CanaryResult/v1 listing the entity, verify.py records it not_measured and the admission is paused_safe — which is exactly what the matrix demanded in prose before the verifier existed. The gate tools/graph/deploy_gate.py can-i-deploy applies the same rule per contract edge, and adds the offline half (route presence between the resident version and the candidate). A flag never substitutes for the canary: --force needs a registry exemption (rule D4).",
+   "canary_required": true,
+   "mandatory": [
+    "type_check",
+    "contract_diff",
+    "route_config_consistency",
+    "canary"
+   ],
+   "note": "route edge: controller compile + contract-diff of the route's DTOs + route/config consistency",
+   "selectable": [
+    "targeted_test"
+   ],
+   "target_of_verification": "the route and its controller"
+  },
+  "reads_config": {
+   "calibration": {
+    "canary": "MANDATORY. Not measured (2 detected mutants); the bias-free subsample put it at 0.0 (0/2). Same rule as route until a calibration with a real denominator exists.",
+    "detected_mutants": 2,
+    "edge_class": "config",
+    "gt_pairs": 14,
+    "recall_core": null,
+    "receipt": "receipts/graph/mutcal0-20260905T130900Z.json",
+    "state": "not_measured",
+    "type_check_stratum_recall": null,
+    "unbiased_gt_pairs": 2,
+    "unbiased_recall_core": 0.0
+   },
+   "canary_enforcement": "WIRED by AUP-GRAPH-008: `canary` is mandatory for this edge type. Without a CanaryResult/v1 listing the entity, verify.py records it not_measured and the admission is paused_safe — which is exactly what the matrix demanded in prose before the verifier existed. The gate tools/graph/deploy_gate.py can-i-deploy applies the same rule per contract edge, and adds the offline half (route presence between the resident version and the candidate). A flag never substitutes for the canary: --force needs a registry exemption (rule D4).",
+   "canary_required": true,
+   "mandatory": [
+    "config_schema",
+    "canary"
+   ],
+   "selectable": [],
+   "target_of_verification": "the config key and the reading unit"
+  },
+  "verifies": {
+   "calibration": {
+    "reason": "this edge type carries no code mutation site (document / receipt / deployment edge); the mutation calibration cannot reach it",
+    "receipt": "receipts/graph/mutcal0-20260905T130900Z.json",
+    "state": "not_measured"
+   },
+   "mandatory": [],
+   "note": "a spec reached as a code node still gets type_check + fitness_rules from its node type; a receipt reached here is historical evidence — asserted, never re-verified (I14) → not_measured",
+   "selectable": [
+    "targeted_test"
+   ],
+   "target_of_verification": "the spec / receipt (edge from)"
+  }
+ },
+ "epic": "AUP-E29",
+ "fitness_rules": {
+  "FR-01": {
+   "name": "no-transport-to-persistence",
+   "rule": "a transport-layer unit (*.controller.ts, *.gateway.ts, *.resolver.ts) must not import a persistence unit (prisma.service*, @prisma/client, *.repository.ts, typeorm)",
+   "severity": "failed",
+   "source": "imports edges of the head graph + the head import statements"
+  },
+  "FR-02": {
+   "name": "no-import-cycles",
+   "rule": "no strongly connected component of size > 1 over value imports (import type / export type excluded) among code units of one deployable",
+   "severity": "failed",
+   "source": "head sources (AST-lite import scan)"
+  },
+  "FR-03": {
+   "name": "module-boundary",
+   "rule": "a unit under src/<a>/ may import from src/<b>/ (a ≠ b) only through the module's exported surface: never another module's *.controller.ts / *.gateway.ts / *.processor.ts",
+   "severity": "failed",
+   "source": "imports edges of the head graph"
+  },
+  "FR-04": {
+   "name": "reuse-marker-resolves",
+   "rule": "a `reuse: @arcanada/<pkg>` marker must name a package declared as a dependency of the containing deployable or present as a workspace package (packages/*), or be registered in the exemption registry",
+   "severity": "failed",
+   "source": "reuse-marker imports edges of the head graph + package.json files at head"
+  },
+  "FR-05": {
+   "name": "deployable-boundary",
+   "rule": "a unit of deployable A must not import a unit of deployable B unless B is a shared package (kind library / shared_package)",
+   "severity": "failed",
+   "source": "imports + deploys_to edges of the head graph"
+  }
+ },
+ "id": "contracts/graph-verified-change/verifier-matrix.v1.json",
+ "node_types": {
+  "code_unit": {
+   "mandatory": [
+    "fitness_rules",
+    "type_check"
+   ],
+   "selectable": [
+    "targeted_test",
+    "property_check"
+   ]
+  },
+  "config_key": {
+   "mandatory": [
+    "config_schema"
+   ],
+   "selectable": []
+  },
+  "contract": {
+   "mandatory": [
+    "contract_diff"
+   ],
+   "selectable": []
+  },
+  "data_model": {
+   "mandatory": [
+    "schema_diff"
+   ],
+   "selectable": []
+  },
+  "deployable_unit": {
+   "mandatory": [
+    "type_check",
+    "fitness_rules"
+   ],
+   "selectable": []
+  },
+  "document": {
+   "mandatory": [
+    "doc_reference"
+   ],
+   "selectable": []
+  },
+  "receipt": {
+   "mandatory": [],
+   "not_measured_reason": "historical receipt: asserted, never re-verified (I14); a new receipt supersedes it",
+   "selectable": []
+  },
+  "route": {
+   "mandatory": [
+    "route_config_consistency",
+    "contract_diff",
+    "type_check"
+   ],
+   "selectable": [
+    "targeted_test"
+   ]
+  },
+  "work_item": {
+   "mandatory": [],
+   "not_measured_reason": "no local verifier for a work item; GRAPH-006 links the admission receipt to the work item in Muneral",
+   "selectable": []
+  }
+ },
+ "portion_id": "AUP-GRAPH-005:verify0",
+ "principles": [
+  "P1 every affected entity (deterministic core, inferred tail, changed nodes) receives exactly one tri-valued verdict verified | failed | not_measured; the runner may not drop an entity without a verdict (card failure condition)",
+  "P2 mandatory verifiers are executed locally by the change author's agent; a mandatory verifier that cannot run (tool absent, no toolchain) yields not_measured with the reason, never verified",
+  "P3 tests are never mandatory 'just in case': targeted_test and property_check are selectable and bound to an edge type (verifies) or a declared property, not to the whole change",
+  "P4 a disabled mandatory verifier is recorded as MANDATORY_VERIFIER_DISABLED; the entities it would have covered become not_measured and the draft can never be admitted — the mutation battery shows every mandatory verifier is load-bearing (fault caught when enabled, mutant survives when disabled)",
+  "P5 fitness rules run over the head tree with a frozen baseline of pre-existing violations (FitnessBaseline/v1, owner + expiry) and an exemption registry; a new violation is failed, a frozen one is reported and not counted, an expired baseline counts again",
+  "P6 an inferred edge across a service/repo boundary never yields verified alone: the entity stays not_measured until a canary (GRAPH-008) lists it (CAR rule INFERRED_BOUNDARY_WITHOUT_CANARY)"
+ ],
+ "purpose": "For every edge type and node type of RelationshipGraph/v1: which verifiers are MANDATORY (run locally by `arcana verify`, never CI-only) and which are SELECTABLE. The graph selects verification, it never replaces it (consilium 2026-09-05): an affected entity with no applicable verifier gets `not_measured`, and not_measured blocks unqualified admission (ChangeAdmissionReceipt/v1 admission rule).",
+ "schema": "VerifierMatrix/v1",
+ "selection_rule": "required(entity) = ⋃ edge_types[t].mandatory over the edge types t of the hops that reach the entity in its best path (impact.py ImpactQuery/v1 path) ∪ node_types[type(entity)].mandatory; for a changed node (seed) required = node_types[type].mandatory. Selected selectable verifiers (--select) are added when applicable. verdict(entity) = failed if any verifier reports failed for it; not_measured if any required verifier is missing / disabled / not attributable; verified only when every required verifier reports verified for it (and, for inferred boundary entities, a canary lists it).",
+ "status": "normative-draft — ratification by blind agent review (DEC-AUP-0010 reviewer_incarnation), not by a human gate",
+ "verifiers": {
+  "canary": {
+   "applies_to_nodes": [
+    "code_unit",
+    "deployable_unit",
+    "route",
+    "config_key",
+    "contract"
+   ],
+   "contract_ref": "contracts/graph-verified-change/observed-edges-and-deploy-gate.v1.json",
+   "kind": "canary",
+   "reserved_for": "AUP-GRAPH-008 (delivered 2026-09-05)",
+   "verdict_rule": "implemented by AUP-GRAPH-008: tools/graph/verify.py --canary <CanaryResult/v1> consumes live-contour evidence produced by tools/graph/deploy_gate.py canary. An entity that needs a canary and is not listed by any supplied result is not_measured (INFERRED_BOUNDARY_WITHOUT_CANARY); a listed entity carries the canary's own tri-valued verdict, and only a `verified` one lifts the inferred-boundary hold P6.",
+   "what": "observed edge / deployment canary for inferred boundary edges and can-i-deploy"
+  },
+  "config_schema": {
+   "applies_to_nodes": [
+    "config_key",
+    "code_unit"
+   ],
+   "kind": "config_schema",
+   "tool": "tools/graph/verify.py (built in)",
+   "verdict_rule": "verified when every key read is declared; failed on UNDECLARED_CONFIG_KEY unless frozen in the baseline; not_measured when the repo declares no env source at all",
+   "what": "every config key read by an affected code unit at head (process.env.X, process.env['X'], configService.get('X')) is declared in an env declaration source of the repo (.env.example / .env.schema / .env.template / env.schema.json / docker-compose*.yml environment:), framework-owned prefixes excluded (NODE_ENV, CI, PORT, NEXT_*, VERCEL_*, NEXTAUTH_*, AUTH_*, WS_NO_*, NO_PROXY, DEBUG)"
+  },
+  "contract_diff": {
+   "applies_to_nodes": [
+    "contract",
+    "route",
+    "code_unit"
+   ],
+   "kind": "contract_diff",
+   "tool": "tools/graph/contract_diff.py",
+   "verdict_rule": "provider: verified when no breaking change on the contract, failed when a breaking change lands on it (compatible/info codes keep verified); consumer edge verdict from the usage projection (failed / verified / not_measured when the projection is not narrowable)",
+   "what": "schema-lite of every contract taken from code at base and head; breaking-change taxonomy; consumer ⊆ provider over implements_contract / consumes_contract edges"
+  },
+  "doc_reference": {
+   "applies_to_nodes": [
+    "document"
+   ],
+   "kind": "doc_reference",
+   "tool": "tools/graph/verify.py (built in)",
+   "verdict_rule": "verified when every reference into the change set resolves; failed on DANGLING_REFERENCE",
+   "what": "every path / route / model reference a document makes to the change set still resolves at head (file exists, route served, model present)"
+  },
+  "fitness_rules": {
+   "applies_to_nodes": [
+    "code_unit",
+    "deployable_unit"
+   ],
+   "kind": "fitness_rules",
+   "tool": "tools/graph/verify.py (built in, rules FR-01..FR-05 below)",
+   "verdict_rule": "verified when the code unit has no new violation (frozen violations reported in the summary); failed on a new violation or an expired baseline entry",
+   "what": "architecture fitness rules over the head graph + head sources: layers, cycles, module boundaries, reuse markers, deployable boundaries — executed locally, not only in CI"
+  },
+  "property_check": {
+   "applies_to_nodes": [
+    "code_unit"
+   ],
+   "kind": "property_check",
+   "selectable": true,
+   "tool": "declared per node in the repo profile (.arcana/verify.json → property_checks) or --profile",
+   "verdict_rule": "verified on exit 0, failed otherwise; not run when no property is declared for the node",
+   "what": "input→output properties for high-sensitivity functions"
+  },
+  "route_config_consistency": {
+   "applies_to_nodes": [
+    "route"
+   ],
+   "kind": "config_schema",
+   "tool": "tools/graph/verify.py (built in)",
+   "verdict_rule": "verified when RC-01..03 hold for the route; failed on UNREGISTERED_CONTROLLER / PREFIX_MISMATCH / ROUTE_REMOVED_WITH_CONSUMER",
+   "what": "RC-01 the global prefix set in the bootstrap (setGlobalPrefix) equals the prefix the route node was built with; RC-02 the controller / gateway that provides the route is registered (controllers: / providers:) in a @Module reachable from the root module passed to NestFactory.create; RC-03 the served route still exists in the head graph"
+  },
+  "schema_diff": {
+   "applies_to_nodes": [
+    "data_model"
+   ],
+   "kind": "schema_diff",
+   "tool": "tools/graph/verify.py prisma-lite diff + `prisma validate` when the CLI is available",
+   "verdict_rule": "verified when the model has no breaking change and prisma validate passes (or the CLI is absent and the schema-lite parse is clean: then not_measured for the validate half is recorded in the summary and the entity stays not_measured); failed when a breaking change lands on the model and a consumer (maps_model from a code unit) references the removed/changed field, or prisma validate fails; not_measured when breaking but consumer usage is not narrowable",
+   "what": "Prisma schema-lite (models, fields, types, optionality, lists, enums) at base and head; breaking taxonomy MODEL_REMOVED / FIELD_REMOVED / FIELD_TYPE_CHANGED / FIELD_MADE_REQUIRED / NEW_REQUIRED_FIELD_WITHOUT_DEFAULT / ENUM_VALUE_REMOVED / RELATION_CHANGED; prisma validate of the head schema"
+  },
+  "targeted_test": {
+   "applies_to_nodes": [
+    "code_unit"
+   ],
+   "kind": "targeted_test",
+   "selectable": true,
+   "tool": "the deployable's test runner (jest / vitest) restricted to the spec files whose `verifies` edge reaches an affected node",
+   "verdict_rule": "verified for the spec node and the units it verifies when the run exits 0; failed otherwise (a test that needs an absent environment fails honestly — the summary records the cause)",
+   "what": "existing tests covering the affected node; never the whole suite"
+  },
+  "type_check": {
+   "applies_to_nodes": [
+    "code_unit",
+    "deployable_unit",
+    "route"
+   ],
+   "kind": "type_check",
+   "tool": "tsc --noEmit --incremental false -p <tsconfig> (per deployable; test tsconfig when a spec is affected)",
+   "verdict_rule": "verified when the project containing the entity compiles with 0 errors; failed when an error is reported in the entity's file; not_measured when the project fails only in other files (error not attributable) or tsc is unavailable",
+   "what": "compilation of the deployable that contains the affected caller / importer / controller / consumer at the head tree"
+  }
+ }
+}

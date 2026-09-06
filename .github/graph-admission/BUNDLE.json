@@ -1,0 +1,54 @@
+{
+ "bundle_digest": "sha256:180589836904d15c0606bfc6a611ac830b932758c2de38dc6c9040cdd7e515f9",
+ "files": [
+  {
+   "note": "the workflow file itself; it is already running by the time the job checks the bundle",
+   "path": ".github/workflows/graph-admission.yml",
+   "sha256": "sha256:ab3a384418c9f8e5039046651abad8d11eba60ee054fd455948ecab73611c543",
+   "vendored_to": "graph-admission.yml",
+   "verified_by_the_job": false
+  },
+  {
+   "path": "tools/graph/admit_change.py",
+   "sha256": "sha256:03beac69bab5aa0abe8692cfef8ec5f505c12640897247d2be63c59f09614702"
+  },
+  {
+   "path": "tools/graph/schema_check.py",
+   "sha256": "sha256:bd686fefb025f09f85df751189565a7848a5a9fe547d1aa316fd98176df43a08"
+  },
+  {
+   "path": "tools/graph/build_graph.py",
+   "sha256": "sha256:04894597429247883dd33b39065430e4e72f26fe5016ff56c059382c763fe3b7"
+  },
+  {
+   "path": "tools/graph/ci_gate.py",
+   "sha256": "sha256:2cf6e2336d0a068f8ad01e7b941231ad563a9b81d2d7de19e3c103c1226caec5"
+  },
+  {
+   "path": "contracts/graph-verified-change/admission-gate.v1.json",
+   "sha256": "sha256:490c0299ec7fecc9edfa2e63047334675712227fbb52468bc6a3f676077e4ead"
+  },
+  {
+   "path": "contracts/graph-verified-change/relationship-graph.v1.json",
+   "sha256": "sha256:ade4aaf8ff2813a16928aeaa0e6fed44253ce72cbbd65695f6caaa110f372d39"
+  },
+  {
+   "path": "contracts/graph-verified-change/change-admission-receipt.v1.json",
+   "sha256": "sha256:c33ef47a3ccfd2b2d6e9c9e87c75b64435d77b59128cb9b4459f08cdff356c17"
+  },
+  {
+   "path": "contracts/graph-verified-change/verifier-matrix.v1.json",
+   "sha256": "sha256:b4a018dc51c6958de78a7ac5c931006bf047dc2e21b1216f042775cf0e26b51c"
+  }
+ ],
+ "model": "claude-opus-5",
+ "producer": {
+  "tool": "tools/graph/ci_gate.py",
+  "version": "1.0.0"
+ },
+ "program_ref": "0caeec0ac8cd4984024a5ce396f994c827adc023",
+ "program_repo": "Arcanada-one/arcanada-universal-program",
+ "provisional_until_fable_review": true,
+ "rule": "The workflow refuses unless every file's sha256 matches this manifest AND the caller's `program_ref` input matches `program_ref` here. The bundle is a VENDORED copy of one pinned program-repo SHA (the program repository is private and no shared credential exists to check it out from a caller's CI). A pull request that changes anything under the bundle directory is refused by the gate job \u2014 a bundle refresh is its own pull request.",
+ "schema": "GraphAdmissionBundle/v1"
+}
