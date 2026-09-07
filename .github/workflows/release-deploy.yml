@@ -356,7 +356,7 @@ jobs:
           BUILT_SHA: ${{ needs.build.outputs.build_commit }}
         run: bash scripts/require-fresh-main.sh "$BUILT_SHA"
       - name: Attach exact bundled binary
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3.0.2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3.0.3
         with:
           files: ${{ runner.temp }}/disk-deploy-bundle/disk-arcana-server
           fail_on_unmatched_files: true
@@ -409,7 +409,7 @@ jobs:
         run: bash scripts/require-fresh-main.sh "$BUILT_SHA"
 
       - name: Attach Windows zip to GitHub Release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3.0.2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3.0.3
         with:
           files: dist/disk-arcana-windows-x86_64.zip
           fail_on_unmatched_files: true
@@ -475,7 +475,7 @@ jobs:
           BUILT_SHA: ${{ github.sha }}
         run: bash scripts/require-fresh-main.sh "$BUILT_SHA"
       - name: Attach client binary to GitHub Release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3.0.2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3.0.3
         with:
           files: ${{ matrix.asset }}
           fail_on_unmatched_files: true
@@ -562,7 +562,7 @@ jobs:
           BUILT_SHA: ${{ github.sha }}
         run: bash scripts/require-fresh-main.sh "$BUILT_SHA"
       - name: Attach macOS client to GitHub Release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228  # v3.0.2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3.0.3
         with:
           files: ${{ matrix.asset }}
           fail_on_unmatched_files: true
