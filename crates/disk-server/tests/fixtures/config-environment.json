@@ -1,0 +1,2904 @@
+[
+  {
+    "id": "C01-defaults",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path"
+    },
+    "expected": {
+      "bind_addr": "127.0.0.1:9443",
+      "health_bind_addr": "0.0.0.0:9446",
+      "enrollment_bind_addr": "0.0.0.0:9445",
+      "db_path": "/synthetic/config-probe/db_path",
+      "sync_root": "/synthetic/config-probe/sync_root",
+      "tls_cert_path": "/synthetic/config-probe/tls_cert_path",
+      "tls_key_path": "/synthetic/config-probe/tls_key_path",
+      "tls_ca_path": "/synthetic/config-probe/tls_ca_path",
+      "acl_yaml_path": "/synthetic/config-probe/acl_yaml_path",
+      "share_roots": {},
+      "acl_sig_path": null,
+      "acl_gnupghome": null,
+      "tenant_db_dir": null,
+      "ops_bot_url": null,
+      "admin_token": null,
+      "ca_mode": "Http",
+      "use_stub_ca": false,
+      "acl_allow_unsigned": false,
+      "register_node_mode": "Enrolled",
+      "billing_mode": "Disabled",
+      "stripe_webhook_secret": null,
+      "auth_mode": "Disabled",
+      "jwt_signing_key": null,
+      "jwt_ttl_secs": 86400,
+      "jwt_mode": "Local",
+      "jwt_issuer": null,
+      "jwt_jwks_uri": null,
+      "oauth_mode": "Disabled",
+      "oauth_issuer": null,
+      "oauth_client_id": null,
+      "oauth_client_secret": null,
+      "oauth_redirect_uri": null,
+      "oauth_public_base_url": null,
+      "email_verify_mode": "Disabled",
+      "email_verify_base_url": null,
+      "email_verify_ttl_secs": 86400
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_DB_PATH",
+      "DISK_SYNC_ROOT",
+      "DISK_TLS_CERT_PATH",
+      "DISK_TLS_KEY_PATH",
+      "DISK_TLS_CA_PATH",
+      "DISK_ACL_YAML_PATH",
+      "ALL_OPTIONAL_C01"
+    ]
+  },
+  {
+    "id": "C01-DISK_DB_PATH-missing",
+    "env": {
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path"
+    },
+    "expected": {
+      "error_kind": "missing",
+      "error_key": "DISK_DB_PATH"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_DB_PATH"
+    ]
+  },
+  {
+    "id": "C01-DISK_DB_PATH-empty",
+    "env": {
+      "DISK_DB_PATH": "",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path"
+    },
+    "expected": {
+      "error_kind": "missing",
+      "error_key": "DISK_DB_PATH"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_DB_PATH"
+    ]
+  },
+  {
+    "id": "C01-DISK_DB_PATH-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/alternate",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path"
+    },
+    "expected": {
+      "db_path": "/synthetic/alternate"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_DB_PATH"
+    ]
+  },
+  {
+    "id": "C01-DISK_SYNC_ROOT-missing",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path"
+    },
+    "expected": {
+      "error_kind": "missing",
+      "error_key": "DISK_SYNC_ROOT"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_SYNC_ROOT"
+    ]
+  },
+  {
+    "id": "C01-DISK_SYNC_ROOT-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path"
+    },
+    "expected": {
+      "error_kind": "missing",
+      "error_key": "DISK_SYNC_ROOT"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_SYNC_ROOT"
+    ]
+  },
+  {
+    "id": "C01-DISK_SYNC_ROOT-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/alternate",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path"
+    },
+    "expected": {
+      "sync_root": "/synthetic/alternate"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_SYNC_ROOT"
+    ]
+  },
+  {
+    "id": "C01-DISK_TLS_CERT_PATH-missing",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path"
+    },
+    "expected": {
+      "error_kind": "missing",
+      "error_key": "DISK_TLS_CERT_PATH"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_TLS_CERT_PATH"
+    ]
+  },
+  {
+    "id": "C01-DISK_TLS_CERT_PATH-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path"
+    },
+    "expected": {
+      "error_kind": "missing",
+      "error_key": "DISK_TLS_CERT_PATH"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_TLS_CERT_PATH"
+    ]
+  },
+  {
+    "id": "C01-DISK_TLS_CERT_PATH-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/alternate",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path"
+    },
+    "expected": {
+      "tls_cert_path": "/synthetic/alternate"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_TLS_CERT_PATH"
+    ]
+  },
+  {
+    "id": "C01-DISK_TLS_KEY_PATH-missing",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path"
+    },
+    "expected": {
+      "error_kind": "missing",
+      "error_key": "DISK_TLS_KEY_PATH"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_TLS_KEY_PATH"
+    ]
+  },
+  {
+    "id": "C01-DISK_TLS_KEY_PATH-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path"
+    },
+    "expected": {
+      "error_kind": "missing",
+      "error_key": "DISK_TLS_KEY_PATH"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_TLS_KEY_PATH"
+    ]
+  },
+  {
+    "id": "C01-DISK_TLS_KEY_PATH-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/alternate",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path"
+    },
+    "expected": {
+      "tls_key_path": "/synthetic/alternate"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_TLS_KEY_PATH"
+    ]
+  },
+  {
+    "id": "C01-DISK_TLS_CA_PATH-missing",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path"
+    },
+    "expected": {
+      "error_kind": "missing",
+      "error_key": "DISK_TLS_CA_PATH"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_TLS_CA_PATH"
+    ]
+  },
+  {
+    "id": "C01-DISK_TLS_CA_PATH-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path"
+    },
+    "expected": {
+      "error_kind": "missing",
+      "error_key": "DISK_TLS_CA_PATH"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_TLS_CA_PATH"
+    ]
+  },
+  {
+    "id": "C01-DISK_TLS_CA_PATH-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/alternate",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path"
+    },
+    "expected": {
+      "tls_ca_path": "/synthetic/alternate"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_TLS_CA_PATH"
+    ]
+  },
+  {
+    "id": "C01-DISK_ACL_YAML_PATH-missing",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path"
+    },
+    "expected": {
+      "error_kind": "missing",
+      "error_key": "DISK_ACL_YAML_PATH"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_ACL_YAML_PATH"
+    ]
+  },
+  {
+    "id": "C01-DISK_ACL_YAML_PATH-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": ""
+    },
+    "expected": {
+      "error_kind": "missing",
+      "error_key": "DISK_ACL_YAML_PATH"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_ACL_YAML_PATH"
+    ]
+  },
+  {
+    "id": "C01-DISK_ACL_YAML_PATH-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/alternate"
+    },
+    "expected": {
+      "acl_yaml_path": "/synthetic/alternate"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_ACL_YAML_PATH"
+    ]
+  },
+  {
+    "id": "C01-DISK_BIND_ADDR-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_BIND_ADDR": "127.0.0.1:0"
+    },
+    "expected": {
+      "bind_addr": "127.0.0.1:0"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_BIND_ADDR"
+    ]
+  },
+  {
+    "id": "C01-DISK_BIND_ADDR-invalid",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_BIND_ADDR": "bad-socket"
+    },
+    "expected": {
+      "error_kind": "invalid",
+      "error_key": "DISK_BIND_ADDR"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_BIND_ADDR"
+    ]
+  },
+  {
+    "id": "C01-DISK_HEALTH_BIND_ADDR-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_HEALTH_BIND_ADDR": "127.0.0.1:0"
+    },
+    "expected": {
+      "health_bind_addr": "127.0.0.1:0"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_HEALTH_BIND_ADDR"
+    ]
+  },
+  {
+    "id": "C01-DISK_HEALTH_BIND_ADDR-invalid",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_HEALTH_BIND_ADDR": "bad-socket"
+    },
+    "expected": {
+      "error_kind": "invalid",
+      "error_key": "DISK_HEALTH_BIND_ADDR"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_HEALTH_BIND_ADDR"
+    ]
+  },
+  {
+    "id": "C01-DISK_ENROLLMENT_BIND_ADDR-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_ENROLLMENT_BIND_ADDR": "127.0.0.1:0"
+    },
+    "expected": {
+      "enrollment_bind_addr": "127.0.0.1:0"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_ENROLLMENT_BIND_ADDR"
+    ]
+  },
+  {
+    "id": "C01-DISK_ENROLLMENT_BIND_ADDR-invalid",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_ENROLLMENT_BIND_ADDR": "bad-socket"
+    },
+    "expected": {
+      "error_kind": "invalid",
+      "error_key": "DISK_ENROLLMENT_BIND_ADDR"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_ENROLLMENT_BIND_ADDR"
+    ]
+  },
+  {
+    "id": "C01-DISK_ACL_SIG_PATH-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_ACL_SIG_PATH": "/synthetic/optional"
+    },
+    "expected": {
+      "acl_sig_path": "/synthetic/optional"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_ACL_SIG_PATH"
+    ]
+  },
+  {
+    "id": "C01-DISK_ACL_SIG_PATH-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_ACL_SIG_PATH": ""
+    },
+    "expected": {
+      "acl_sig_path": null
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_ACL_SIG_PATH"
+    ]
+  },
+  {
+    "id": "C01-DISK_ACL_GNUPGHOME-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_ACL_GNUPGHOME": "/synthetic/optional"
+    },
+    "expected": {
+      "acl_gnupghome": "/synthetic/optional"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_ACL_GNUPGHOME"
+    ]
+  },
+  {
+    "id": "C01-DISK_ACL_GNUPGHOME-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_ACL_GNUPGHOME": ""
+    },
+    "expected": {
+      "acl_gnupghome": null
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_ACL_GNUPGHOME"
+    ]
+  },
+  {
+    "id": "C01-DISK_TENANT_DB_DIR-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_TENANT_DB_DIR": "/synthetic/optional"
+    },
+    "expected": {
+      "tenant_db_dir": "/synthetic/optional"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_TENANT_DB_DIR"
+    ]
+  },
+  {
+    "id": "C01-DISK_TENANT_DB_DIR-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_TENANT_DB_DIR": ""
+    },
+    "expected": {
+      "tenant_db_dir": null
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_TENANT_DB_DIR"
+    ]
+  },
+  {
+    "id": "C01-OPS_BOT_URL-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "OPS_BOT_URL": "http://127.0.0.1:9/ops_bot_url"
+    },
+    "expected": {
+      "ops_bot_url": "http://127.0.0.1:9/ops_bot_url"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "OPS_BOT_URL"
+    ]
+  },
+  {
+    "id": "C01-OPS_BOT_URL-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "OPS_BOT_URL": ""
+    },
+    "expected": {
+      "ops_bot_url": null
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "OPS_BOT_URL"
+    ]
+  },
+  {
+    "id": "C01-DISK_ADMIN_TOKEN-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_ADMIN_TOKEN": "synthetic-admin_token"
+    },
+    "expected": {
+      "admin_token": "synthetic-admin_token"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_ADMIN_TOKEN"
+    ]
+  },
+  {
+    "id": "C01-DISK_ADMIN_TOKEN-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_ADMIN_TOKEN": ""
+    },
+    "expected": {
+      "admin_token": null
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_ADMIN_TOKEN"
+    ]
+  },
+  {
+    "id": "C01-DISK_STRIPE_WEBHOOK_SECRET-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_STRIPE_WEBHOOK_SECRET": "synthetic-stripe_webhook_secret"
+    },
+    "expected": {
+      "stripe_webhook_secret": "synthetic-stripe_webhook_secret"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_STRIPE_WEBHOOK_SECRET"
+    ]
+  },
+  {
+    "id": "C01-DISK_STRIPE_WEBHOOK_SECRET-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_STRIPE_WEBHOOK_SECRET": ""
+    },
+    "expected": {
+      "stripe_webhook_secret": null
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_STRIPE_WEBHOOK_SECRET"
+    ]
+  },
+  {
+    "id": "C01-DISK_JWT_SIGNING_KEY-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_SIGNING_KEY": "synthetic-jwt_signing_key"
+    },
+    "expected": {
+      "jwt_signing_key": "synthetic-jwt_signing_key"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_SIGNING_KEY"
+    ]
+  },
+  {
+    "id": "C01-DISK_JWT_SIGNING_KEY-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_SIGNING_KEY": ""
+    },
+    "expected": {
+      "jwt_signing_key": null
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_SIGNING_KEY"
+    ]
+  },
+  {
+    "id": "C01-DISK_OAUTH_ISSUER-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_OAUTH_ISSUER": "http://127.0.0.1:9/oauth_issuer"
+    },
+    "expected": {
+      "oauth_issuer": "http://127.0.0.1:9/oauth_issuer"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_OAUTH_ISSUER"
+    ]
+  },
+  {
+    "id": "C01-DISK_OAUTH_ISSUER-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_OAUTH_ISSUER": ""
+    },
+    "expected": {
+      "oauth_issuer": null
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_OAUTH_ISSUER"
+    ]
+  },
+  {
+    "id": "C01-DISK_OAUTH_CLIENT_ID-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_OAUTH_CLIENT_ID": "http://127.0.0.1:9/oauth_client_id"
+    },
+    "expected": {
+      "oauth_client_id": "http://127.0.0.1:9/oauth_client_id"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_OAUTH_CLIENT_ID"
+    ]
+  },
+  {
+    "id": "C01-DISK_OAUTH_CLIENT_ID-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_OAUTH_CLIENT_ID": ""
+    },
+    "expected": {
+      "oauth_client_id": null
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_OAUTH_CLIENT_ID"
+    ]
+  },
+  {
+    "id": "C01-DISK_OAUTH_CLIENT_SECRET-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_OAUTH_CLIENT_SECRET": "synthetic-oauth_client_secret"
+    },
+    "expected": {
+      "oauth_client_secret": "synthetic-oauth_client_secret"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_OAUTH_CLIENT_SECRET"
+    ]
+  },
+  {
+    "id": "C01-DISK_OAUTH_CLIENT_SECRET-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_OAUTH_CLIENT_SECRET": ""
+    },
+    "expected": {
+      "oauth_client_secret": null
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_OAUTH_CLIENT_SECRET"
+    ]
+  },
+  {
+    "id": "C01-DISK_OAUTH_REDIRECT_URI-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_OAUTH_REDIRECT_URI": "http://127.0.0.1:9/oauth_redirect_uri"
+    },
+    "expected": {
+      "oauth_redirect_uri": "http://127.0.0.1:9/oauth_redirect_uri"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_OAUTH_REDIRECT_URI"
+    ]
+  },
+  {
+    "id": "C01-DISK_OAUTH_REDIRECT_URI-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_OAUTH_REDIRECT_URI": ""
+    },
+    "expected": {
+      "oauth_redirect_uri": null
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_OAUTH_REDIRECT_URI"
+    ]
+  },
+  {
+    "id": "C01-DISK_OAUTH_PUBLIC_BASE_URL-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_OAUTH_PUBLIC_BASE_URL": "http://127.0.0.1:9/oauth_public_base_url"
+    },
+    "expected": {
+      "oauth_public_base_url": "http://127.0.0.1:9/oauth_public_base_url"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_OAUTH_PUBLIC_BASE_URL"
+    ]
+  },
+  {
+    "id": "C01-DISK_OAUTH_PUBLIC_BASE_URL-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_OAUTH_PUBLIC_BASE_URL": ""
+    },
+    "expected": {
+      "oauth_public_base_url": null
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_OAUTH_PUBLIC_BASE_URL"
+    ]
+  },
+  {
+    "id": "C01-DISK_EMAIL_VERIFY_BASE_URL-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_EMAIL_VERIFY_BASE_URL": "http://127.0.0.1:9/email_verify_base_url"
+    },
+    "expected": {
+      "email_verify_base_url": "http://127.0.0.1:9/email_verify_base_url"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_EMAIL_VERIFY_BASE_URL"
+    ]
+  },
+  {
+    "id": "C01-DISK_EMAIL_VERIFY_BASE_URL-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_EMAIL_VERIFY_BASE_URL": ""
+    },
+    "expected": {
+      "email_verify_base_url": null
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_EMAIL_VERIFY_BASE_URL"
+    ]
+  },
+  {
+    "id": "C01-DISK_JWT_ISSUER-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_ISSUER": "http://127.0.0.1:9/jwt_issuer"
+    },
+    "expected": {
+      "jwt_issuer": "http://127.0.0.1:9/jwt_issuer"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_ISSUER"
+    ]
+  },
+  {
+    "id": "C01-DISK_JWT_ISSUER-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_ISSUER": ""
+    },
+    "expected": {
+      "jwt_issuer": null
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_ISSUER"
+    ]
+  },
+  {
+    "id": "C01-DISK_JWT_JWKS_URI-override",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_JWKS_URI": "http://127.0.0.1:9/jwt_jwks_uri"
+    },
+    "expected": {
+      "jwt_jwks_uri": "http://127.0.0.1:9/jwt_jwks_uri"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_JWKS_URI"
+    ]
+  },
+  {
+    "id": "C01-DISK_JWT_JWKS_URI-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_JWKS_URI": ""
+    },
+    "expected": {
+      "jwt_jwks_uri": null
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_JWKS_URI"
+    ]
+  },
+  {
+    "id": "C01-DISK_JWT_TTL_SECS-positive",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_TTL_SECS": "17"
+    },
+    "expected": {
+      "jwt_ttl_secs": 17
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_TTL_SECS"
+    ]
+  },
+  {
+    "id": "C01-DISK_JWT_TTL_SECS-zero",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_TTL_SECS": "0"
+    },
+    "expected": {
+      "jwt_ttl_secs": 0
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_TTL_SECS"
+    ]
+  },
+  {
+    "id": "C01-DISK_JWT_TTL_SECS-max",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_TTL_SECS": "18446744073709551615"
+    },
+    "expected": {
+      "jwt_ttl_secs": 18446744073709551615
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_TTL_SECS"
+    ]
+  },
+  {
+    "id": "C01-DISK_JWT_TTL_SECS-overflow",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_TTL_SECS": "18446744073709551616"
+    },
+    "expected": {
+      "jwt_ttl_secs": 86400
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_TTL_SECS"
+    ]
+  },
+  {
+    "id": "C01-DISK_JWT_TTL_SECS-invalid",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_TTL_SECS": "bad"
+    },
+    "expected": {
+      "jwt_ttl_secs": 86400
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_TTL_SECS"
+    ]
+  },
+  {
+    "id": "C01-DISK_JWT_TTL_SECS-negative",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_TTL_SECS": "-1"
+    },
+    "expected": {
+      "jwt_ttl_secs": 86400
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_TTL_SECS"
+    ]
+  },
+  {
+    "id": "C01-DISK_JWT_TTL_SECS-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_TTL_SECS": ""
+    },
+    "expected": {
+      "jwt_ttl_secs": 86400
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_TTL_SECS"
+    ]
+  },
+  {
+    "id": "C01-DISK_EMAIL_VERIFY_TTL_SECS-positive",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_EMAIL_VERIFY_TTL_SECS": "17"
+    },
+    "expected": {
+      "email_verify_ttl_secs": 17
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_EMAIL_VERIFY_TTL_SECS"
+    ]
+  },
+  {
+    "id": "C01-DISK_EMAIL_VERIFY_TTL_SECS-zero",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_EMAIL_VERIFY_TTL_SECS": "0"
+    },
+    "expected": {
+      "email_verify_ttl_secs": 0
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_EMAIL_VERIFY_TTL_SECS"
+    ]
+  },
+  {
+    "id": "C01-DISK_EMAIL_VERIFY_TTL_SECS-max",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_EMAIL_VERIFY_TTL_SECS": "18446744073709551615"
+    },
+    "expected": {
+      "email_verify_ttl_secs": 18446744073709551615
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_EMAIL_VERIFY_TTL_SECS"
+    ]
+  },
+  {
+    "id": "C01-DISK_EMAIL_VERIFY_TTL_SECS-overflow",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_EMAIL_VERIFY_TTL_SECS": "18446744073709551616"
+    },
+    "expected": {
+      "email_verify_ttl_secs": 86400
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_EMAIL_VERIFY_TTL_SECS"
+    ]
+  },
+  {
+    "id": "C01-DISK_EMAIL_VERIFY_TTL_SECS-invalid",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_EMAIL_VERIFY_TTL_SECS": "bad"
+    },
+    "expected": {
+      "email_verify_ttl_secs": 86400
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_EMAIL_VERIFY_TTL_SECS"
+    ]
+  },
+  {
+    "id": "C01-DISK_EMAIL_VERIFY_TTL_SECS-negative",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_EMAIL_VERIFY_TTL_SECS": "-1"
+    },
+    "expected": {
+      "email_verify_ttl_secs": 86400
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_EMAIL_VERIFY_TTL_SECS"
+    ]
+  },
+  {
+    "id": "C01-DISK_EMAIL_VERIFY_TTL_SECS-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_EMAIL_VERIFY_TTL_SECS": ""
+    },
+    "expected": {
+      "email_verify_ttl_secs": 86400
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_EMAIL_VERIFY_TTL_SECS"
+    ]
+  },
+  {
+    "id": "C01-ca-http",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_CA_MODE": "http"
+    },
+    "expected": {
+      "ca_mode": "Http",
+      "use_stub_ca": false,
+      "acl_allow_unsigned": false,
+      "register_node_mode": "Enrolled"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_CA_MODE"
+    ]
+  },
+  {
+    "id": "C01-ca-stub",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_CA_MODE": "stub"
+    },
+    "expected": {
+      "ca_mode": "Stub",
+      "use_stub_ca": true,
+      "acl_allow_unsigned": false,
+      "register_node_mode": "Open"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_CA_MODE"
+    ]
+  },
+  {
+    "id": "C01-ca-offline",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_CA_MODE": "offline"
+    },
+    "expected": {
+      "ca_mode": "Offline",
+      "use_stub_ca": false,
+      "acl_allow_unsigned": false,
+      "register_node_mode": "Enrolled"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_CA_MODE"
+    ]
+  },
+  {
+    "id": "C01-ca-STUB",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_CA_MODE": "STUB"
+    },
+    "expected": {
+      "ca_mode": "Stub",
+      "use_stub_ca": true,
+      "acl_allow_unsigned": false,
+      "register_node_mode": "Open"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_CA_MODE"
+    ]
+  },
+  {
+    "id": "C01-ca-invalid",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_CA_MODE": "bad"
+    },
+    "expected": {
+      "error_kind": "invalid",
+      "error_key": "DISK_CA_MODE"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_CA_MODE"
+    ]
+  },
+  {
+    "id": "C01-legacy-1",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_USE_STUB_CA": "1"
+    },
+    "expected": {
+      "ca_mode": "Stub",
+      "acl_allow_unsigned": true
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_USE_STUB_CA"
+    ]
+  },
+  {
+    "id": "C01-unsigned-1",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_ACL_ALLOW_UNSIGNED": "1"
+    },
+    "expected": {
+      "acl_allow_unsigned": true
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_ACL_ALLOW_UNSIGNED"
+    ]
+  },
+  {
+    "id": "C01-legacy-0",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_USE_STUB_CA": "0"
+    },
+    "expected": {
+      "ca_mode": "Http",
+      "acl_allow_unsigned": false
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_USE_STUB_CA"
+    ]
+  },
+  {
+    "id": "C01-unsigned-0",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_ACL_ALLOW_UNSIGNED": "0"
+    },
+    "expected": {
+      "acl_allow_unsigned": false
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_ACL_ALLOW_UNSIGNED"
+    ]
+  },
+  {
+    "id": "C01-legacy-true",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_USE_STUB_CA": "true"
+    },
+    "expected": {
+      "ca_mode": "Http",
+      "acl_allow_unsigned": false
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_USE_STUB_CA"
+    ]
+  },
+  {
+    "id": "C01-unsigned-true",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_ACL_ALLOW_UNSIGNED": "true"
+    },
+    "expected": {
+      "acl_allow_unsigned": false
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_ACL_ALLOW_UNSIGNED"
+    ]
+  },
+  {
+    "id": "C01-legacy-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_USE_STUB_CA": ""
+    },
+    "expected": {
+      "ca_mode": "Http",
+      "acl_allow_unsigned": false
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_USE_STUB_CA"
+    ]
+  },
+  {
+    "id": "C01-unsigned-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_ACL_ALLOW_UNSIGNED": ""
+    },
+    "expected": {
+      "acl_allow_unsigned": false
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_ACL_ALLOW_UNSIGNED"
+    ]
+  },
+  {
+    "id": "C01-legacy-offline-precedence",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_USE_STUB_CA": "1",
+      "DISK_CA_MODE": "offline"
+    },
+    "expected": {
+      "ca_mode": "Offline",
+      "use_stub_ca": false,
+      "acl_allow_unsigned": true
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_CA_MODE",
+      "DISK_USE_STUB_CA"
+    ]
+  },
+  {
+    "id": "C01-register-open",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_REGISTER_NODE_MODE": "open"
+    },
+    "expected": {
+      "register_node_mode": "Open"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_REGISTER_NODE_MODE"
+    ]
+  },
+  {
+    "id": "C01-register-enrolled",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_REGISTER_NODE_MODE": "enrolled"
+    },
+    "expected": {
+      "register_node_mode": "Enrolled"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_REGISTER_NODE_MODE"
+    ]
+  },
+  {
+    "id": "C01-register-disabled",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_REGISTER_NODE_MODE": "disabled"
+    },
+    "expected": {
+      "register_node_mode": "Disabled"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_REGISTER_NODE_MODE"
+    ]
+  },
+  {
+    "id": "C01-register-admin",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_REGISTER_NODE_MODE": "admin"
+    },
+    "expected": {
+      "register_node_mode": "Admin"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_REGISTER_NODE_MODE"
+    ]
+  },
+  {
+    "id": "C01-register-invalid",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_REGISTER_NODE_MODE": "bad"
+    },
+    "expected": {
+      "error_kind": "invalid",
+      "error_key": "DISK_REGISTER_NODE_MODE"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_REGISTER_NODE_MODE"
+    ]
+  },
+  {
+    "id": "C01-billing-disabled",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_BILLING_MODE": "disabled"
+    },
+    "expected": {
+      "billing_mode": "Disabled"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_BILLING_MODE"
+    ]
+  },
+  {
+    "id": "C01-billing-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_BILLING_MODE": ""
+    },
+    "expected": {
+      "billing_mode": "Disabled"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_BILLING_MODE"
+    ]
+  },
+  {
+    "id": "C01-billing-enforce",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_BILLING_MODE": "enforce"
+    },
+    "expected": {
+      "billing_mode": "Enforce"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_BILLING_MODE"
+    ]
+  },
+  {
+    "id": "C01-billing-local",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_BILLING_MODE": "local"
+    },
+    "expected": {
+      "billing_mode": "Enforce"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_BILLING_MODE"
+    ]
+  },
+  {
+    "id": "C01-billing-stripe",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_BILLING_MODE": "stripe"
+    },
+    "expected": {
+      "billing_mode": "Stripe"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_BILLING_MODE"
+    ]
+  },
+  {
+    "id": "C01-billing-invalid",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_BILLING_MODE": "bad"
+    },
+    "expected": {
+      "error_kind": "invalid",
+      "error_key": "DISK_BILLING_MODE"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_BILLING_MODE"
+    ]
+  },
+  {
+    "id": "C01-auth-disabled",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "disabled",
+      "DISK_JWT_SIGNING_KEY": "fixture-only-signing-material-32-bytes-long"
+    },
+    "expected": {
+      "auth_mode": "Disabled"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE",
+      "DISK_JWT_SIGNING_KEY"
+    ]
+  },
+  {
+    "id": "C01-auth-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "",
+      "DISK_JWT_SIGNING_KEY": "fixture-only-signing-material-32-bytes-long"
+    },
+    "expected": {
+      "auth_mode": "Disabled"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE",
+      "DISK_JWT_SIGNING_KEY"
+    ]
+  },
+  {
+    "id": "C01-auth-enforce",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "enforce",
+      "DISK_JWT_SIGNING_KEY": "fixture-only-signing-material-32-bytes-long"
+    },
+    "expected": {
+      "auth_mode": "Enforce"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE",
+      "DISK_JWT_SIGNING_KEY"
+    ]
+  },
+  {
+    "id": "C01-auth-local",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "local",
+      "DISK_JWT_SIGNING_KEY": "fixture-only-signing-material-32-bytes-long"
+    },
+    "expected": {
+      "auth_mode": "Enforce"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE",
+      "DISK_JWT_SIGNING_KEY"
+    ]
+  },
+  {
+    "id": "C01-auth-invalid",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "bad"
+    },
+    "expected": {
+      "error_kind": "invalid",
+      "error_key": "DISK_AUTH_MODE"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE"
+    ]
+  },
+  {
+    "id": "C01-auth-key-missing",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "enforce"
+    },
+    "expected": {
+      "error_kind": "missing",
+      "error_key": "DISK_JWT_SIGNING_KEY"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE"
+    ]
+  },
+  {
+    "id": "C01-auth-key-short",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "enforce",
+      "DISK_JWT_SIGNING_KEY": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "expected": {
+      "error_kind": "invalid",
+      "error_key": "DISK_JWT_SIGNING_KEY"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE",
+      "DISK_JWT_SIGNING_KEY"
+    ]
+  },
+  {
+    "id": "C01-auth-key-32",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "enforce",
+      "DISK_JWT_SIGNING_KEY": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "expected": {
+      "auth_mode": "Enforce"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE",
+      "DISK_JWT_SIGNING_KEY"
+    ]
+  },
+  {
+    "id": "C01-jwt-local",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_MODE": "local"
+    },
+    "expected": {
+      "jwt_mode": "Local"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_MODE"
+    ]
+  },
+  {
+    "id": "C01-jwt-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_MODE": ""
+    },
+    "expected": {
+      "jwt_mode": "Local"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_MODE"
+    ]
+  },
+  {
+    "id": "C01-jwt-auth_arcana",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_MODE": "auth_arcana"
+    },
+    "expected": {
+      "jwt_mode": "AuthArcana",
+      "jwt_issuer": "https://auth.arcanada.ai",
+      "jwt_jwks_uri": "https://auth.arcanada.ai/.well-known/jwks.json"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_MODE"
+    ]
+  },
+  {
+    "id": "C01-jwt-jwks",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_MODE": "jwks"
+    },
+    "expected": {
+      "jwt_mode": "AuthArcana",
+      "jwt_issuer": "https://auth.arcanada.ai",
+      "jwt_jwks_uri": "https://auth.arcanada.ai/.well-known/jwks.json"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_MODE"
+    ]
+  },
+  {
+    "id": "C01-jwt-oidc",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_MODE": "oidc"
+    },
+    "expected": {
+      "jwt_mode": "AuthArcana",
+      "jwt_issuer": "https://auth.arcanada.ai",
+      "jwt_jwks_uri": "https://auth.arcanada.ai/.well-known/jwks.json"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_MODE"
+    ]
+  },
+  {
+    "id": "C01-jwt-dual",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_MODE": "dual"
+    },
+    "expected": {
+      "jwt_mode": "Dual",
+      "jwt_issuer": "https://auth.arcanada.ai",
+      "jwt_jwks_uri": "https://auth.arcanada.ai/.well-known/jwks.json"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_MODE"
+    ]
+  },
+  {
+    "id": "C01-jwt-invalid",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_MODE": "bad"
+    },
+    "expected": {
+      "error_kind": "invalid",
+      "error_key": "DISK_JWT_MODE"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_MODE"
+    ]
+  },
+  {
+    "id": "C01-jwt-issuer-fallback",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_OAUTH_ISSUER": "http://127.0.0.1:9/issuer/"
+    },
+    "expected": {
+      "jwt_issuer": "http://127.0.0.1:9/issuer/",
+      "jwt_jwks_uri": "http://127.0.0.1:9/issuer/.well-known/jwks.json"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_OAUTH_ISSUER"
+    ]
+  },
+  {
+    "id": "C01-jwt-explicit-precedence",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_JWT_ISSUER": "http://127.0.0.1:9/explicit",
+      "DISK_OAUTH_ISSUER": "http://127.0.0.1:9/fallback",
+      "DISK_JWT_JWKS_URI": "http://127.0.0.1:9/custom"
+    },
+    "expected": {
+      "jwt_issuer": "http://127.0.0.1:9/explicit",
+      "jwt_jwks_uri": "http://127.0.0.1:9/custom"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_JWT_ISSUER",
+      "DISK_JWT_JWKS_URI",
+      "DISK_OAUTH_ISSUER"
+    ]
+  },
+  {
+    "id": "C01-oauth-actual-mode",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "enforce",
+      "DISK_JWT_SIGNING_KEY": "fixture-only-signing-material-32-bytes-long",
+      "DISK_OAUTH_MODE": "auth_arcana",
+      "DISK_OAUTH_ISSUER": "http://127.0.0.1:9/issuer",
+      "DISK_OAUTH_CLIENT_ID": "fixture-client",
+      "DISK_OAUTH_CLIENT_SECRET": "fixture-client-secret",
+      "DISK_OAUTH_REDIRECT_URI": "http://127.0.0.1:9/callback"
+    },
+    "expected": {
+      "oauth_mode": "AuthArcana",
+      "oauth_client_id": "fixture-client",
+      "oauth_client_secret": "fixture-client-secret"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE",
+      "DISK_JWT_SIGNING_KEY",
+      "DISK_OAUTH_CLIENT_ID",
+      "DISK_OAUTH_CLIENT_SECRET",
+      "DISK_OAUTH_ISSUER",
+      "DISK_OAUTH_MODE",
+      "DISK_OAUTH_REDIRECT_URI"
+    ]
+  },
+  {
+    "id": "C01-oauth-oidc-alias",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "enforce",
+      "DISK_JWT_SIGNING_KEY": "fixture-only-signing-material-32-bytes-long",
+      "DISK_OAUTH_MODE": "oidc",
+      "DISK_OAUTH_ISSUER": "http://127.0.0.1:9/issuer",
+      "DISK_OAUTH_CLIENT_ID": "fixture-client",
+      "DISK_OAUTH_CLIENT_SECRET": "fixture-client-secret",
+      "DISK_OAUTH_REDIRECT_URI": "http://127.0.0.1:9/callback"
+    },
+    "expected": {
+      "oauth_mode": "AuthArcana"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE",
+      "DISK_JWT_SIGNING_KEY",
+      "DISK_OAUTH_CLIENT_ID",
+      "DISK_OAUTH_CLIENT_SECRET",
+      "DISK_OAUTH_ISSUER",
+      "DISK_OAUTH_MODE",
+      "DISK_OAUTH_REDIRECT_URI"
+    ]
+  },
+  {
+    "id": "C01-oauth-missing-DISK_OAUTH_ISSUER",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "enforce",
+      "DISK_JWT_SIGNING_KEY": "fixture-only-signing-material-32-bytes-long",
+      "DISK_OAUTH_MODE": "auth_arcana",
+      "DISK_OAUTH_CLIENT_ID": "fixture-client",
+      "DISK_OAUTH_CLIENT_SECRET": "fixture-client-secret",
+      "DISK_OAUTH_REDIRECT_URI": "http://127.0.0.1:9/callback"
+    },
+    "expected": {
+      "error_kind": "missing",
+      "error_key": "DISK_OAUTH_ISSUER"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE",
+      "DISK_JWT_SIGNING_KEY",
+      "DISK_OAUTH_CLIENT_ID",
+      "DISK_OAUTH_CLIENT_SECRET",
+      "DISK_OAUTH_ISSUER",
+      "DISK_OAUTH_MODE",
+      "DISK_OAUTH_REDIRECT_URI"
+    ]
+  },
+  {
+    "id": "C01-oauth-missing-DISK_OAUTH_CLIENT_ID",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "enforce",
+      "DISK_JWT_SIGNING_KEY": "fixture-only-signing-material-32-bytes-long",
+      "DISK_OAUTH_MODE": "auth_arcana",
+      "DISK_OAUTH_ISSUER": "http://127.0.0.1:9/issuer",
+      "DISK_OAUTH_CLIENT_SECRET": "fixture-client-secret",
+      "DISK_OAUTH_REDIRECT_URI": "http://127.0.0.1:9/callback"
+    },
+    "expected": {
+      "error_kind": "missing",
+      "error_key": "DISK_OAUTH_CLIENT_ID"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE",
+      "DISK_JWT_SIGNING_KEY",
+      "DISK_OAUTH_CLIENT_ID",
+      "DISK_OAUTH_CLIENT_SECRET",
+      "DISK_OAUTH_ISSUER",
+      "DISK_OAUTH_MODE",
+      "DISK_OAUTH_REDIRECT_URI"
+    ]
+  },
+  {
+    "id": "C01-oauth-missing-DISK_OAUTH_CLIENT_SECRET",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "enforce",
+      "DISK_JWT_SIGNING_KEY": "fixture-only-signing-material-32-bytes-long",
+      "DISK_OAUTH_MODE": "auth_arcana",
+      "DISK_OAUTH_ISSUER": "http://127.0.0.1:9/issuer",
+      "DISK_OAUTH_CLIENT_ID": "fixture-client",
+      "DISK_OAUTH_REDIRECT_URI": "http://127.0.0.1:9/callback"
+    },
+    "expected": {
+      "error_kind": "missing",
+      "error_key": "DISK_OAUTH_CLIENT_SECRET"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE",
+      "DISK_JWT_SIGNING_KEY",
+      "DISK_OAUTH_CLIENT_ID",
+      "DISK_OAUTH_CLIENT_SECRET",
+      "DISK_OAUTH_ISSUER",
+      "DISK_OAUTH_MODE",
+      "DISK_OAUTH_REDIRECT_URI"
+    ]
+  },
+  {
+    "id": "C01-oauth-missing-DISK_OAUTH_REDIRECT_URI",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "enforce",
+      "DISK_JWT_SIGNING_KEY": "fixture-only-signing-material-32-bytes-long",
+      "DISK_OAUTH_MODE": "auth_arcana",
+      "DISK_OAUTH_ISSUER": "http://127.0.0.1:9/issuer",
+      "DISK_OAUTH_CLIENT_ID": "fixture-client",
+      "DISK_OAUTH_CLIENT_SECRET": "fixture-client-secret"
+    },
+    "expected": {
+      "error_kind": "missing",
+      "error_key": "DISK_OAUTH_REDIRECT_URI"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE",
+      "DISK_JWT_SIGNING_KEY",
+      "DISK_OAUTH_CLIENT_ID",
+      "DISK_OAUTH_CLIENT_SECRET",
+      "DISK_OAUTH_ISSUER",
+      "DISK_OAUTH_MODE",
+      "DISK_OAUTH_REDIRECT_URI"
+    ]
+  },
+  {
+    "id": "C01-oauth-auth-disabled",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_OAUTH_MODE": "stub"
+    },
+    "expected": {
+      "error_kind": "invalid",
+      "error_key": "DISK_OAUTH_MODE"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_OAUTH_MODE"
+    ]
+  },
+  {
+    "id": "C01-oauth-invalid",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_OAUTH_MODE": "bad"
+    },
+    "expected": {
+      "error_kind": "invalid",
+      "error_key": "DISK_OAUTH_MODE"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_OAUTH_MODE"
+    ]
+  },
+  {
+    "id": "C01-oauth-stub-url-missing",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "enforce",
+      "DISK_JWT_SIGNING_KEY": "fixture-only-signing-material-32-bytes-long",
+      "DISK_OAUTH_MODE": "stub"
+    },
+    "expected": {
+      "error_kind": "invalid",
+      "error_key": "DISK_OAUTH_PUBLIC_BASE_URL"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE",
+      "DISK_JWT_SIGNING_KEY",
+      "DISK_OAUTH_MODE"
+    ]
+  },
+  {
+    "id": "C01-oauth-stub-DISK_OAUTH_PUBLIC_BASE_URL",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "enforce",
+      "DISK_JWT_SIGNING_KEY": "fixture-only-signing-material-32-bytes-long",
+      "DISK_OAUTH_MODE": "stub",
+      "DISK_OAUTH_PUBLIC_BASE_URL": "http://127.0.0.1:9/stub"
+    },
+    "expected": {
+      "oauth_mode": "Stub"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE",
+      "DISK_JWT_SIGNING_KEY",
+      "DISK_OAUTH_MODE",
+      "DISK_OAUTH_PUBLIC_BASE_URL"
+    ]
+  },
+  {
+    "id": "C01-oauth-stub-DISK_OAUTH_REDIRECT_URI",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "enforce",
+      "DISK_JWT_SIGNING_KEY": "fixture-only-signing-material-32-bytes-long",
+      "DISK_OAUTH_MODE": "stub",
+      "DISK_OAUTH_REDIRECT_URI": "http://127.0.0.1:9/stub"
+    },
+    "expected": {
+      "oauth_mode": "Stub"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE",
+      "DISK_JWT_SIGNING_KEY",
+      "DISK_OAUTH_MODE",
+      "DISK_OAUTH_REDIRECT_URI"
+    ]
+  },
+  {
+    "id": "C01-oauth-dev-DISK_OAUTH_PUBLIC_BASE_URL",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "enforce",
+      "DISK_JWT_SIGNING_KEY": "fixture-only-signing-material-32-bytes-long",
+      "DISK_OAUTH_MODE": "dev",
+      "DISK_OAUTH_PUBLIC_BASE_URL": "http://127.0.0.1:9/stub"
+    },
+    "expected": {
+      "oauth_mode": "Stub"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE",
+      "DISK_JWT_SIGNING_KEY",
+      "DISK_OAUTH_MODE",
+      "DISK_OAUTH_PUBLIC_BASE_URL"
+    ]
+  },
+  {
+    "id": "C01-oauth-dev-DISK_OAUTH_REDIRECT_URI",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "enforce",
+      "DISK_JWT_SIGNING_KEY": "fixture-only-signing-material-32-bytes-long",
+      "DISK_OAUTH_MODE": "dev",
+      "DISK_OAUTH_REDIRECT_URI": "http://127.0.0.1:9/stub"
+    },
+    "expected": {
+      "oauth_mode": "Stub"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE",
+      "DISK_JWT_SIGNING_KEY",
+      "DISK_OAUTH_MODE",
+      "DISK_OAUTH_REDIRECT_URI"
+    ]
+  },
+  {
+    "id": "C01-oauth-disabled-disabled",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_OAUTH_MODE": "disabled"
+    },
+    "expected": {
+      "oauth_mode": "Disabled"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_OAUTH_MODE"
+    ]
+  },
+  {
+    "id": "C01-oauth-disabled-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_OAUTH_MODE": ""
+    },
+    "expected": {
+      "oauth_mode": "Disabled"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_OAUTH_MODE"
+    ]
+  },
+  {
+    "id": "C01-email-auth-disabled",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_EMAIL_VERIFY_MODE": "stub"
+    },
+    "expected": {
+      "error_kind": "invalid",
+      "error_key": "DISK_EMAIL_VERIFY_MODE"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_EMAIL_VERIFY_MODE"
+    ]
+  },
+  {
+    "id": "C01-email-url-missing",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "enforce",
+      "DISK_JWT_SIGNING_KEY": "fixture-only-signing-material-32-bytes-long",
+      "DISK_EMAIL_VERIFY_MODE": "stub"
+    },
+    "expected": {
+      "error_kind": "invalid",
+      "error_key": "DISK_EMAIL_VERIFY_BASE_URL"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE",
+      "DISK_EMAIL_VERIFY_MODE",
+      "DISK_JWT_SIGNING_KEY"
+    ]
+  },
+  {
+    "id": "C01-email-invalid",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_EMAIL_VERIFY_MODE": "bad"
+    },
+    "expected": {
+      "error_kind": "invalid",
+      "error_key": "DISK_EMAIL_VERIFY_MODE"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_EMAIL_VERIFY_MODE"
+    ]
+  },
+  {
+    "id": "C01-email-stub",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "enforce",
+      "DISK_JWT_SIGNING_KEY": "fixture-only-signing-material-32-bytes-long",
+      "DISK_EMAIL_VERIFY_MODE": "stub",
+      "DISK_EMAIL_VERIFY_BASE_URL": "http://127.0.0.1:9/verify"
+    },
+    "expected": {
+      "email_verify_mode": "Stub",
+      "email_verify_base_url": "http://127.0.0.1:9/verify"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE",
+      "DISK_EMAIL_VERIFY_BASE_URL",
+      "DISK_EMAIL_VERIFY_MODE",
+      "DISK_JWT_SIGNING_KEY"
+    ]
+  },
+  {
+    "id": "C01-email-dev",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "enforce",
+      "DISK_JWT_SIGNING_KEY": "fixture-only-signing-material-32-bytes-long",
+      "DISK_EMAIL_VERIFY_MODE": "dev",
+      "DISK_EMAIL_VERIFY_BASE_URL": "http://127.0.0.1:9/verify"
+    },
+    "expected": {
+      "email_verify_mode": "Stub",
+      "email_verify_base_url": "http://127.0.0.1:9/verify"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_AUTH_MODE",
+      "DISK_EMAIL_VERIFY_BASE_URL",
+      "DISK_EMAIL_VERIFY_MODE",
+      "DISK_JWT_SIGNING_KEY"
+    ]
+  },
+  {
+    "id": "C01-email-disabled-disabled",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_EMAIL_VERIFY_MODE": "disabled"
+    },
+    "expected": {
+      "email_verify_mode": "Disabled"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_EMAIL_VERIFY_MODE"
+    ]
+  },
+  {
+    "id": "C01-email-disabled-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_EMAIL_VERIFY_MODE": ""
+    },
+    "expected": {
+      "email_verify_mode": "Disabled"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_EMAIL_VERIFY_MODE"
+    ]
+  },
+  {
+    "id": "C01-share-roots",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_SHARE_ROOTS": " alpha:/synthetic/one , ,beta:/synthetic/two "
+    },
+    "expected": {
+      "share_roots": {
+        "alpha": "/synthetic/one",
+        "beta": "/synthetic/two"
+      }
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_SHARE_ROOTS"
+    ]
+  },
+  {
+    "id": "C01-share-empty",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_SHARE_ROOTS": ""
+    },
+    "expected": {
+      "share_roots": {}
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_SHARE_ROOTS"
+    ]
+  },
+  {
+    "id": "C01-share-invalid-0",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_SHARE_ROOTS": "missing-separator"
+    },
+    "expected": {
+      "error_kind": "invalid",
+      "error_key": "DISK_SHARE_ROOTS"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_SHARE_ROOTS"
+    ]
+  },
+  {
+    "id": "C01-share-invalid-1",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_SHARE_ROOTS": ":/synthetic/one"
+    },
+    "expected": {
+      "error_kind": "invalid",
+      "error_key": "DISK_SHARE_ROOTS"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_SHARE_ROOTS"
+    ]
+  },
+  {
+    "id": "C01-share-invalid-2",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_SHARE_ROOTS": "alpha:relative"
+    },
+    "expected": {
+      "error_kind": "invalid",
+      "error_key": "DISK_SHARE_ROOTS"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_SHARE_ROOTS"
+    ]
+  },
+  {
+    "id": "C01-share-duplicate-current-behavior",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_SHARE_ROOTS": "a:/synthetic/one,a:/synthetic/two"
+    },
+    "expected": {
+      "share_roots": {
+        "a": "/synthetic/two"
+      }
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_SHARE_ROOTS"
+    ]
+  },
+  {
+    "id": "C01-email-log",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_AUTH_MODE": "enforce",
+      "DISK_JWT_SIGNING_KEY": "fixture-only-signing-material-32-bytes-long",
+      "DISK_EMAIL_VERIFY_MODE": "log"
+    },
+    "expected": {
+      "email_verify_mode": "Log",
+      "email_verify_base_url": null
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_EMAIL_VERIFY_MODE"
+    ]
+  },
+  {
+    "id": "C01-email-log-auth-disabled",
+    "env": {
+      "DISK_DB_PATH": "/synthetic/config-probe/db_path",
+      "DISK_SYNC_ROOT": "/synthetic/config-probe/sync_root",
+      "DISK_TLS_CERT_PATH": "/synthetic/config-probe/tls_cert_path",
+      "DISK_TLS_KEY_PATH": "/synthetic/config-probe/tls_key_path",
+      "DISK_TLS_CA_PATH": "/synthetic/config-probe/tls_ca_path",
+      "DISK_ACL_YAML_PATH": "/synthetic/config-probe/acl_yaml_path",
+      "DISK_EMAIL_VERIFY_MODE": "log"
+    },
+    "expected": {
+      "error_kind": "invalid",
+      "error_key": "DISK_EMAIL_VERIFY_MODE"
+    },
+    "reader": "crates/disk-server/src/config.rs",
+    "keys": [
+      "DISK_EMAIL_VERIFY_MODE",
+      "DISK_AUTH_MODE"
+    ]
+  }
+]

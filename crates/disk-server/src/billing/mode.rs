@@ -54,3 +54,7 @@ mod tests {
         assert_eq!(BillingMode::parse("stripe").unwrap(), BillingMode::Stripe);
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "mode_env_canary.rs"]
+mod env_canary;
