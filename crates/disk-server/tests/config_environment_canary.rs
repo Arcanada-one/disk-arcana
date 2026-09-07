@@ -67,7 +67,7 @@ fn verifier_rejects_zero_selected_child_tests() {
 }
 
 #[test]
-#[should_panic(expected = "configuration probe")]
+#[should_panic(expected = "configuration probe negative-wrong-field:")]
 fn verifier_rejects_wrong_field_expectation() {
     env_probe::run(
         "config_probe_child",
