@@ -1,7 +1,6 @@
 //! C04 test-only access to the actual private telemetry reader.
-#[path = "../../../../test-support/env_probe.rs"]
-mod env_probe;
 use super::TelemetryRuntimeConfig;
+use crate::config_env_probe as env_probe;
 use serde_json::json;
 
 #[test]

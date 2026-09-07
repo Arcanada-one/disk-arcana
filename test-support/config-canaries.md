@@ -16,7 +16,9 @@ Run with `--nocapture` to retain each `CONFIG_PROBE_CASE_OK <id>` association.
 
 Server and storage integration tests call their public constructors. Telemetry
 and billing tests are cfg(test,Linux) children of the actual private module, so
-production visibility and dependency architecture remain unchanged. There is no
+production visibility and dependency architecture remain unchanged. These two
+modules share one private cfg(test,Linux) helper at the library root; integration
+test binaries include their own independently compiled helper. There is no
 copied parser or alternate validator. `config-canary-map.json` binds fixture IDs,
 keys and readers. Default URLs are compared as strings only, never contacted.
 The `/synthetic/config-probe` path literals are returned by the config parser;

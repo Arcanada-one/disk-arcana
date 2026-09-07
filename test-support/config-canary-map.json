@@ -469,6 +469,11 @@
       "verifier_rejects_zero_selected_child_tests",
       "verifier_rejects_wrong_field_expectation"
     ],
-    "runtime_status": "NOT_MEASURED"
+    "runtime_status": "NOT_MEASURED",
+    "compilation_owners": {
+      "disk-server-libtest": "crate::config_env_probe, declared once in crates/disk-server/src/lib.rs under cfg(test,Linux)",
+      "disk-server-config-integration": "independent integration executable env_probe module",
+      "disk-storage-config-integration": "independent integration executable env_probe module"
+    }
   }
 }

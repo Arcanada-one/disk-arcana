@@ -1,8 +1,7 @@
 //! C04 test-only access to the actual private billing env reader.
-#[path = "../../../../test-support/env_probe.rs"]
-mod env_probe;
 use super::default_plan_tier_from_env;
 use crate::config::ConfigError;
+use crate::config_env_probe as env_probe;
 use serde_json::json;
 
 #[test]
