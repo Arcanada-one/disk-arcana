@@ -13,10 +13,15 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
+# Route to the existing public Default-group runner with root/current-user-owned
+# toolchain ancestry. The generic Linux pool also includes ci-isolated on DEVS,
+# whose filesystem root belongs to another account and fails our ownership gate.
+# Do not weaken that gate or use the private arcana-prod-ci group. One eligible
+# runner serializes this CI queue; cold isolated toolchain downloads still apply.
 jobs:
   personal-provider:
     name: Personal provider foundation (Rust 1.97.1)
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Linux, X64, arcana-dbs]
     timeout-minutes: 20
     env:
       CARGO_BUILD_JOBS: 2
@@ -45,7 +50,7 @@ jobs:
 
   lint:
     name: Lint (fmt + clippy + audit + deny)
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Linux, X64, arcana-dbs]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Isolate Rust state for this job
@@ -205,7 +210,7 @@ jobs:
 
   test:
     name: Test (linux)
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Linux, X64, arcana-dbs]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Isolate Rust state for this job
@@ -259,7 +264,7 @@ jobs:
 
   fuzz-smoke:
     name: Fuzz smoke (DISK-0012, 80s)
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Linux, X64, arcana-dbs]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Isolate Rust state for this job
@@ -326,7 +331,7 @@ jobs:
             build_kind: native
           - target: aarch64-unknown-linux-gnu
             build_kind: aarch64
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Linux, X64, arcana-dbs]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Isolate Rust state for this job
