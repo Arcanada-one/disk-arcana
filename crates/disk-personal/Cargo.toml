@@ -1,0 +1,43 @@
+[package]
+name = "disk-personal"
+version.workspace = true
+edition.workspace = true
+rust-version = "1.97.1"
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "Synthetic-only immutable provider foundation; personal runtime is unavailable"
+
+[features]
+default = []
+synthetic-fixtures = []
+
+[[bin]]
+name = "disk-arcana-personal"
+path = "src/main.rs"
+
+[[bin]]
+name = "disk-personal-fixture-worker"
+path = "src/bin/disk-personal-fixture-worker.rs"
+required-features = ["synthetic-fixtures"]
+
+[dependencies]
+sqlx.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+sha2 = "=0.10.9"
+uuid = "=1.24.0"
+rustix = { version = "=1.1.4", features = ["fs", "process"] }
+
+[dev-dependencies]
+tempfile = "=3.27.0"
+
+[[test]]
+name = "provider_integrity"
+required-features = ["synthetic-fixtures"]
+
+[[test]]
+name = "provider_crash"
+required-features = ["synthetic-fixtures"]
