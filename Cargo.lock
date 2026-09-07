@@ -1742,6 +1742,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "disk-personal"
+version = "0.1.0"
+dependencies = [
+ "rustix 1.1.4",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "disk-proto"
 version = "0.1.0"
 dependencies = [

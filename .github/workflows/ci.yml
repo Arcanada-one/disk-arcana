@@ -14,6 +14,30 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  personal-provider:
+    name: Personal provider foundation (Rust 1.97.1)
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: "1.97.1"
+          components: rustfmt, clippy
+      - name: Verify the synthetic foundation and production refusal
+        run: |
+          set -euo pipefail
+          source scripts/ci-ensure-cc.sh
+          export PERSONAL_CARGO_BIN="$(rustup which --toolchain 1.97.1 cargo)"
+          export PERSONAL_RUSTC_BIN="$(rustup which --toolchain 1.97.1 rustc)"
+          export PATH="$(dirname "$PERSONAL_CARGO_BIN"):$PATH"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/personal-provider-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          bash scripts/test-personal-provider.sh
+
   lint:
     name: Lint (fmt + clippy + audit + deny)
     runs-on: [self-hosted, Linux, X64]
