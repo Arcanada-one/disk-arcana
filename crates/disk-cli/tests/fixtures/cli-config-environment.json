@@ -1,0 +1,192 @@
+[
+  {
+    "id": "absent-defaults",
+    "env": {},
+    "expected": {
+      "api_override": null,
+      "token_override": null,
+      "api_base": "http://127.0.0.1:9446",
+      "token": null,
+      "token_error": "set --token or DISK_ACCESS_TOKEN (dashboard login JWT)"
+    }
+  },
+  {
+    "id": "env-values",
+    "env": {
+      "DISK_API_BASE": "http://127.0.0.1:9/api",
+      "DISK_ACCESS_TOKEN": "fixture-env"
+    },
+    "expected": {
+      "api_override": null,
+      "token_override": null,
+      "api_base": "http://127.0.0.1:9/api",
+      "token": "fixture-env",
+      "token_error": null
+    }
+  },
+  {
+    "id": "env-trailing-slashes",
+    "env": {
+      "DISK_API_BASE": "http://127.0.0.1:9/api////"
+    },
+    "expected": {
+      "api_override": null,
+      "token_override": null,
+      "api_base": "http://127.0.0.1:9/api",
+      "token": null,
+      "token_error": "set --token or DISK_ACCESS_TOKEN (dashboard login JWT)"
+    }
+  },
+  {
+    "id": "env-empty-base",
+    "env": {
+      "DISK_API_BASE": ""
+    },
+    "expected": {
+      "api_override": null,
+      "token_override": null,
+      "api_base": "",
+      "token": null,
+      "token_error": "set --token or DISK_ACCESS_TOKEN (dashboard login JWT)"
+    }
+  },
+  {
+    "id": "env-slash-only-base",
+    "env": {
+      "DISK_API_BASE": "///"
+    },
+    "expected": {
+      "api_override": null,
+      "token_override": null,
+      "api_base": "",
+      "token": null,
+      "token_error": "set --token or DISK_ACCESS_TOKEN (dashboard login JWT)"
+    }
+  },
+  {
+    "id": "env-whitespace-preserved",
+    "env": {
+      "DISK_API_BASE": " http://127.0.0.1:9/api/ ",
+      "DISK_ACCESS_TOKEN": " "
+    },
+    "expected": {
+      "api_override": null,
+      "token_override": null,
+      "api_base": " http://127.0.0.1:9/api/ ",
+      "token": " ",
+      "token_error": null
+    }
+  },
+  {
+    "id": "explicit-precedence",
+    "env": {
+      "DISK_API_BASE": "http://127.0.0.1:9/env",
+      "DISK_ACCESS_TOKEN": "fixture-env"
+    },
+    "expected": {
+      "api_override": "http://127.0.0.1:9/argument/",
+      "token_override": "fixture-argument",
+      "api_base": "http://127.0.0.1:9/argument",
+      "token": "fixture-argument",
+      "token_error": null
+    }
+  },
+  {
+    "id": "empty-explicit-base",
+    "env": {
+      "DISK_API_BASE": "http://127.0.0.1:9/env"
+    },
+    "expected": {
+      "api_override": "",
+      "token_override": null,
+      "api_base": "",
+      "token": null,
+      "token_error": "set --token or DISK_ACCESS_TOKEN (dashboard login JWT)"
+    }
+  },
+  {
+    "id": "explicit-base-without-env",
+    "env": {},
+    "expected": {
+      "api_override": "http://127.0.0.1:9/argument///",
+      "token_override": null,
+      "api_base": "http://127.0.0.1:9/argument",
+      "token": null,
+      "token_error": "set --token or DISK_ACCESS_TOKEN (dashboard login JWT)"
+    }
+  },
+  {
+    "id": "explicit-slash-only-base",
+    "env": {},
+    "expected": {
+      "api_override": "///",
+      "token_override": null,
+      "api_base": "",
+      "token": null,
+      "token_error": "set --token or DISK_ACCESS_TOKEN (dashboard login JWT)"
+    }
+  },
+  {
+    "id": "env-empty-token",
+    "env": {
+      "DISK_ACCESS_TOKEN": ""
+    },
+    "expected": {
+      "api_override": null,
+      "token_override": null,
+      "api_base": "http://127.0.0.1:9446",
+      "token": null,
+      "token_error": "set --token or DISK_ACCESS_TOKEN (dashboard login JWT)"
+    }
+  },
+  {
+    "id": "empty-explicit-token",
+    "env": {
+      "DISK_ACCESS_TOKEN": "fixture-env"
+    },
+    "expected": {
+      "api_override": null,
+      "token_override": "",
+      "api_base": "http://127.0.0.1:9446",
+      "token": null,
+      "token_error": "set --token or DISK_ACCESS_TOKEN (dashboard login JWT)"
+    }
+  },
+  {
+    "id": "explicit-token-without-env",
+    "env": {},
+    "expected": {
+      "api_override": null,
+      "token_override": "fixture-argument",
+      "api_base": "http://127.0.0.1:9446",
+      "token": "fixture-argument",
+      "token_error": null
+    }
+  },
+  {
+    "id": "explicit-token-over-empty-env",
+    "env": {
+      "DISK_ACCESS_TOKEN": ""
+    },
+    "expected": {
+      "api_override": null,
+      "token_override": "fixture-argument",
+      "api_base": "http://127.0.0.1:9446",
+      "token": "fixture-argument",
+      "token_error": null
+    }
+  },
+  {
+    "id": "explicit-token-whitespace",
+    "env": {
+      "DISK_ACCESS_TOKEN": "fixture-env"
+    },
+    "expected": {
+      "api_override": null,
+      "token_override": " ",
+      "api_base": "http://127.0.0.1:9446",
+      "token": " ",
+      "token_error": null
+    }
+  }
+]
