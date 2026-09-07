@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Offline fixtures: no network, toolchain installation or runner-wide writes."""
 import importlib.util
+import hashlib
 import os
 from pathlib import Path
 import tempfile
@@ -51,16 +52,20 @@ class IsolationTest(unittest.TestCase):
         os.environ['PATH'] = ''
         self.prepare()
 
-    def test_no_existing_rustup_fails_without_creating_state(self):
+    def test_no_existing_rustup_uses_pinned_fallback(self):
         self.executable.unlink()
-        with self.assertRaisesRegex(ValueError, 'no installer fallback'):
-            self.prepare()
-        self.assertEqual(list(self.root.glob('disk-rust.*')), [])
+        with patch.object(isolation, 'bootstrap', side_effect=ValueError('fallback reached')) as fallback:
+            with self.assertRaisesRegex(ValueError, 'fallback reached'):
+                self.prepare()
+            self.assertEqual(fallback.call_count, 1)
 
-    def test_world_writable_existing_rustup_is_rejected(self):
+    def test_world_writable_existing_rustup_is_rejected_before_fallback(self):
         self.executable.chmod(0o777)
-        with self.assertRaisesRegex(ValueError, 'no installer fallback'):
-            self.prepare()
+        with patch.object(isolation, 'bootstrap', side_effect=ValueError('fallback reached')):
+            with self.assertRaisesRegex(ValueError, 'fallback reached'):
+                self.prepare()
+        for root in self.root.glob('disk-rust.*'):
+            self.assertFalse((root / 'cargo/bin/rustup').exists())
 
     def test_each_prepare_uses_unique_homes(self):
         first = self.prepare()
@@ -112,6 +117,56 @@ class IsolationTest(unittest.TestCase):
         with patch.object(isolation.subprocess, 'check_output', return_value=str(self.home)):
             with self.assertRaisesRegex(ValueError, 'different home'):
                 isolation.verify('1.97.1')
+
+    def bootstrap_env(self):
+        root = self.root / 'bootstrap'
+        root.mkdir(mode=0o700)
+        env = dict(os.environ, CARGO_HOME=str(root / 'cargo'), RUSTUP_HOME=str(root / 'rustup'))
+        return root, env
+
+    def test_bootstrap_rejects_unsupported_host_before_download(self):
+        root, env = self.bootstrap_env()
+        with patch.object(isolation.platform, 'system', return_value='Darwin'), patch.object(isolation.subprocess, 'run') as run:
+            with self.assertRaisesRegex(ValueError, 'only Linux x86_64'):
+                isolation.bootstrap(root, env)
+            run.assert_not_called()
+
+    def test_bootstrap_digest_mismatch_never_executes_installer(self):
+        root, env = self.bootstrap_env()
+        def download(_args, **_kwargs):
+            (root / 'rustup-init').write_bytes(b'untrusted bytes')
+        with patch.object(isolation.platform, 'system', return_value='Linux'), patch.object(isolation.platform, 'machine', return_value='x86_64'), patch.object(isolation.subprocess, 'run', side_effect=download) as run:
+            with self.assertRaisesRegex(ValueError, 'SHA256 mismatch'):
+                isolation.bootstrap(root, env)
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual((root / 'rustup-init').stat().st_mode & 0o111, 0)
+
+    def test_bootstrap_verified_bytes_exact_flags_and_owned_destinations(self):
+        root, env = self.bootstrap_env()
+        payload = b'fixture bytes, never executed'
+        calls = []
+        def command(args, **kwargs):
+            calls.append(args)
+            self.assertEqual(kwargs['env']['HOME'], str(self.home))
+            self.assertEqual(kwargs['cwd'], root)
+            self.assertTrue(Path(kwargs['env']['CARGO_HOME']).is_relative_to(root))
+            self.assertTrue(Path(kwargs['env']['RUSTUP_HOME']).is_relative_to(root))
+            self.assertTrue(kwargs['check'])
+            self.assertLessEqual(kwargs['timeout'], 150)
+            if args[0] == 'curl':
+                self.assertEqual(args[1], '--disable')
+                self.assertEqual(args[-1], isolation.RUSTUP_INIT_URL)
+                self.assertIn('--max-filesize', args)
+                (root / 'rustup-init').write_bytes(payload)
+            else:
+                self.assertEqual(args, [str(root / 'rustup-init'), '--no-modify-path', '--default-toolchain', 'none', '--profile', 'minimal', '-y'])
+                binary = Path(env['CARGO_HOME']) / 'bin/rustup'
+                binary.parent.mkdir(parents=True)
+                binary.write_bytes(payload)
+                binary.chmod(0o700)
+        with patch.object(isolation.platform, 'system', return_value='Linux'), patch.object(isolation.platform, 'machine', return_value='x86_64'), patch.object(isolation, 'RUSTUP_INIT_SHA256', hashlib.sha256(payload).hexdigest()), patch.object(isolation.subprocess, 'run', side_effect=command):
+            isolation.bootstrap(root, env)
+        self.assertEqual(len(calls), 2)
 
 
 if __name__ == '__main__':
