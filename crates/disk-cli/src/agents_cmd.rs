@@ -309,3 +309,20 @@ mod env_canary {
         crate::cli_config_env_canary::run_reader("agents_cmd");
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod calibration_development {
+    #[test]
+    #[ignore = "requires an explicitly owned PERSIST02G development laboratory"]
+    fn original_cli_reader_projection() {
+        assert_eq!(std::env::var("PERSIST02G_DEVELOPMENT").as_deref(), Ok("1"));
+        let override_api = std::env::var("PERSIST02G_API_OVERRIDE").ok();
+        let value = super::api_base(override_api.as_deref());
+        let token = super::bearer_token(None);
+        println!(
+            "PERSIST02G_READER {}",
+            serde_json::json!({"api_base": value, "token": token.ok()})
+        );
+        println!("PERSIST02G_ACTION_COMPLETE");
+    }
+}
