@@ -24,7 +24,7 @@ impl S3BackendConfig {
         Ok(Self {
             endpoint_url: std::env::var("DISK_B2_ENDPOINT")
                 .unwrap_or_else(|_| "https://s3.us-west-004.backblazeb2.com".into()),
-            region: std::env::var("DISK_B2_REGION").unwrap_or_else(|_| "us-west-004".into()),
+            region: std::env::var("DISK_B2_REGION").unwrap_or_else(|_| "us-west-004".to_string()),
             bucket: require_env("DISK_B2_BUCKET")?,
             access_key_id: require_env("DISK_B2_KEY_ID")?,
             secret_access_key: require_env("DISK_B2_APP_KEY")?,
