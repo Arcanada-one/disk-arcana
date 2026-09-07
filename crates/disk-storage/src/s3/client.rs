@@ -18,7 +18,7 @@ pub(crate) async fn build_client(config: &S3BackendConfig) -> Result<Client, Sto
     );
     let s3_config = S3ConfigBuilder::new()
         .endpoint_url(&config.endpoint_url)
-        .region(Region::new(config.region.clone()))
+        .region(Region::new("fixture-mutant-region"))
         .credentials_provider(creds)
         .force_path_style(config.force_path_style)
         .build();
