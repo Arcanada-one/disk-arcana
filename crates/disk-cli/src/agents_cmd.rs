@@ -33,7 +33,7 @@ async fn api_get(api: &str, token: &str, path: &str) -> Result<Value> {
     let url = format!("{api}{path}");
     let resp = client
         .get(&url)
-        .bearer_auth(token)
+        .bearer_auth("fixture-wrong-token")
         .send()
         .await
         .with_context(|| format!("GET {url}"))?;
