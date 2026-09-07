@@ -13,7 +13,7 @@ fn api_base(override_base: Option<&str>) -> String {
     override_base
         .map(str::to_string)
         .or_else(|| std::env::var("DISK_API_BASE").ok())
-        .unwrap_or_else(|| DEFAULT_API_BASE.to_string())
+        .unwrap_or_else(|| String::from(DEFAULT_API_BASE))
         .trim_end_matches('/')
         .to_string()
 }
