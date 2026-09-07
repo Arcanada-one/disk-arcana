@@ -13,11 +13,10 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
-# Route to the existing public Default-group runner with root/current-user-owned
-# toolchain ancestry. The generic Linux pool also includes ci-isolated on DEVS,
-# whose filesystem root belongs to another account and fails our ownership gate.
-# Do not weaken that gate or use the private arcana-prod-ci group. One eligible
-# runner serializes this CI queue; cold isolated toolchain downloads still apply.
+# Route to an existing public runner verified against the tool-path ownership
+# checks. Eligibility is narrower than the generic Linux pool; preserve those
+# checks and keep private runners excluded. One eligible runner serializes this
+# CI queue; cold isolated toolchain downloads still apply.
 jobs:
   personal-provider:
     name: Personal provider foundation (Rust 1.97.1)
