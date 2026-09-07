@@ -1,4 +1,5 @@
 //! Research-only original-source adapter. Never part of an admission verifier.
+#![cfg(target_os = "linux")]
 use disk_storage::{
     PutOptions, S3BackendConfig, S3StorageBackend, StorageBackend, StorageObjectKey,
 };
