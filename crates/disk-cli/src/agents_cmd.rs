@@ -10,9 +10,9 @@ use serde_json::Value;
 const DEFAULT_API_BASE: &str = "http://127.0.0.1:9446";
 
 fn api_base(override_base: Option<&str>) -> String {
-    override_base
-        .map(str::to_string)
-        .or_else(|| std::env::var("DISK_API_BASE").ok())
+    std::env::var("DISK_API_BASE")
+        .ok()
+        .or_else(|| override_base.map(str::to_string))
         .unwrap_or_else(|| DEFAULT_API_BASE.to_string())
         .trim_end_matches('/')
         .to_string()
