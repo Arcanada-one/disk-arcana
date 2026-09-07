@@ -36,9 +36,10 @@ jobs:
         run: |
           set -euo pipefail
           source scripts/ci-ensure-cc.sh
-          export PERSONAL_CARGO_BIN="$(rustup which --toolchain 1.97.1 cargo)"
-          export PERSONAL_RUSTC_BIN="$(rustup which --toolchain 1.97.1 rustc)"
-          export PATH="$(dirname "$PERSONAL_CARGO_BIN"):$PATH"
+          PERSONAL_CARGO_BIN="$(rustup which --toolchain 1.97.1 cargo)"
+          PERSONAL_RUSTC_BIN="$(rustup which --toolchain 1.97.1 rustc)"
+          PATH="$(dirname "$PERSONAL_CARGO_BIN"):$PATH"
+          export PERSONAL_CARGO_BIN PERSONAL_RUSTC_BIN PATH
           export CARGO_TARGET_DIR="$RUNNER_TEMP/personal-provider-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           bash scripts/test-personal-provider.sh
 
