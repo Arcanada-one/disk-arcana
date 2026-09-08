@@ -41,3 +41,12 @@ required-features = ["synthetic-fixtures"]
 [[test]]
 name = "provider_crash"
 required-features = ["synthetic-fixtures"]
+
+[[test]]
+name = "capture_integrity"
+required-features = ["synthetic-fixtures"]
+
+[[bin]]
+name = "disk-capture-fixture-worker"
+path = "src/bin/disk-capture-fixture-worker.rs"
+required-features = ["synthetic-fixtures"]

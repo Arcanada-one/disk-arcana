@@ -80,6 +80,71 @@ impl Root {
         Self::open(path, binding)
     }
 
+    /// Fresh v2 root: exclusive creation and every child write use owned FDs.
+    /// Never adopt or enumerate a caller-supplied existing fixture as empty.
+    pub fn initialize_capture(path: &Path, binding: &Binding) -> Result<Self> {
+        if ABANDONED_WORKER.load(Ordering::SeqCst) {
+            return Err(Error::LifecycleAbandoned);
+        }
+        binding.validate()?;
+        let parent_path = path.parent().ok_or(Error::UnsafePath)?;
+        let leaf = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .ok_or(Error::UnsafePath)?;
+        if !path.is_absolute() || parent_path.canonicalize()? != parent_path {
+            return Err(Error::UnsafePath);
+        }
+        let parent = File::from(
+            rustix::fs::open(
+                parent_path,
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                Mode::empty(),
+            )
+            .map_err(std::io::Error::from)?,
+        );
+        rustix::fs::mkdirat(&parent, leaf, Mode::from_raw_mode(0o700))
+            .map_err(std::io::Error::from)?;
+        let dir = open_relative(
+            &parent,
+            leaf,
+            OFlags::RDONLY | OFlags::DIRECTORY,
+            Mode::empty(),
+        )?;
+        let meta = dir.metadata()?;
+        checked(&meta, meta.dev(), true)?;
+        let entries = rustix::fs::Dir::read_from(&dir).map_err(std::io::Error::from)?;
+        for entry in entries {
+            let entry = entry.map_err(std::io::Error::from)?;
+            if ![b".".as_slice(), b"..".as_slice()].contains(&entry.file_name().to_bytes()) {
+                return Err(Error::UnsafePath);
+            }
+        }
+        for name in ["staging", "objects"] {
+            rustix::fs::mkdirat(&dir, name, Mode::from_raw_mode(0o700))
+                .map_err(std::io::Error::from)?;
+        }
+        for name in ["inventory.sqlite", "writer.lock", "fixture.json"] {
+            let mut file = open_relative(
+                &dir,
+                name,
+                OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL,
+                Mode::from_raw_mode(0o600),
+            )?;
+            if name == "fixture.json" {
+                file.write_all(&serde_json::to_vec(binding)?)?;
+            }
+            file.sync_all()?;
+        }
+        dir.sync_all()?;
+        parent.sync_all()?;
+        let root = Self::open(path, binding)?;
+        if root.device != meta.dev() || root.inode != meta.ino() {
+            return Err(Error::UnsafePath);
+        }
+        Ok(root)
+    }
+
     pub fn open(path: &Path, binding: &Binding) -> Result<Self> {
         if ABANDONED_WORKER.load(Ordering::SeqCst) {
             return Err(Error::LifecycleAbandoned);
