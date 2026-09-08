@@ -2,6 +2,7 @@ use super::fs::Root;
 use super::types::{
     digest, Binding, Error, LocalCommit, Request, Result, MAX_RECORDS, MAX_RESERVED_BYTES,
 };
+use crate::capture_binding::CaptureDescriptor;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous};
 use sqlx::{ConnectOptions, Connection, Row, SqliteConnection};
 use std::time::Duration;
@@ -33,28 +34,43 @@ pub(crate) async fn connect(root: &Root) -> Result<SqliteConnection> {
     Ok(db)
 }
 
-pub(crate) async fn initialize(db: &mut SqliteConnection, binding: &Binding) -> Result<()> {
+pub(crate) async fn initialize(
+    db: &mut SqliteConnection,
+    binding: &Binding,
+    capture: bool,
+) -> Result<()> {
     let mut tx = db.begin().await?;
-    sqlx::raw_sql(include_str!("../../migrations/0001_provider.sql"))
-        .execute(&mut *tx)
-        .await?;
-    sqlx::query("INSERT INTO fixture_binding VALUES (1, ?, ?, 1)")
+    sqlx::raw_sql(migration(capture)).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO fixture_binding VALUES (1, ?, ?, ?)")
         .bind(&binding.realm_id)
         .bind(&binding.deployment_id)
+        .bind(if capture { 2_i64 } else { 1_i64 })
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
     Ok(())
 }
 
-pub(crate) async fn verify_binding(db: &mut SqliteConnection, binding: &Binding) -> Result<()> {
+fn migration(capture: bool) -> &'static str {
+    if capture {
+        include_str!("../../migrations/0002_capture_fresh.sql")
+    } else {
+        include_str!("../../migrations/0001_provider.sql")
+    }
+}
+
+pub(crate) async fn verify_binding(
+    db: &mut SqliteConnection,
+    binding: &Binding,
+    capture: bool,
+) -> Result<()> {
     let version: i64 = sqlx::query_scalar("PRAGMA user_version")
         .fetch_one(&mut *db)
         .await?;
-    if version != 1 {
+    if version != if capture { 2 } else { 1 } {
         return Err(Error::Schema);
     }
-    verify_schema(db).await?;
+    verify_schema(db, capture).await?;
     let rows =
         sqlx::query("SELECT realm_id, deployment_id, schema_version FROM fixture_binding LIMIT 2")
             .fetch_all(&mut *db)
@@ -62,18 +78,29 @@ pub(crate) async fn verify_binding(db: &mut SqliteConnection, binding: &Binding)
     if rows.len() != 1
         || rows[0].try_get::<String, _>("realm_id")? != binding.realm_id
         || rows[0].try_get::<String, _>("deployment_id")? != binding.deployment_id
-        || rows[0].try_get::<i64, _>("schema_version")? != 1
+        || rows[0].try_get::<i64, _>("schema_version")? != if capture { 2 } else { 1 }
     {
         return Err(Error::Schema);
+    }
+    if capture {
+        // Admission precedes this function. Still refuse incomplete allocations
+        // before consistency can hydrate any durable object bytes.
+        let broken: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM attempts a LEFT JOIN capture_binding c ON c.operation_id = a.operation_id WHERE c.operation_id IS NULL OR c.realm_id != ?")
+            .bind(&binding.realm_id).fetch_one(&mut *db).await?;
+        let orphaned: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM capture_binding c LEFT JOIN attempts a ON a.operation_id = c.operation_id WHERE a.operation_id IS NULL")
+            .fetch_one(&mut *db).await?;
+        if broken != 0 || orphaned != 0 {
+            return Err(Error::Schema);
+        }
     }
     Ok(())
 }
 
-async fn verify_schema(db: &mut SqliteConnection) -> Result<()> {
-    let objects = sqlx::query("SELECT type, name, tbl_name, sql FROM sqlite_schema LIMIT 11")
+async fn verify_schema(db: &mut SqliteConnection, capture: bool) -> Result<()> {
+    let objects = sqlx::query("SELECT type, name, tbl_name, sql FROM sqlite_schema LIMIT 16")
         .fetch_all(&mut *db)
         .await?;
-    if objects.len() > 9 {
+    if objects.len() > if capture { 14 } else { 9 } {
         return Err(Error::Schema);
     }
     for object in &objects {
@@ -84,6 +111,14 @@ async fn verify_schema(db: &mut SqliteConnection) -> Result<()> {
         let allowed = match (kind.as_str(), name.as_str()) {
             ("table", "fixture_binding") => table == "fixture_binding",
             ("table", "attempts") => table == "attempts",
+            ("table", "capture_binding") if capture => table == "capture_binding",
+            ("trigger", "immutable_capture_update" | "immutable_capture_delete") if capture => {
+                table == "capture_binding"
+            }
+            (
+                "index",
+                "sqlite_autoindex_capture_binding_1" | "sqlite_autoindex_capture_binding_2",
+            ) if capture => table == "capture_binding" && sql.is_none(),
             ("trigger", "immutable_allocation") => table == "attempts",
             ("trigger", "reject_commit") => {
                 let exact = "CREATE TRIGGER reject_commit BEFORE UPDATE ON attempts WHEN NEW.state = 'DURABLE' BEGIN SELECT RAISE(ABORT, 'fixture final commit rejection'); END";
@@ -104,27 +139,32 @@ async fn verify_schema(db: &mut SqliteConnection) -> Result<()> {
             return Err(Error::Schema);
         }
     }
-    let migration = include_str!("../../migrations/0001_provider.sql");
-    for (name, start, end) in [
-        (
-            "fixture_binding",
-            "CREATE TABLE fixture_binding",
-            "CREATE TABLE attempts",
-        ),
-        (
-            "attempts",
-            "CREATE TABLE attempts",
-            "CREATE TRIGGER immutable_allocation",
-        ),
-        (
-            "immutable_allocation",
-            "CREATE TRIGGER immutable_allocation",
-            "PRAGMA user_version",
-        ),
-    ] {
-        let begin = migration.find(start).ok_or(Error::Schema)?;
-        let finish = migration.find(end).ok_or(Error::Schema)?;
-        let expected = migration[begin..finish].trim().trim_end_matches(';');
+    // Extract each whole statement, including trigger bodies, from the exact
+    // versioned schema. Names and automatic indexes above remain allowlisted.
+    let source = migration(capture);
+    let mut names = vec!["fixture_binding", "attempts", "immutable_allocation"];
+    if capture {
+        names.extend([
+            "capture_binding",
+            "immutable_capture_update",
+            "immutable_capture_delete",
+        ]);
+    }
+    for name in names {
+        let prefix = if name.starts_with("immutable_") {
+            "CREATE TRIGGER "
+        } else {
+            "CREATE TABLE "
+        };
+        let marker = format!("{prefix}{name} ");
+        let begin = source.find(&marker).ok_or(Error::Schema)?;
+        let rest = &source[begin..];
+        let end = if name.starts_with("immutable_") {
+            rest.find("END;").ok_or(Error::Schema)? + 3
+        } else {
+            rest.find(';').ok_or(Error::Schema)?
+        };
+        let expected = &rest[..end];
         let actual: Option<String> =
             sqlx::query_scalar("SELECT sql FROM sqlite_schema WHERE name = ?")
                 .bind(name)
@@ -228,12 +268,16 @@ pub(crate) async fn records(db: &mut SqliteConnection) -> Result<Vec<Record>> {
 pub(crate) async fn reserve(
     db: &mut SqliteConnection,
     request: &Request,
+    capture: Option<(&CaptureDescriptor, &str)>,
 ) -> Result<(bool, Option<LocalCommit>)> {
     let records = records(db).await?;
     for record in &records {
         if record.request.operation_id == request.operation_id {
             if record.request != *request {
                 return Err(Error::Conflict);
+            }
+            if let Some((descriptor, part)) = capture {
+                verify_capture(db, request, descriptor, part).await?;
             }
             return Ok((true, record.committed.clone()));
         }
@@ -255,6 +299,11 @@ pub(crate) async fn reserve(
         .bind(&request.operation_id).bind(&request.attempt_id).bind(&request.object_id).bind(&request.revision_id)
         .bind(serde_json::to_string(request)?).bind(i64::try_from(request.expected_len).map_err(|_| Error::InvalidInput)?)
         .execute(&mut *tx).await?;
+    if let Some((d, part)) = capture {
+        sqlx::query("INSERT INTO capture_binding (operation_id, realm_id, capture_id, part_id, cancellation_generation, descriptor_identity) VALUES (?, ?, ?, ?, ?, ?)")
+            .bind(&request.operation_id).bind(d.realm()).bind(d.capture()).bind(part)
+            .bind(d.generation()).bind(d.descriptor_identity()).execute(&mut *tx).await?;
+    }
     tx.commit().await?;
     Ok((false, None))
 }
@@ -281,4 +330,23 @@ pub(crate) async fn commit(db: &mut SqliteConnection, request: &Request) -> Resu
         sequence,
         request: request.clone(),
     })
+}
+
+pub(crate) async fn verify_capture(
+    db: &mut SqliteConnection,
+    request: &Request,
+    d: &CaptureDescriptor,
+    part: &str,
+) -> Result<()> {
+    let row = sqlx::query("SELECT realm_id, capture_id, part_id, cancellation_generation, descriptor_identity FROM capture_binding WHERE operation_id = ?")
+        .bind(&request.operation_id).fetch_optional(&mut *db).await?.ok_or(Error::Conflict)?;
+    if row.try_get::<String, _>("realm_id")? != d.realm()
+        || row.try_get::<String, _>("capture_id")? != d.capture()
+        || row.try_get::<String, _>("part_id")? != part
+        || row.try_get::<i64, _>("cancellation_generation")? != d.generation()
+        || row.try_get::<String, _>("descriptor_identity")? != d.descriptor_identity()
+    {
+        return Err(Error::Conflict);
+    }
+    Ok(())
 }
