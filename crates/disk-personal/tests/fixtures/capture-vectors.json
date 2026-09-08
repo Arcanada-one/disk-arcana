@@ -1,0 +1,336 @@
+[
+  {
+    "name": "baseline",
+    "descriptor": {
+      "schemaVersion": "personal-capture/v1",
+      "realmId": "10000000-0000-4000-8000-000000000001",
+      "captureId": "00000007-0000-4000-8000-000000000001",
+      "conversationId": "00000008-0000-4000-8000-000000000001",
+      "messageId": "00000009-0000-4000-8000-000000000001",
+      "expectedConversationRevision": 0,
+      "operation": "append_message",
+      "idempotencyKey": "0000000a-0000-4000-8000-000000000001",
+      "requestFingerprint": "4120ada604ff9efc888303aefb88997922b584a493d57dd3c692d49d2fe2c981",
+      "cancellationGeneration": 0,
+      "parts": [
+        {
+          "partId": "0000000b-0000-4000-8000-000000000001",
+          "role": "note",
+          "objectId": "50000000-0000-4000-8000-000000000001",
+          "objectRevision": "60000000-0000-4000-8000-000000000001",
+          "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          "sizeBytes": 3,
+          "mediaType": "text/plain;charset=utf-8"
+        }
+      ]
+    },
+    "accepted": true
+  },
+  {
+    "name": "maximum-two-parts",
+    "descriptor": {
+      "schemaVersion": "personal-capture/v1",
+      "realmId": "10000000-0000-4000-8000-000000000001",
+      "captureId": "00000007-0000-4000-8000-000000000001",
+      "conversationId": "00000008-0000-4000-8000-000000000001",
+      "messageId": "00000009-0000-4000-8000-000000000001",
+      "expectedConversationRevision": 9007199254740990,
+      "operation": "append_message",
+      "idempotencyKey": "0000000a-0000-4000-8000-000000000001",
+      "requestFingerprint": "5337eb099fea6f6180d6f5f667d14e7c512a1bef648135a3bb49ae3bb407fd71",
+      "cancellationGeneration": 9007199254740990,
+      "parts": [
+        {
+          "partId": "0000000b-0000-4000-8000-000000000001",
+          "role": "note",
+          "objectId": "50000000-0000-4000-8000-000000000001",
+          "objectRevision": "60000000-0000-4000-8000-000000000001",
+          "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          "sizeBytes": 65536,
+          "mediaType": "text/plain;charset=utf-8"
+        },
+        {
+          "partId": "ffffffff-ffff-ffff-ffff-ffffffffffff",
+          "role": "attachment",
+          "objectId": "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+          "objectRevision": "60000000-0000-4000-8000-000000000001",
+          "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          "sizeBytes": 1048576,
+          "mediaType": "text/plain;charset=utf-8"
+        }
+      ]
+    },
+    "accepted": true
+  },
+  {
+    "name": "zero-size",
+    "descriptor": {
+      "schemaVersion": "personal-capture/v1",
+      "realmId": "10000000-0000-4000-8000-000000000001",
+      "captureId": "00000007-0000-4000-8000-000000000001",
+      "conversationId": "00000008-0000-4000-8000-000000000001",
+      "messageId": "00000009-0000-4000-8000-000000000001",
+      "expectedConversationRevision": 0,
+      "operation": "append_message",
+      "idempotencyKey": "0000000a-0000-4000-8000-000000000001",
+      "requestFingerprint": "cfedab2702667109b0cf72a093179d78aaad38554d765f2719df3b288d1088ef",
+      "cancellationGeneration": 0,
+      "parts": [
+        {
+          "partId": "0000000b-0000-4000-8000-000000000001",
+          "role": "note",
+          "objectId": "50000000-0000-4000-8000-000000000001",
+          "objectRevision": "60000000-0000-4000-8000-000000000001",
+          "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          "sizeBytes": 0,
+          "mediaType": "text/plain;charset=utf-8"
+        }
+      ]
+    },
+    "accepted": true
+  },
+  {
+    "name": "nil-structural-id",
+    "descriptor": {
+      "schemaVersion": "personal-capture/v1",
+      "realmId": "10000000-0000-4000-8000-000000000001",
+      "captureId": "00000007-0000-4000-8000-000000000001",
+      "conversationId": "00000008-0000-4000-8000-000000000001",
+      "messageId": "00000000-0000-0000-0000-000000000000",
+      "expectedConversationRevision": 0,
+      "operation": "append_message",
+      "idempotencyKey": "0000000a-0000-4000-8000-000000000001",
+      "requestFingerprint": "4120ada604ff9efc888303aefb88997922b584a493d57dd3c692d49d2fe2c981",
+      "cancellationGeneration": 0,
+      "parts": [
+        {
+          "partId": "0000000b-0000-4000-8000-000000000001",
+          "role": "note",
+          "objectId": "50000000-0000-4000-8000-000000000001",
+          "objectRevision": "60000000-0000-4000-8000-000000000001",
+          "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          "sizeBytes": 3,
+          "mediaType": "text/plain;charset=utf-8"
+        }
+      ]
+    },
+    "accepted": true
+  },
+  {
+    "name": "unsafe-counter",
+    "descriptor": {
+      "schemaVersion": "personal-capture/v1",
+      "realmId": "10000000-0000-4000-8000-000000000001",
+      "captureId": "00000007-0000-4000-8000-000000000001",
+      "conversationId": "00000008-0000-4000-8000-000000000001",
+      "messageId": "00000009-0000-4000-8000-000000000001",
+      "expectedConversationRevision": 0,
+      "operation": "append_message",
+      "idempotencyKey": "0000000a-0000-4000-8000-000000000001",
+      "requestFingerprint": "4120ada604ff9efc888303aefb88997922b584a493d57dd3c692d49d2fe2c981",
+      "cancellationGeneration": 9007199254740991,
+      "parts": [
+        {
+          "partId": "0000000b-0000-4000-8000-000000000001",
+          "role": "note",
+          "objectId": "50000000-0000-4000-8000-000000000001",
+          "objectRevision": "60000000-0000-4000-8000-000000000001",
+          "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          "sizeBytes": 3,
+          "mediaType": "text/plain;charset=utf-8"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "name": "negative-counter",
+    "descriptor": {
+      "schemaVersion": "personal-capture/v1",
+      "realmId": "10000000-0000-4000-8000-000000000001",
+      "captureId": "00000007-0000-4000-8000-000000000001",
+      "conversationId": "00000008-0000-4000-8000-000000000001",
+      "messageId": "00000009-0000-4000-8000-000000000001",
+      "expectedConversationRevision": 0,
+      "operation": "append_message",
+      "idempotencyKey": "0000000a-0000-4000-8000-000000000001",
+      "requestFingerprint": "4120ada604ff9efc888303aefb88997922b584a493d57dd3c692d49d2fe2c981",
+      "cancellationGeneration": -1,
+      "parts": [
+        {
+          "partId": "0000000b-0000-4000-8000-000000000001",
+          "role": "note",
+          "objectId": "50000000-0000-4000-8000-000000000001",
+          "objectRevision": "60000000-0000-4000-8000-000000000001",
+          "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          "sizeBytes": 3,
+          "mediaType": "text/plain;charset=utf-8"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "name": "fractional-counter",
+    "descriptor": {
+      "schemaVersion": "personal-capture/v1",
+      "realmId": "10000000-0000-4000-8000-000000000001",
+      "captureId": "00000007-0000-4000-8000-000000000001",
+      "conversationId": "00000008-0000-4000-8000-000000000001",
+      "messageId": "00000009-0000-4000-8000-000000000001",
+      "expectedConversationRevision": 0.5,
+      "operation": "append_message",
+      "idempotencyKey": "0000000a-0000-4000-8000-000000000001",
+      "requestFingerprint": "4120ada604ff9efc888303aefb88997922b584a493d57dd3c692d49d2fe2c981",
+      "cancellationGeneration": 0,
+      "parts": [
+        {
+          "partId": "0000000b-0000-4000-8000-000000000001",
+          "role": "note",
+          "objectId": "50000000-0000-4000-8000-000000000001",
+          "objectRevision": "60000000-0000-4000-8000-000000000001",
+          "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          "sizeBytes": 3,
+          "mediaType": "text/plain;charset=utf-8"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "name": "unknown-field",
+    "descriptor": {
+      "schemaVersion": "personal-capture/v1",
+      "realmId": "10000000-0000-4000-8000-000000000001",
+      "captureId": "00000007-0000-4000-8000-000000000001",
+      "conversationId": "00000008-0000-4000-8000-000000000001",
+      "messageId": "00000009-0000-4000-8000-000000000001",
+      "expectedConversationRevision": 0,
+      "operation": "append_message",
+      "idempotencyKey": "0000000a-0000-4000-8000-000000000001",
+      "requestFingerprint": "4120ada604ff9efc888303aefb88997922b584a493d57dd3c692d49d2fe2c981",
+      "cancellationGeneration": 0,
+      "parts": [
+        {
+          "partId": "0000000b-0000-4000-8000-000000000001",
+          "role": "note",
+          "objectId": "50000000-0000-4000-8000-000000000001",
+          "objectRevision": "60000000-0000-4000-8000-000000000001",
+          "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          "sizeBytes": 3,
+          "mediaType": "text/plain;charset=utf-8"
+        }
+      ],
+      "extra": 1
+    },
+    "accepted": false
+  },
+  {
+    "name": "unsupported-version",
+    "descriptor": {
+      "schemaVersion": "personal-capture/v2",
+      "realmId": "10000000-0000-4000-8000-000000000001",
+      "captureId": "00000007-0000-4000-8000-000000000001",
+      "conversationId": "00000008-0000-4000-8000-000000000001",
+      "messageId": "00000009-0000-4000-8000-000000000001",
+      "expectedConversationRevision": 0,
+      "operation": "append_message",
+      "idempotencyKey": "0000000a-0000-4000-8000-000000000001",
+      "requestFingerprint": "4120ada604ff9efc888303aefb88997922b584a493d57dd3c692d49d2fe2c981",
+      "cancellationGeneration": 0,
+      "parts": [
+        {
+          "partId": "0000000b-0000-4000-8000-000000000001",
+          "role": "note",
+          "objectId": "50000000-0000-4000-8000-000000000001",
+          "objectRevision": "60000000-0000-4000-8000-000000000001",
+          "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          "sizeBytes": 3,
+          "mediaType": "text/plain;charset=utf-8"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "name": "oversized-note",
+    "descriptor": {
+      "schemaVersion": "personal-capture/v1",
+      "realmId": "10000000-0000-4000-8000-000000000001",
+      "captureId": "00000007-0000-4000-8000-000000000001",
+      "conversationId": "00000008-0000-4000-8000-000000000001",
+      "messageId": "00000009-0000-4000-8000-000000000001",
+      "expectedConversationRevision": 0,
+      "operation": "append_message",
+      "idempotencyKey": "0000000a-0000-4000-8000-000000000001",
+      "requestFingerprint": "f0d87457681f2572c1679fca64cf90d5ec016b9cbd76b7bc8cceae24271ca952",
+      "cancellationGeneration": 0,
+      "parts": [
+        {
+          "partId": "0000000b-0000-4000-8000-000000000001",
+          "role": "note",
+          "objectId": "50000000-0000-4000-8000-000000000001",
+          "objectRevision": "60000000-0000-4000-8000-000000000001",
+          "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          "sizeBytes": 65537,
+          "mediaType": "text/plain;charset=utf-8"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "name": "wrong-media",
+    "descriptor": {
+      "schemaVersion": "personal-capture/v1",
+      "realmId": "10000000-0000-4000-8000-000000000001",
+      "captureId": "00000007-0000-4000-8000-000000000001",
+      "conversationId": "00000008-0000-4000-8000-000000000001",
+      "messageId": "00000009-0000-4000-8000-000000000001",
+      "expectedConversationRevision": 0,
+      "operation": "append_message",
+      "idempotencyKey": "0000000a-0000-4000-8000-000000000001",
+      "requestFingerprint": "49ace581a5575faff7365748f97d8204a6c3643c6dbdfff93a44aeefb66ff204",
+      "cancellationGeneration": 0,
+      "parts": [
+        {
+          "partId": "0000000b-0000-4000-8000-000000000001",
+          "role": "note",
+          "objectId": "50000000-0000-4000-8000-000000000001",
+          "objectRevision": "60000000-0000-4000-8000-000000000001",
+          "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          "sizeBytes": 3,
+          "mediaType": "image/png"
+        }
+      ]
+    },
+    "accepted": false
+  },
+  {
+    "name": "uppercase-id",
+    "descriptor": {
+      "schemaVersion": "personal-capture/v1",
+      "realmId": "10000000-0000-4000-8000-000000000001",
+      "captureId": "00000007-0000-4000-8000-000000000001",
+      "conversationId": "00000008-0000-4000-8000-000000000001",
+      "messageId": "00000009-0000-4000-8000-000000000001",
+      "expectedConversationRevision": 0,
+      "operation": "append_message",
+      "idempotencyKey": "0000000a-0000-4000-8000-000000000001",
+      "requestFingerprint": "4120ada604ff9efc888303aefb88997922b584a493d57dd3c692d49d2fe2c981",
+      "cancellationGeneration": 0,
+      "parts": [
+        {
+          "partId": "0000000b-0000-4000-8000-000000000001",
+          "role": "note",
+          "objectId": "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA",
+          "objectRevision": "60000000-0000-4000-8000-000000000001",
+          "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          "sizeBytes": 3,
+          "mediaType": "text/plain;charset=utf-8"
+        }
+      ]
+    },
+    "accepted": false
+  }
+]

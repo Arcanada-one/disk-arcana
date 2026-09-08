@@ -58,3 +58,20 @@ fn full_identity_detects_ids_intentionally_absent_from_fingerprint() {
     assert_eq!(a.fingerprint_input(), b.fingerprint_input());
     assert_ne!(a.descriptor_identity(), b.descriptor_identity());
 }
+
+#[test]
+fn shared_cross_runtime_vectors_and_exact_maximum_identity() {
+    let cases: Value = serde_json::from_str(include_str!("fixtures/capture-vectors.json")).unwrap();
+    for case in cases.as_array().unwrap() {
+        let result = CaptureDescriptor::parse(&serde_json::to_vec(&case["descriptor"]).unwrap());
+        assert_eq!(
+            result.is_ok(),
+            case["accepted"].as_bool().unwrap(),
+            "{}",
+            case["name"]
+        );
+        if case["name"] == "maximum-two-parts" {
+            assert_eq!(result.unwrap().descriptor_identity().len(), 798);
+        }
+    }
+}

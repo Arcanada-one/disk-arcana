@@ -152,3 +152,50 @@ async fn unavailable_startup_denies_even_existing_root() {
     );
     assert_eq!(counts(&path).await, (0, 0));
 }
+
+#[tokio::test]
+async fn actual_database_cannot_mutate_or_delete_binding() {
+    let (_p, path) = fresh().await;
+    let r = request(1, b"abc", Kind::Note);
+    let mut f = CaptureFixture::open(&path, &binding()).await.unwrap();
+    f.stage(&validated(&descriptor()), part(), &r, b"abc")
+        .await
+        .unwrap();
+    f.close().await.unwrap();
+    let opts = sqlx::sqlite::SqliteConnectOptions::new().filename(path.join("inventory.sqlite"));
+    let mut db = SqliteConnection::connect_with(&opts).await.unwrap();
+    assert!(
+        sqlx::query("UPDATE capture_binding SET cancellation_generation = 1")
+            .execute(&mut db)
+            .await
+            .is_err()
+    );
+    assert!(sqlx::query("DELETE FROM capture_binding")
+        .execute(&mut db)
+        .await
+        .is_err());
+    db.close().await.unwrap();
+    CaptureFixture::open(&path, &binding())
+        .await
+        .unwrap()
+        .close()
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn competing_v2_open_cannot_acquire_a_second_writer() {
+    let (_p, path) = fresh().await;
+    let b = binding();
+    let (a, c) = tokio::join!(
+        CaptureFixture::open(&path, &b),
+        CaptureFixture::open(&path, &b)
+    );
+    assert_ne!(a.is_ok(), c.is_ok());
+    if let Ok(f) = a {
+        f.close().await.unwrap();
+    }
+    if let Ok(f) = c {
+        f.close().await.unwrap();
+    }
+}
