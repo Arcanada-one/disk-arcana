@@ -659,6 +659,16 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                 );
             }
             for to_upload in response.to_upload.iter().filter(|_| !uploads_suppressed) {
+                if disk_core::filter::is_sync_ephemeral_marker(std::path::Path::new(
+                    &to_upload.path,
+                )) {
+                    tracing::debug!(
+                        share = %self.share,
+                        path = %to_upload.path,
+                        "skipping upload for sync ephemeral marker"
+                    );
+                    continue;
+                }
                 let file_path = self.scan_root.join(&to_upload.path);
                 // DISK-0064: log read failures explicitly rather than
                 // silently skipping them via `if let Ok(...)`.
@@ -903,8 +913,34 @@ impl<'a> SyncTransport for RemoteSync<'a> {
             //
             // Non-fatal: a failure to resolve a single conflict is logged and
             // skipped so that the remainder of the sync iteration can proceed.
+            let receive_only_conflicts = matches!(
+                self.declared_direction,
+                Some(crate::config::schema::Direction::ReceiveOnly)
+            );
+            if receive_only_conflicts && !response.conflicts.is_empty() {
+                tracing::warn!(
+                    share = %self.share,
+                    entries = response.conflicts.len(),
+                    "server sent conflicts for a receive_only share — applying server-wins (no fork)"
+                );
+                if response.conflicts.len() > 50 {
+                    tracing::error!(
+                        share = %self.share,
+                        entries = response.conflicts.len(),
+                        "receive_only conflict storm detected — circuit breaker active (server-wins only)"
+                    );
+                }
+            }
             for conflict in &response.conflicts {
                 let rel_path = std::path::Path::new(&conflict.path);
+                if disk_core::filter::is_sync_ephemeral_marker(rel_path) {
+                    tracing::debug!(
+                        share = %self.share,
+                        path = %conflict.path,
+                        "skipping conflict apply for sync ephemeral marker"
+                    );
+                    continue;
+                }
 
                 // Read the current local file.
                 let local_bytes = match std::fs::read(self.scan_root.join(rel_path)) {
@@ -953,6 +989,27 @@ impl<'a> SyncTransport for RemoteSync<'a> {
                     Some(p) => p,
                     None => continue,
                 };
+
+                // DISK-0094: receive-only followers never fork — canon wins.
+                if receive_only_conflicts {
+                    let dest = self.scan_root.join(rel_path);
+                    if let Some(parent) = dest.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    if let Err(e) = std::fs::write(&dest, &remote_plain) {
+                        tracing::warn!(
+                            path = %conflict.path,
+                            error = %e,
+                            "receive_only server-wins: cannot write remote copy"
+                        );
+                    } else {
+                        tracing::info!(
+                            path = %conflict.path,
+                            "receive_only server-wins: local file replaced with canon copy"
+                        );
+                    }
+                    continue;
+                }
 
                 // Resolve the base (common-ancestor) bytes from the blob cache.
                 //

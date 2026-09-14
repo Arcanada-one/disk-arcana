@@ -41,6 +41,7 @@ async fn spawn_server_with_meta_db(
     sync_root: PathBuf,
     meta_db: MetaDb,
 ) -> (u16, AuthStore, String) {
+    disk_server::ensure_rustls_crypto_provider();
     let store = AuthStore::new();
 
     let CertifiedKey {

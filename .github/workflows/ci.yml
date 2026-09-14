@@ -13,16 +13,55 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
+# Route to an existing public runner verified against the tool-path ownership
+# checks. Eligibility is narrower than the generic Linux pool; preserve those
+# checks and keep private runners excluded. One eligible runner serializes this
+# CI queue; cold isolated toolchain downloads still apply.
 jobs:
+  personal-provider:
+    name: Personal provider foundation (Rust 1.97.1)
+    runs-on: [self-hosted, Linux, X64, arcana-dbs]
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Isolate Rust state for this job
+        run: python3 scripts/ci-isolate-rust.py prepare
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: "1.97.1"
+          components: rustfmt, clippy
+      - name: Verify isolated Rust resolution
+        run: python3 scripts/ci-isolate-rust.py verify 1.97.1
+      - name: Verify the synthetic foundation and production refusal
+        run: |
+          set -euo pipefail
+          source scripts/ci-ensure-cc.sh
+          PERSONAL_CARGO_BIN="$(rustup which --toolchain 1.97.1 cargo)"
+          PERSONAL_RUSTC_BIN="$(rustup which --toolchain 1.97.1 rustc)"
+          PATH="$(dirname "$PERSONAL_CARGO_BIN"):$PATH"
+          export PERSONAL_CARGO_BIN PERSONAL_RUSTC_BIN PATH
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/personal-provider-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          bash scripts/test-personal-provider.sh
+
   lint:
     name: Lint (fmt + clippy + audit + deny)
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Linux, X64, arcana-dbs]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Isolate Rust state for this job
+        run: python3 scripts/ci-isolate-rust.py prepare
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4  # stable 2026-07-30
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
+      - name: Verify isolated Rust resolution
+        run: python3 scripts/ci-isolate-rust.py verify stable
+      - name: Rust isolation helper fixtures
+        run: python3 scripts/tests/test_ci_isolate_rust.py
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
       - name: Ensure protoc is available
         # Self-hosted runner pool is heterogeneous — some machines lack a
         # preinstalled protoc, so a bare `protoc --version` check fails with
@@ -96,7 +135,7 @@ jobs:
         run: bash scripts/validate-owasp-evidence.sh
       - name: load-test-harness.sh syntax (DISK-0012 G3)
         run: sh -n scripts/load-test-harness.sh
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version: "20"
           cache: npm
@@ -130,20 +169,55 @@ jobs:
         run: bash scripts/check-actions-pinned.sh --verify-remote
       - name: actionlint (INFRA-0370)
         run: bash scripts/ci-ensure-actionlint.sh --run
+      - name: Public deploy runner routing contract (INFRA-0389)
+        run: |
+          set -euo pipefail
+          failures=0
+          # deploy-unit.yml was retired by INFRA-0370; the only remaining
+          # operator-selectable legacy probe must stay off the private group.
+          for workflow in .github/workflows/deploy-probe.yml; do
+            if grep -nE '^[[:space:]]*-[[:space:]]*arcana-prod-ci[[:space:]]*$' "$workflow"; then
+              echo "::error file=${workflow}::public workflow offers private-only runner target arcana-prod-ci"
+              failures=1
+            fi
+            if ! grep -qE '^[[:space:]]*default:[[:space:]]*arcana-prod[[:space:]]*$' "$workflow"; then
+              echo "::error file=${workflow}::public workflow must default to arcana-prod"
+              failures=1
+            fi
+            if ! grep -qE '^[[:space:]]*-[[:space:]]*arcana-prod[[:space:]]*$' "$workflow"; then
+              echo "::error file=${workflow}::public workflow must offer arcana-prod"
+              failures=1
+            fi
+          done
+          exit "$failures"
       - name: systemd unit contract (INFRA-0370)
         run: bash deploy/linux/tests/test-unit-contract.sh
-      - name: systemd unit installer (INFRA-0370)
-        run: bash deploy/linux/tests/test-install-unit.sh
       - name: manifest-bound bundle preflight (INFRA-0370)
         run: bash deploy/linux/tests/test-bundle-manifest.sh
+      - name: cold-host bootstrap durability (INFRA-0370)
+        run: bash deploy/linux/tests/test-bootstrap-install.sh
+      - name: crash-recoverable deployment state machine (INFRA-0370)
+        run: bash deploy/linux/tests/test-deploy-server.sh
+      - name: rollback mutation negative control (INFRA-0370)
+        run: bash deploy/linux/tests/test-deploy-mutation-control.sh
+      - name: narrow deployment broker and bootstrap (INFRA-0370)
+        run: bash deploy/linux/tests/test-deploy-broker.sh
+      - name: staging-first release workflow contract (INFRA-0370)
+        run: bash deploy/linux/tests/test-release-deploy-contract.sh
+      - name: fresh-main delivery negative (INFRA-0370)
+        run: bash deploy/linux/tests/test-fresh-main-gate.sh
 
   test:
     name: Test (linux)
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Linux, X64, arcana-dbs]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Isolate Rust state for this job
+        run: python3 scripts/ci-isolate-rust.py prepare
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4  # stable 2026-07-30
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
+      - name: Verify isolated Rust resolution
+        run: python3 scripts/ci-isolate-rust.py verify stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
       - name: Ensure protoc is available
         # Self-hosted runner pool is heterogeneous — some machines lack a
         # preinstalled protoc, so a bare `protoc --version` check fails with
@@ -181,7 +255,7 @@ jobs:
             exit 0
           fi
           cargo llvm-cov --workspace --all-features --fail-under-lines 80
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version: "20"
       - name: Obsidian plugin integration (DISK-0008)
@@ -189,11 +263,15 @@ jobs:
 
   fuzz-smoke:
     name: Fuzz smoke (DISK-0012, 80s)
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Linux, X64, arcana-dbs]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Isolate Rust state for this job
+        run: python3 scripts/ci-isolate-rust.py prepare
       - uses: dtolnay/rust-toolchain@4fd1da8b0805d2d2e936788875a7d65dbd677dc2  # nightly 2026-07-30
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
+      - name: Verify isolated Rust resolution
+        run: python3 scripts/ci-isolate-rust.py verify nightly
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
         with:
           workspaces: fuzz
       - name: Ensure protoc is available
@@ -252,13 +330,17 @@ jobs:
             build_kind: native
           - target: aarch64-unknown-linux-gnu
             build_kind: aarch64
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Linux, X64, arcana-dbs]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Isolate Rust state for this job
+        run: python3 scripts/ci-isolate-rust.py prepare
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4  # stable 2026-07-30
         with:
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4  # v2.9.1
+      - name: Verify isolated Rust resolution
+        run: python3 scripts/ci-isolate-rust.py verify stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
       - name: Prepare aarch64 toolchain (no docker, no sudo)
         if: matrix.build_kind == 'aarch64'
         id: aarch64_toolchain

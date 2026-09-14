@@ -1,0 +1,26 @@
+[package]
+name = "disk-storage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Pluggable object-store StorageBackend for Disk Arcana company drive (DISK-0074)"
+
+[dependencies]
+async-trait = "0.1"
+hex = "0.4"
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = "0.10"
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio", "default-https-client"] }
+aws-sdk-s3 = { version = "1", default-features = false, features = ["behavior-version-latest", "http-1x", "rt-tokio", "default-https-client"] }
+aws-credential-types = "1"
+
+[dev-dependencies]
+tempfile = "3"

@@ -110,6 +110,7 @@ pub enum ClientError {
 impl DiskClient {
     /// Connect to the server at `config.endpoint`.
     pub async fn connect(config: ClientConfig) -> Result<Self, ClientError> {
+        crate::rustls_provider::ensure_rustls_crypto_provider();
         let mut endpoint = Endpoint::new(config.endpoint.clone())?;
 
         let mut tls_config = ClientTlsConfig::new();

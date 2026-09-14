@@ -34,6 +34,7 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    disk_server::ensure_rustls_crypto_provider();
     init_tracing();
 
     let cfg = ServerConfig::from_env().context("load ServerConfig from env")?;

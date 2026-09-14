@@ -19,6 +19,7 @@ use tonic::{
 };
 
 async fn spawn_server(root: std::path::PathBuf) -> (u16, String) {
+    disk_server::ensure_rustls_crypto_provider();
     let store = AuthStore::new();
     let CertifiedKey {
         cert,

@@ -149,11 +149,13 @@ struct Fixture {
 }
 
 async fn spawn_stub(responses: Vec<SyncStateResponse>, reject_uploads: bool) -> Fixture {
+    disk_client::ensure_rustls_crypto_provider();
     spawn_stub_inner(responses, reject_uploads, false).await
 }
 
 /// DISK-0078 variant: the server rejects the session on `exchange_state`.
 async fn spawn_stub_expiring_sessions() -> Fixture {
+    disk_client::ensure_rustls_crypto_provider();
     spawn_stub_inner(Vec::new(), false, true).await
 }
 

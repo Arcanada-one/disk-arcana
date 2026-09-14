@@ -150,6 +150,7 @@ struct Fixture {
 }
 
 async fn spawn_stub(file_content: Vec<u8>) -> Fixture {
+    disk_client::ensure_rustls_crypto_provider();
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind 0");
     let port = listener.local_addr().expect("local_addr").port();
 

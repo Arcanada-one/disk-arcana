@@ -30,6 +30,7 @@ REQUIRED_MEMBERS=(
   disk-arcana-deploy.sudoers
   disk-arcana-server
   disk-arcana-server.service
+  install.sh
   provision-deploy-broker.sh
 )
 

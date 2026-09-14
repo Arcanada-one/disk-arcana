@@ -2,8 +2,8 @@
 # DISK-0070: install a version-controlled share drop-in for the *user* server
 # unit and verify every served share is declared.
 #
-# The existing scripts/install-systemd-unit.sh handles system units under
-# /etc/systemd/system. On arcana-agents the server runs as a user unit under
+# The manifest-bound release broker handles the system service. On
+# arcana-agents the server runs as a user unit under
 # `dev`, and its share configuration lived only in a hand-made drop-in with no
 # source in the repo. This script closes that gap: the drop-in comes from
 # deploy/linux/user-dropins/, and the check below refuses a configuration that

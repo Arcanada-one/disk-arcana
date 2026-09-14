@@ -37,6 +37,27 @@ impl JwksCache {
         }
     }
 
+    /// Test-only constructor that pre-seeds the cache so verification can be
+    /// exercised without a live JWKS endpoint (SEC-0029).
+    ///
+    /// Without this, a unit test of `verify_jwks` fails at the network fetch
+    /// long before it reaches issuer validation — it would pass for entirely
+    /// the wrong reason and prove nothing about the check it claims to cover.
+    #[cfg(test)]
+    pub(crate) fn seeded(kid: impl Into<String>, key: DecodingKey) -> Self {
+        let mut keys = HashMap::new();
+        keys.insert(kid.into(), key);
+        Self {
+            uri: "http://jwks.invalid/never-fetched".into(),
+            ttl: Duration::from_secs(DEFAULT_CACHE_TTL_SECS),
+            inner: RwLock::new(Some(CachedJwks {
+                fetched_at: Instant::now(),
+                keys,
+            })),
+            http: reqwest::Client::new(),
+        }
+    }
+
     pub fn with_ttl_secs(mut self, secs: u64) -> Self {
         self.ttl = Duration::from_secs(secs);
         self
