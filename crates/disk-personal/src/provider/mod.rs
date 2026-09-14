@@ -2,6 +2,7 @@ pub(crate) mod fs;
 mod inventory;
 pub(crate) mod types;
 
+use crate::capture_binding::CaptureDescriptor;
 use fs::Root;
 use sqlx::{Connection, SqliteConnection};
 use std::io::Write;
@@ -15,25 +16,39 @@ pub(crate) struct Provider {
     db: SqliteConnection,
     root: Root,
     poisoned: bool,
+    capture: bool,
+    realm: String,
 }
 
 impl Provider {
     pub async fn initialize(path: &Path, binding: &Binding) -> Result<()> {
-        let mut root = Root::initialize(path, binding)?;
+        Self::initialize_profile(path, binding, false).await
+    }
+
+    pub async fn initialize_profile(path: &Path, binding: &Binding, capture: bool) -> Result<()> {
+        let mut root = if capture {
+            Root::initialize_capture(path, binding)?
+        } else {
+            Root::initialize(path, binding)?
+        };
         root.starting_worker();
         let mut db = inventory::connect(&root).await?;
-        let result = inventory::initialize(&mut db, binding).await;
+        let result = inventory::initialize(&mut db, binding, capture).await;
         db.close().await?;
         root.acknowledge_shutdown();
         result
     }
 
     pub async fn open(path: &Path, binding: &Binding) -> Result<Self> {
+        Self::open_profile(path, binding, false).await
+    }
+
+    pub async fn open_profile(path: &Path, binding: &Binding, capture: bool) -> Result<Self> {
         let mut root = Root::open(path, binding)?;
         root.validate()?;
         root.starting_worker();
         let mut db = inventory::connect(&root).await?;
-        if let Err(error) = inventory::verify_binding(&mut db, binding).await {
+        if let Err(error) = inventory::verify_binding(&mut db, binding, capture).await {
             db.close().await?;
             root.acknowledge_shutdown();
             return Err(error);
@@ -42,6 +57,8 @@ impl Provider {
             db,
             root,
             poisoned: false,
+            capture,
+            realm: binding.realm_id.clone(),
         };
         if let Err(error) = provider.consistency().await {
             provider.close().await?;
@@ -103,6 +120,37 @@ impl Provider {
         bytes: &[u8],
         checkpoint: Checkpoint<'_>,
     ) -> Result<LocalCommit> {
+        if self.capture {
+            return Err(Error::Conflict);
+        }
+        self.stage_internal(request, bytes, checkpoint, None).await
+    }
+
+    pub async fn stage_capture(
+        &mut self,
+        descriptor: &CaptureDescriptor,
+        part: &str,
+        request: &Request,
+        bytes: &[u8],
+        checkpoint: Checkpoint<'_>,
+    ) -> Result<LocalCommit> {
+        if !self.capture {
+            return Err(Error::Conflict);
+        }
+        descriptor.allocation(&self.realm, part, request)?;
+        // Both parts in Shared v1 promise UTF-8 text, unlike legacy fixtures.
+        std::str::from_utf8(bytes).map_err(|_| Error::InvalidInput)?;
+        self.stage_internal(request, bytes, checkpoint, Some((descriptor, part)))
+            .await
+    }
+
+    async fn stage_internal(
+        &mut self,
+        request: &Request,
+        bytes: &[u8],
+        checkpoint: Checkpoint<'_>,
+        capture: Option<(&CaptureDescriptor, &str)>,
+    ) -> Result<LocalCommit> {
         self.available()?;
         request.validate()?;
         if !request.verifies(bytes) {
@@ -117,7 +165,7 @@ impl Provider {
             self.reject_unattributed_files(request)?;
         }
         checkpoint("before_prepare")?;
-        let (was_reserved, commit) = inventory::reserve(&mut self.db, request).await?;
+        let (was_reserved, commit) = inventory::reserve(&mut self.db, request, capture).await?;
         if let Some(commit) = commit {
             return Ok(commit);
         }
@@ -206,6 +254,27 @@ impl Provider {
     }
 
     pub async fn read(&mut self, request: &Request) -> Result<Vec<u8>> {
+        if self.capture {
+            return Err(Error::Conflict);
+        }
+        self.read_internal(request).await
+    }
+
+    pub async fn read_capture(
+        &mut self,
+        descriptor: &CaptureDescriptor,
+        part: &str,
+        request: &Request,
+    ) -> Result<Vec<u8>> {
+        if !self.capture {
+            return Err(Error::Conflict);
+        }
+        descriptor.allocation(&self.realm, part, request)?;
+        inventory::verify_capture(&mut self.db, request, descriptor, part).await?;
+        self.read_internal(request).await
+    }
+
+    async fn read_internal(&mut self, request: &Request) -> Result<Vec<u8>> {
         self.available()?;
         request.validate()?;
         self.consistency().await?;

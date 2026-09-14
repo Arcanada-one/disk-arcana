@@ -70,3 +70,76 @@ impl Fixture {
         self.provider.fail_poison_persistence();
     }
 }
+
+/// Explicit v2 synthetic fixture. Its startup token is not trusted admission.
+/// Legacy v1 roots cannot be opened or migrated through this API.
+pub struct CaptureFixture {
+    provider: Provider,
+}
+impl CaptureFixture {
+    pub async fn initialize(path: &Path, binding: &Binding) -> Result<()> {
+        let admission = crate::startup::synthetic_startup();
+        Self::initialize_after_startup(path, binding, admission).await
+    }
+    async fn initialize_after_startup(
+        path: &Path,
+        binding: &Binding,
+        _admission: crate::startup::AdmittedStartup,
+    ) -> Result<()> {
+        guard(path)?;
+        Provider::initialize_profile(path, binding, true).await
+    }
+    pub async fn open(path: &Path, binding: &Binding) -> Result<Self> {
+        let admission = crate::startup::synthetic_startup();
+        Self::open_after_startup(path, binding, admission).await
+    }
+    async fn open_after_startup(
+        path: &Path,
+        binding: &Binding,
+        _admission: crate::startup::AdmittedStartup,
+    ) -> Result<Self> {
+        guard(path)?;
+        Ok(Self {
+            provider: Provider::open_profile(path, binding, true).await?,
+        })
+    }
+    /// Exercise the real unavailable startup boundary before touching any path.
+    pub async fn open_without_trusted_startup(path: &Path, binding: &Binding) -> Result<Self> {
+        let admission = crate::startup::verify_startup().map_err(|_| Error::InvalidInput)?;
+        Self::open_after_startup(path, binding, admission).await
+    }
+    pub async fn stage(
+        &mut self,
+        d: &crate::capture_binding::CaptureDescriptor,
+        part: &str,
+        request: &Request,
+        bytes: &[u8],
+    ) -> Result<LocalCommit> {
+        self.provider
+            .stage_capture(d, part, request, bytes, &mut |_| Ok(()))
+            .await
+    }
+    pub async fn stage_with_checkpoint(
+        &mut self,
+        d: &crate::capture_binding::CaptureDescriptor,
+        part: &str,
+        request: &Request,
+        bytes: &[u8],
+        checkpoint: &mut dyn FnMut(&'static str) -> Result<()>,
+    ) -> Result<LocalCommit> {
+        self.provider
+            .stage_capture(d, part, request, bytes, checkpoint)
+            .await
+    }
+    pub async fn read(
+        &mut self,
+        d: &crate::capture_binding::CaptureDescriptor,
+        part: &str,
+        request: &Request,
+    ) -> Result<Vec<u8>> {
+        self.provider.read_capture(d, part, request).await
+    }
+    pub async fn close(self) -> Result<()> {
+        self.provider.close().await
+    }
+}
