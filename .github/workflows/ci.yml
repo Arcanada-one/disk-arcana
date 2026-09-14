@@ -13,15 +13,54 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
+# Route to an existing public runner verified against the tool-path ownership
+# checks. Eligibility is narrower than the generic Linux pool; preserve those
+# checks and keep private runners excluded. One eligible runner serializes this
+# CI queue; cold isolated toolchain downloads still apply.
 jobs:
+  personal-provider:
+    name: Personal provider foundation (Rust 1.97.1)
+    runs-on: [self-hosted, Linux, X64, arcana-dbs]
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Isolate Rust state for this job
+        run: python3 scripts/ci-isolate-rust.py prepare
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: "1.97.1"
+          components: rustfmt, clippy
+      - name: Verify isolated Rust resolution
+        run: python3 scripts/ci-isolate-rust.py verify 1.97.1
+      - name: Verify the synthetic foundation and production refusal
+        run: |
+          set -euo pipefail
+          source scripts/ci-ensure-cc.sh
+          PERSONAL_CARGO_BIN="$(rustup which --toolchain 1.97.1 cargo)"
+          PERSONAL_RUSTC_BIN="$(rustup which --toolchain 1.97.1 rustc)"
+          PATH="$(dirname "$PERSONAL_CARGO_BIN"):$PATH"
+          export PERSONAL_CARGO_BIN PERSONAL_RUSTC_BIN PATH
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/personal-provider-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          bash scripts/test-personal-provider.sh
+
   lint:
     name: Lint (fmt + clippy + audit + deny)
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Linux, X64, arcana-dbs]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Isolate Rust state for this job
+        run: python3 scripts/ci-isolate-rust.py prepare
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4  # stable 2026-07-30
         with:
           components: rustfmt, clippy
+      - name: Verify isolated Rust resolution
+        run: python3 scripts/ci-isolate-rust.py verify stable
+      - name: Rust isolation helper fixtures
+        run: python3 scripts/tests/test_ci_isolate_rust.py
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
       - name: Ensure protoc is available
         # Self-hosted runner pool is heterogeneous — some machines lack a
@@ -170,10 +209,14 @@ jobs:
 
   test:
     name: Test (linux)
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Linux, X64, arcana-dbs]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Isolate Rust state for this job
+        run: python3 scripts/ci-isolate-rust.py prepare
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4  # stable 2026-07-30
+      - name: Verify isolated Rust resolution
+        run: python3 scripts/ci-isolate-rust.py verify stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
       - name: Ensure protoc is available
         # Self-hosted runner pool is heterogeneous — some machines lack a
@@ -220,10 +263,14 @@ jobs:
 
   fuzz-smoke:
     name: Fuzz smoke (DISK-0012, 80s)
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Linux, X64, arcana-dbs]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Isolate Rust state for this job
+        run: python3 scripts/ci-isolate-rust.py prepare
       - uses: dtolnay/rust-toolchain@4fd1da8b0805d2d2e936788875a7d65dbd677dc2  # nightly 2026-07-30
+      - name: Verify isolated Rust resolution
+        run: python3 scripts/ci-isolate-rust.py verify nightly
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
         with:
           workspaces: fuzz
@@ -283,12 +330,16 @@ jobs:
             build_kind: native
           - target: aarch64-unknown-linux-gnu
             build_kind: aarch64
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Linux, X64, arcana-dbs]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Isolate Rust state for this job
+        run: python3 scripts/ci-isolate-rust.py prepare
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4  # stable 2026-07-30
         with:
           targets: ${{ matrix.target }}
+      - name: Verify isolated Rust resolution
+        run: python3 scripts/ci-isolate-rust.py verify stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
       - name: Prepare aarch64 toolchain (no docker, no sudo)
         if: matrix.build_kind == 'aarch64'

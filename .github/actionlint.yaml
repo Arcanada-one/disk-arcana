@@ -10,6 +10,7 @@ self-hosted-runner:
     - X64
     - arcana-agents
     - arcana-devs
+    - arcana-dbs
     - arcana-prod
     - arcana-prod-ci
     - disk-arcana-stage
