@@ -178,10 +178,8 @@ mod tests {
 
         let stat = std::fs::metadata(&file).unwrap();
         let size = stat.len();
-        let mtime_ns = {
-            use std::os::unix::fs::MetadataExt;
-            stat.mtime() * 1_000_000_000 + stat.mtime_nsec()
-        };
+        // Same helper the scanner uses, so the test also builds on Windows.
+        let mtime_ns = super::mtime_nanos(&stat);
 
         let sentinel = [0x5A; 32];
         let mut cache = HashMap::new();
