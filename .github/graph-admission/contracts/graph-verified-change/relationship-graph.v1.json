@@ -1,0 +1,82 @@
+{
+ "schema": "RelationshipGraphSchema/v1",
+ "id": "relationship-graph.v1",
+ "portion_id": "AUP-GRAPH-001:schema0",
+ "epic": "AUP-E29",
+ "decision_ref": "DEC-AUP-0008",
+ "normative_text": "contracts/graph-verified-change/relationship-graph.v1.md",
+ "status": "NORMATIVE_DRAFT — binding for every program-owned repository from R00 (DEC-AUP-0008); this JSON is what tools/graph/schema_check.py, build_graph.py and impact.py import; the .md explains it and the JSON wins where they disagree",
+ "document_schema_name": "RelationshipGraph/v1",
+ "purpose": "A relationship graph is a measurement instrument, not a source of truth: it SELECTS what a change must re-verify. It is only a production artefact when it can state which commit it represents, when and by what it was built, which edges are inferred, and what every node's content hash was.",
+ "node_types": {
+  "code_unit": {"granularity": "file (class-level nodes only at contract/route boundaries)", "id_form": "code_unit:<repo-relative path>", "content_hash": "sha256 of the file bytes at source_commit", "stack_coverage": ["TypeScript/NestJS", "TypeScript front-end", "Playwright adapter", "Rust module/crate (GRAPH-009)", "Python module (GRAPH-009)", "shared package marker @arcanada/*"]},
+  "contract": {"granularity": "one declared schema/DTO/enum", "id_form": "contract:<path>#<symbol>", "content_hash": "sha256 of the declaring file bytes (GRAPH-004 narrows it to the declaration text)", "kinds": ["zod", "class_validator_dto", "openapi", "cross_repo_enum", "type_alias_union", "json_schema"]},
+  "route": {"granularity": "one handler", "id_form": "route:<METHOD> <path>  (WS <event> for gateways)", "content_hash": "sha256 of the providing file bytes"},
+  "data_model": {"granularity": "one Prisma model or enum (or table)", "id_form": "data_model:<Model>", "content_hash": "sha256 of the model block text"},
+  "config_key": {"granularity": "one environment/config key", "id_form": "config_key:<KEY>", "content_hash": "sha256 of the key name"},
+  "deployable_unit": {"granularity": "service / CLI / front-end / adapter / shared package", "id_form": "deployable_unit:<workspace path or package name>", "content_hash": "sha256 of its package manifest bytes", "kinds": ["service", "frontend", "cli", "adapter", "library", "shared_package"]},
+  "document": {"granularity": "one KB/Scrutator document or repo markdown file", "id_form": "document:<path or KB id>", "content_hash": "sha256 of the document bytes"},
+  "work_item": {"granularity": "one Muneral work item", "id_form": "work_item:<ID>", "content_hash": "sha256 of the id (revision hash once Muneral supplies it)"},
+  "receipt": {"granularity": "one receipt file", "id_form": "receipt:<path>", "content_hash": "sha256 of the receipt bytes"}
+ },
+ "edge_types": {
+  "imports": {"from": ["code_unit"], "to": ["code_unit"], "meaning": "static import/export/require of another unit (resolved) or a reuse: @arcanada/* marker", "mandatory_verifier_hint": "type-check / compile of the importer"},
+  "calls": {"from": ["code_unit"], "to": ["code_unit"], "meaning": "runtime invocation; deterministic when resolvable from the AST, inferred for DI wiring / config-driven instantiation / dynamic dispatch", "mandatory_verifier_hint": "type-check of the caller; canary when inferred across a boundary"},
+  "implements_contract": {"from": ["code_unit", "route"], "to": ["contract"], "meaning": "the unit declares or serves the contract (provider side)", "mandatory_verifier_hint": "contract-diff provider side + type-check"},
+  "consumes_contract": {"from": ["code_unit", "route", "deployable_unit"], "to": ["contract", "route"], "meaning": "the unit depends on the contract (consumer side); target route = an HTTP client call site bound to a served route", "mandatory_verifier_hint": "consumer ⊆ provider check (contract-diff)"},
+  "provides_route": {"from": ["code_unit"], "to": ["route"], "meaning": "controller/handler registration", "mandatory_verifier_hint": "controller compile + contract-diff + route/config consistency"},
+  "reads_config": {"from": ["code_unit", "deployable_unit"], "to": ["config_key"], "meaning": "reads an env/config key", "mandatory_verifier_hint": "env/config schema validation"},
+  "maps_model": {"from": ["code_unit", "data_model"], "to": ["data_model"], "meaning": "code uses a data model (client call / generated type) or a model relates to another model", "mandatory_verifier_hint": "schema diff / prisma validate"},
+  "documents": {"from": ["document", "work_item"], "to": ["code_unit", "contract", "route", "data_model", "config_key", "deployable_unit", "document", "work_item", "receipt"], "meaning": "a document or work item describes the target (deterministic only through an explicit link/id; otherwise inferred)", "mandatory_verifier_hint": "doc reference check (path/id still resolves)"},
+  "verifies": {"from": ["receipt", "code_unit"], "to": ["code_unit", "contract", "route", "data_model", "config_key", "deployable_unit", "document", "work_item"], "meaning": "a receipt or a test unit verifies the target", "mandatory_verifier_hint": "selectable: run the targeted test / re-read the receipt"},
+  "deploys_to": {"from": ["code_unit", "deployable_unit"], "to": ["deployable_unit"], "meaning": "the unit ships inside / is deployed as the deployable", "mandatory_verifier_hint": "can-i-deploy gate (GRAPH-008)"}
+ },
+ "provenance": {
+  "values": ["deterministic", "inferred", "observed"],
+  "deterministic": "extracted by a deterministic parser from committed sources; reproducible byte-for-byte from the same commit",
+  "inferred": "derived by a heuristic, DI/config-wiring analysis, URL matching or an LLM; REQUIRES `inferred_by`; a candidate edge, never alone sufficient to waive a contract check across a service boundary",
+  "observed": "seen at runtime (trace / canary); REQUIRES `observed_at_utc`; never ground truth, carries the time it was seen",
+  "rule": "every edge carries exactly one provenance value; an edge without it is a schema violation, not a warning"
+ },
+ "edge_fields": {
+  "required": ["from", "to", "type", "provenance"],
+  "conditional": {"inferred_by": "required when provenance = inferred", "observed_at_utc": "required when provenance = observed"},
+  "optional": ["via", "boundary", "symbol", "site", "confidence"],
+  "boundary_values": ["intra_unit", "service", "repo"],
+  "forbidden": {"inferred_by on a deterministic edge": "LLM_EDGE_NOT_INFERRED — an edge that names an inference method is inferred by definition"}
+ },
+ "node_fields": {
+  "required": ["id", "type", "content_hash"],
+  "optional": ["path", "symbol", "kind", "attrs"],
+  "content_hash_form": "sha256:<64 hex>"
+ },
+ "manifest": {
+  "required": ["schema", "builder", "builder_version", "source_repo", "source_commit", "built_at_utc", "extractors", "node_count", "edge_count", "graph_digest"],
+  "optional": ["source_tree", "dirty", "language_coverage", "limitations", "incremental_from"],
+  "source_commit_form": "40-hex git commit sha",
+  "graph_digest": "sha256 over canonical JSON (sort_keys, separators (',',':'), ensure_ascii=False) of {nodes, edges, manifest minus graph_digest minus built_at_utc}; two builds of one commit must share the digest and, with an equal built_at_utc, be byte-identical",
+  "dirty_rule": "a graph built on a dirty working tree carries dirty=true and is refused by impact/admission (STALE_GRAPH)"
+ },
+ "document_layout": {"schema": "RelationshipGraph/v1", "manifest": "object", "nodes": "array sorted by id", "edges": "array sorted by (from, type, to, provenance)"},
+ "rules": {
+  "GRAPH_SCHEMA_MISMATCH": "document schema is not RelationshipGraph/v1",
+  "MANIFEST_MISSING_FIELD": "a required manifest field is absent",
+  "SOURCE_COMMIT_INVALID": "manifest.source_commit is not a 40-hex sha",
+  "BUILT_AT_INVALID": "manifest.built_at_utc is not an ISO-8601 UTC timestamp",
+  "NODE_TYPE_UNKNOWN": "node.type outside node_types",
+  "NODE_WITHOUT_HASH": "node lacks content_hash in the form sha256:<64 hex>",
+  "NODE_ID_FORM": "node id does not start with '<type>:'",
+  "DUPLICATE_NODE_ID": "two nodes share an id",
+  "EDGE_TYPE_UNKNOWN": "edge.type outside edge_types",
+  "EDGE_WITHOUT_PROVENANCE": "edge lacks the provenance field",
+  "EDGE_PROVENANCE_INVALID": "edge.provenance outside {deterministic, inferred, observed}",
+  "INFERRED_WITHOUT_METHOD": "inferred edge lacks inferred_by",
+  "OBSERVED_WITHOUT_TIME": "observed edge lacks observed_at_utc",
+  "LLM_EDGE_NOT_INFERRED": "an edge carries inferred_by (or via: llm) but claims provenance deterministic/observed",
+  "EDGE_ENDPOINT_UNKNOWN": "edge.from or edge.to names no node in the graph",
+  "EDGE_ENDPOINT_TYPE_MISMATCH": "edge endpoints violate the edge type's allowed from/to node types",
+  "GRAPH_DIGEST_MISMATCH": "manifest.graph_digest does not equal the recomputed digest",
+  "GRAPH_DIRTY": "manifest.dirty = true (informational for the validator; a refusal for impact/admission)"
+ },
+ "verdicts": {"conformant": "0 violations", "violation": "≥ 1 violation code; the classification is deterministic and blind-reproducible"}
+}
