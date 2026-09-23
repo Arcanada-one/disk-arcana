@@ -1,5 +1,14 @@
 # disk.arcanada.ai static site (DISK-0010)
 
+**Live origin (2026-08-09):** Cloudflare orange-cloud `disk.arcanada.ai` →
+`49.13.52.208` (arcana-www) `/var/www/disk.arcanada.ai/`. Prod
+(`65.108.236.39`) keeps a mirror + nginx vhost, but public `:80/:443` on the
+prod public IP do not complete TCP (mesh/Tailscale `:443` still works).
+
+**gRPC / enroll:** do not rely on orange-cloud apex for non-HTTP ports. Use
+grey-cloud `sync.disk.arcanada.ai` → prod (`:9443`). Enrollment WAN `:9445`
+stays closed per RB-011.
+
 Deploy to Arcana WWW webroot `/var/www/disk.arcanada.ai/`:
 
 ```bash

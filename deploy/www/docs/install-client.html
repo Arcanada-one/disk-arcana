@@ -22,10 +22,10 @@
     </section>
 
     <section class="mb-8">
-      <h2 class="text-xl font-semibold mb-3">macOS</h2>
-      <pre class="bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm overflow-x-auto"><code>cargo build --release -p disk-cli
-sudo ./scripts/install-macos.sh --binary ./target/release/disk</code></pre>
-      <p class="text-sm text-slate-400 mt-2">Or download a release binary from <a href="https://github.com/Arcanada-one/disk-arcana/releases" class="text-emerald-400">GitHub Releases</a>.</p>
+      <h2 class="text-xl font-semibold mb-3">macOS (Apple Silicon / Intel)</h2>
+      <pre class="bg-slate-900 border border-slate-700 rounded-lg p-4 text-sm overflow-x-auto"><code>curl -fsSL https://disk.arcanada.ai/install.sh | sh</code></pre>
+      <p class="text-sm text-slate-400 mt-2">Pins a signed notarized release from GitHub (<code>disk-macos-arm64</code> / <code>disk-macos-x86_64</code>). Example: <code>DISK_VERSION=v0.1.1 curl -fsSL https://disk.arcanada.ai/install.sh | sh</code>.</p>
+      <p class="text-sm text-slate-400 mt-2">From source (dev only): <code>cargo build --release -p disk-cli</code> then <code>sudo ./scripts/install-macos.sh --binary ./target/release/disk</code>.</p>
     </section>
 
     <section class="mb-8">
