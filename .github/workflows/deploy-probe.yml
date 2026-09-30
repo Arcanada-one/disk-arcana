@@ -14,11 +14,12 @@ on:
         description: Deploy target to probe
         type: choice
         required: true
-        default: arcana-prod
+        default: arcana-prd-host
         options:
-          # INFRA-0389: this public repository uses the default-group runner;
-          # arcana-prod-ci remains private-only.
-          - arcana-prod
+          # INFRA-0389: arcana-prod-ci remains private-only.
+          # INFRA-0417: the host-unique label of arcana-prd, not the shared
+          # `arcana-prod` label that once named the retired arcana-prod host.
+          - arcana-prd-host
           - arcana-devs
 
 permissions: {}

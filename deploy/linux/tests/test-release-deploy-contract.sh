@@ -343,7 +343,7 @@ assert_unconditional_shell_gate "$share_install_block" \
   'bash scripts/require-fresh-main.sh "$GITHUB_SHA"' \
   "share installation"
 
-grep -qF 'default: arcana-prod' "$PROBE_WORKFLOW" || fail "INFRA-0389 default runner routing changed"
+grep -qF 'default: arcana-prd-host' "$PROBE_WORKFLOW" || fail "INFRA-0389 default runner routing changed"
 ! grep -qE '^[[:space:]]*-[[:space:]]*arcana-prod-ci[[:space:]]*$' "$PROBE_WORKFLOW" ||
   fail "INFRA-0389 private-only runner leaked into the public probe"
 grep -qF '[[ "${{ steps.state.outputs.unit_file_state }}" == "enabled" ]]' "$PROBE_WORKFLOW" ||
