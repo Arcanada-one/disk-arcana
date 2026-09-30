@@ -180,12 +180,12 @@ jobs:
               echo "::error file=${workflow}::public workflow offers private-only runner target arcana-prod-ci"
               failures=1
             fi
-            if ! grep -qE '^[[:space:]]*default:[[:space:]]*arcana-prod[[:space:]]*$' "$workflow"; then
-              echo "::error file=${workflow}::public workflow must default to arcana-prod"
+            if ! grep -qE '^[[:space:]]*default:[[:space:]]*arcana-prd-host[[:space:]]*$' "$workflow"; then
+              echo "::error file=${workflow}::public workflow must default to arcana-prd-host"
               failures=1
             fi
-            if ! grep -qE '^[[:space:]]*-[[:space:]]*arcana-prod[[:space:]]*$' "$workflow"; then
-              echo "::error file=${workflow}::public workflow must offer arcana-prod"
+            if ! grep -qE '^[[:space:]]*-[[:space:]]*arcana-prd-host[[:space:]]*$' "$workflow"; then
+              echo "::error file=${workflow}::public workflow must offer arcana-prd-host"
               failures=1
             fi
           done
