@@ -440,8 +440,21 @@ stage_probe_step_count="$(awk '
   in_steps && /^      - / {count++}
   END {print count + 0}
 ' <<<"$stage_probe_block")"
-[[ "$stage_probe_step_count" -eq 2 ]] ||
-  fail "group-scoped stage probe must contain exactly two steps"
+[[ "$stage_probe_step_count" -eq 3 ]] ||
+  fail "group-scoped stage probe must contain exactly three steps (canonical preflight, exact-main source, readiness verdict)"
+
+# A2-457: the first step is the canonical runner-broker-preflight, run INLINE because this job has
+# permissions {} and no checkout. It is accepted only byte-identical to scripts/ci/runner-broker-preflight.sh,
+# whose git blob must be the workspace canonical 273ee95b; anything else in that slot is refused.
+stage_first_step="$(awk '/^    steps:$/ {in_steps=1; next} in_steps && /^      - / {n++} n==1' <<<"$stage_probe_block")"
+grep -qFx '      - name: Runner broker preflight (A2-457, inline canonical)' <<<"$stage_first_step" ||
+  fail "group-scoped stage probe does not start with the inline canonical runner-broker preflight"
+stage_preflight_inline="$(awk 'f {print} /^        run: \|$/ {f=1}' <<<"$stage_first_step" |
+  sed -e 's/^          //' -e 's/[[:space:]]*$//' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}')"
+[[ "$(git -C "$ROOT" hash-object "$ROOT/scripts/ci/runner-broker-preflight.sh")" == 273ee95be3c8003ed1351f68f6b42f7f543b4a39 ]] ||
+  fail "scripts/ci/runner-broker-preflight.sh is not the canonical blob 273ee95b"
+[[ "$stage_preflight_inline" == "$(<"$ROOT/scripts/ci/runner-broker-preflight.sh")" ]] ||
+  fail "group-scoped stage probe inline preflight is not byte-identical to scripts/ci/runner-broker-preflight.sh"
 
 stage_source_guard="$(sed -n '/^      - name: Exact main source$/,/^      - name: Read-only readiness verdict$/p' \
   <<<"$stage_probe_block")"
@@ -1598,9 +1611,33 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
         run: sudo -n -l
   }' "$WORKFLOW" >"$raw_sudo_step_stage_probe"
   run_stage_probe_fixture "$raw_sudo_step_stage_probe" \
-    'FAIL  group-scoped stage probe must contain exactly two steps' \
+    'FAIL  group-scoped stage probe must contain exactly three steps (canonical preflight, exact-main source, readiness verdict)' \
     "separate raw sudo policy step"
   printf 'PASS  separate raw sudo policy step is rejected for the intended reason\n'
+
+  # A2-457: the inline canonical preflight is load-bearing — one changed byte, or its removal, is refused.
+  drifted_preflight_stage_probe="$fixture_root/stage-probe-drifted-preflight.yml"
+  awk '
+    /^      - name: Runner broker preflight \(A2-457, inline canonical\)$/ {in_pf=1}
+    !mutated && in_pf && /^          set -euo pipefail$/ {print "          set -uo pipefail"; mutated=1; next}
+    {print}
+  ' "$WORKFLOW" >"$drifted_preflight_stage_probe"
+  run_stage_probe_fixture "$drifted_preflight_stage_probe" \
+    'FAIL  group-scoped stage probe inline preflight is not byte-identical to scripts/ci/runner-broker-preflight.sh' \
+    "drifted inline preflight"
+  printf 'PASS  a drifted inline preflight is rejected for the intended reason\n'
+
+  no_preflight_stage_probe="$fixture_root/stage-probe-no-preflight.yml"
+  awk '
+    /^  stage-readiness:$/ {in_job=1}
+    in_job && /^      # A2-457: this job has permissions/ {skip=1}
+    skip && /^      - name: Exact main source$/ {skip=0; in_job=0}
+    !skip {print}
+  ' "$WORKFLOW" >"$no_preflight_stage_probe"
+  run_stage_probe_fixture "$no_preflight_stage_probe" \
+    'FAIL  group-scoped stage probe must contain exactly three steps (canonical preflight, exact-main source, readiness verdict)' \
+    "removed inline preflight"
+  printf 'PASS  a removed inline preflight is rejected for the intended reason\n'
 
   host_write_step_stage_probe="$fixture_root/stage-probe-dd-host-write-step.yml"
   sed '/^  stage-readiness:$/,/^  build:$/ {/^[[:space:]]*steps:$/a\      - name: Host write outside readiness\
@@ -1608,7 +1645,7 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
         run: dd if=/dev/zero of=/tmp/disk-arcana-stage-probe-mutant bs=1 count=1
   }' "$WORKFLOW" >"$host_write_step_stage_probe"
   run_stage_probe_fixture "$host_write_step_stage_probe" \
-    'FAIL  group-scoped stage probe must contain exactly two steps' \
+    'FAIL  group-scoped stage probe must contain exactly three steps (canonical preflight, exact-main source, readiness verdict)' \
     "separate dd host-write step"
   printf 'PASS  separate dd host-write step is rejected for the intended reason\n'
 
@@ -1712,7 +1749,8 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
 
   early_exit_main_stage_probe="$fixture_root/stage-probe-early-exit-main.yml"
   awk '
-    !mutated && /^          set -euo pipefail$/ {
+    /^      - name: Exact main source$/ {in_source=1}
+    !mutated && in_source && /^          set -euo pipefail$/ {
       print
       print "          exit 0"
       mutated=1
@@ -1727,7 +1765,8 @@ if [[ "${DISK_ARCANA_ORDER_FIXTURE_CHILD:-}" != 1 ]]; then
 
   early_return_main_stage_probe="$fixture_root/stage-probe-early-return-main.yml"
   awk '
-    !mutated && /^          set -euo pipefail$/ {
+    /^      - name: Exact main source$/ {in_source=1}
+    !mutated && in_source && /^          set -euo pipefail$/ {
       print
       print "          return 0"
       mutated=1
