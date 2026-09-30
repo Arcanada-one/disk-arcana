@@ -5,7 +5,7 @@
   "superseded_self_rule": "DEC-AUP-0035: the entity a receipt can never verify is the PREVIOUS VERSION OF ITSELF. When a receipt is re-issued at the same path for the same work item — the ordinary case after a rebase or a second commit on a card — the copy of it standing in the tree is superseded by construction: this run is the measurement that replaces it, so the only verdict it could carry is I14 `not_measured` about a document that no longer exists at that path once the run finishes. It is excluded with the work item and the output path that identify it, both re-derived from Git by impact_pair.receipt_problems, never asserted.",
   "verdict": "admitted_with_exemptions"
  },
- "captured_at_utc": "2026-09-30T19:46:26Z",
+ "captured_at_utc": "2026-09-30T20:01:03Z",
  "change_set": {
   "base": "b74ec3ba65db4569cde54979320877f5539b6d85",
   "files": [
@@ -45,7 +45,7 @@
     "status": "A"
    }
   ],
-  "head": "10c9d0b928dde28999bb6e49bc8b26fd5b4949d0",
+  "head": "890c875adb111eee9b46b50e4e400243923ed3e5",
   "mode": "diff"
  },
  "decision_ref": "DEC-AUP-0008",
@@ -99,30 +99,30 @@
  },
  "exemptions": [
   {
-   "code": "RETIREMENT_SEMANTICS",
+   "code": "NOT_MEASURED_INSTRUMENT_GAP",
+   "decision_ref": "Control admission decision 2026-09-30T19:45Z (DEC-AUP-0037 R3), arc2/control/RETIREMENT-EXEMPTION-disk-arcana234-fleet-watcher54.md",
    "entity": "code_unit:.github/workflows/deploy-arcana-agents-share.yml",
-   "owner": "arc2",
    "expires_at_utc": "2026-10-14T00:00:00Z",
-   "decision": "Control admission decision (DEC-AUP-0037 R3), signer Control Arcanada2-orch, 2026-09-30T19:45Z, RETIREMENT-EXEMPTION-disk-arcana234-fleet-watcher54",
-   "reason": "The workflow was moved to .github/retired-workflows/ (not executed). Evidence (reviewer SITE, 19:55Z): 0 of 19 org runners carry the arcana-agents label; the job targets only that label; no runs since the INFRA-0417 decommission.",
-   "reverse_if": "any runner reappears with the arcana-agents label, or anything downstream expected an artifact from this job"
+   "owner": "arc2",
+   "reason": "workflow_config: retirement semantics not measured by the verifier. Evidence (SITE review, REVIEWS.md 19:55Z): 0 of 19 org runners carry arcana-agents; the job targets only that label; the file is moved to .github/retired-workflows and is not executed; no run since 2026-09-03 (INFRA-0417). reverse_if: a runner reappears with arcana-agents, or anything downstream expected an artifact from this job.",
+   "verifier": "workflow_config"
   }
  ],
  "graph": {
   "builder_version": "1.0.1",
   "built_at_utc": "2026-09-05T00:00:00Z",
   "graph_digest": "sha256:f262315de6b835187aad2a91e42e73a18258afe139408d474eb0383fd512526b",
-  "path": "/tmp/pub/vw-disk-arcana/verifier-out/graph-b74ec3ba65db.json",
+  "path": "/tmp/pub/vw-disk-arcana3/verifier-out/graph-b74ec3ba65db.json",
   "source_commit": "b74ec3ba65db4569cde54979320877f5539b6d85"
  },
  "head_graph": {
   "builder_version": "1.0.1",
   "built_at_utc": "2026-09-05T00:00:00Z",
-  "graph_digest": "sha256:a12ade0e3abf772d330810d4e6321231efd44f44d4ffd0229d914f7c97860bad",
-  "path": "/tmp/pub/vw-disk-arcana/verifier-out/graph-head-10c9d0b928dd.json",
-  "source_commit": "10c9d0b928dde28999bb6e49bc8b26fd5b4949d0",
+  "graph_digest": "sha256:efdf303f0b90805886a25ebab99f0be1b345e343f06b0269ae39269a9f6fcde6",
+  "path": "/tmp/pub/vw-disk-arcana3/verifier-out/graph-head-890c875adb11.json",
+  "source_commit": "890c875adb111eee9b46b50e4e400243923ed3e5",
   "staleness": {
-   "checked_at_utc": "2026-09-30T19:46:28Z",
+   "checked_at_utc": "2026-09-30T20:01:05Z",
    "checked_nodes": 424,
    "method": "manifest.dirty must be false; manifest.source_commit == change_set.head; working tree must be clean (a receipt in diff mode describes committed history only); content_hash of every whole-file node (code_unit, document, receipt; deployable_unit via its package.json) must equal the sha256 of the file bytes at head (git objects); contract/route/data_model hashes are extractor-owned (declaration text) and not recomputed",
    "mismatched_nodes": [],
@@ -131,7 +131,7 @@
  },
  "host": "public-ci-host",
  "host_redacted": true,
- "host_sha256": "0e8305ab5c6deabefa664a3c04ee3e7935b5888325ff3716eb1999bc93372936",
+ "host_sha256": "974d0f00e2e2120cf096613b07093f9fe8aa2565836b632d470ef707081fdbb6",
  "impact_set": {
   "deterministic_core": [],
   "edge_types": "all",
@@ -145,13 +145,14 @@
  },
  "notes": [
   "DRAFT produced by `arcana verify` (tools/graph/verify.py 1.2.0) from matrix contracts/graph-verified-change/verifier-matrix.v1.json; selection rule: required(entity) = ⋃ edge_types[t].mandatory over the edge types t of the hops that reach the entity in its best path (i…",
-  "profile: (auto-detected); baseline: (auto-base-freeze: pre-existing findings at base frozen for this run; persist one with --freeze-baseline) (valid); selected: none; disabled: none"
+  "profile: (auto-detected); baseline: (auto-base-freeze: pre-existing findings at base frozen for this run; persist one with --freeze-baseline) (valid); selected: none; disabled: none",
+  "exemptions: 1 attached from /tmp/pub/exemptions/EXEMPTION-disk-arcana234.verify-exemptions.json"
  ],
  "producer": {
   "tool": "tools/graph/verify.py",
   "version": "1.2.0"
  },
- "receipt_id": "car-verify-20260930T194626Z-10c9d0b9",
+ "receipt_id": "car-verify-20260930T200103Z-890c875a",
  "receipt_path": "receipts/graph/change-admission-A2-457-retire-arcana-agents.json",
  "repo": {
   "name": "Arcanada-one/disk-arcana",
@@ -170,7 +171,7 @@
  },
  "schema": "ChangeAdmissionReceipt/v1",
  "staleness": {
-  "checked_at_utc": "2026-09-30T19:46:28Z",
+  "checked_at_utc": "2026-09-30T20:01:05Z",
   "method": "manifest.dirty must be false; manifest.source_commit == change_set.base; working tree must be clean (a receipt in diff mode describes committed history only); content_hash of every whole-file node (code_unit, document, receipt; deployable_unit via its package.json) must equal the sha256 of the file bytes at base (git objects); contract/route/data_model hashes are extractor-owned (declaration text) and not recomputed",
   "mismatched_nodes": [],
   "verdict": "fresh"
@@ -179,7 +180,7 @@
   {
    "content_hash": {
     "base": null,
-    "head": "sha256:d7dc55d8dbf2524bf18374d7416a203ec98754872b2ef3e3464a9f9acb7171ea"
+    "head": "sha256:01b4ea141ff206278526af272d5d8b488b5030cfa2182bd8cb746553dbf51216"
    },
    "entity": "receipt:receipts/graph/change-admission-A2-457-retire-arcana-agents.json",
    "node_type": "receipt",
@@ -193,7 +194,7 @@
   }
  ],
  "tree": {
-  "commit": "10c9d0b928dde28999bb6e49bc8b26fd5b4949d0",
+  "commit": "890c875adb111eee9b46b50e4e400243923ed3e5",
   "dirty": false
  },
  "verdicts": [
@@ -234,8 +235,8 @@
    "exit_code": 1,
    "id": "v-workflow-config-54cbbbd6a3ac88ba",
    "kind": "config_schema",
-   "output_ref": "/tmp/pub/vw-disk-arcana/verifier-out/v-workflow-config-54cbbbd6a3ac88ba.txt",
-   "started_at_utc": "2026-09-30T19:46:29Z",
+   "output_ref": "/tmp/pub/vw-disk-arcana3/verifier-out/v-workflow-config-54cbbbd6a3ac88ba.txt",
+   "started_at_utc": "2026-09-30T20:01:06Z",
    "summary": "workflow removed/renamed; retirement semantics require separate evidence"
   },
   {
@@ -250,8 +251,8 @@
    "exit_code": 0,
    "id": "v-fitness",
    "kind": "fitness_rules",
-   "output_ref": "/tmp/pub/vw-disk-arcana/verifier-out/v-fitness.json",
-   "started_at_utc": "2026-09-30T19:46:29Z",
+   "output_ref": "/tmp/pub/vw-disk-arcana3/verifier-out/v-fitness.json",
+   "started_at_utc": "2026-09-30T20:01:06Z",
    "summary": "23 finding(s): 0 new / 23 frozen; 0 entity(ies) failed"
   },
   {
@@ -266,8 +267,8 @@
    "exit_code": 0,
    "id": "v-doc-reference",
    "kind": "doc_reference",
-   "output_ref": "/tmp/pub/vw-disk-arcana/verifier-out/v-doc-reference.txt",
-   "started_at_utc": "2026-09-30T19:46:29Z",
+   "output_ref": "/tmp/pub/vw-disk-arcana3/verifier-out/v-doc-reference.txt",
+   "started_at_utc": "2026-09-30T20:01:06Z",
    "summary": "1 document(s), 0 failed"
   }
  ],
@@ -310,8 +311,8 @@
    "receipt:receipts/graph/change-admission-A2-457-retire-arcana-agents.json": []
   },
   "seconds": {
-   "prepare": 0.85,
-   "total": 2.65,
+   "prepare": 0.81,
+   "total": 2.63,
    "verifiers": 0.01
   }
  },
