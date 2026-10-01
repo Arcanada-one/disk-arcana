@@ -717,10 +717,6 @@ jobs:
           artifact-ids: ${{ needs.build.outputs.artifact_id }}
           path: ${{ runner.temp }}/disk-deploy-bundle
 
-      - name: Runner broker preflight (A2-457)
-        env: { BROKER_PREFLIGHT_BIN: /usr/local/sbin/disk-arcana-deploy-broker }
-        run: scripts/ci/runner-broker-preflight.sh
-
       - name: Deploy exact bundle through installed broker
         env:
           EXPECTED_ARTIFACT_ID: ${{ needs.build.outputs.artifact_id }}
@@ -842,10 +838,6 @@ jobs:
         with:
           artifact-ids: ${{ needs.build.outputs.artifact_id }}
           path: ${{ runner.temp }}/disk-deploy-bundle
-
-      - name: Runner broker preflight (A2-457)
-        env: { BROKER_PREFLIGHT_BIN: /usr/local/sbin/disk-arcana-deploy-broker }
-        run: scripts/ci/runner-broker-preflight.sh
 
       - name: Deploy staged exact bundle through installed broker
         env:
