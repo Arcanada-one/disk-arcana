@@ -6,6 +6,14 @@ on:
   pull_request:
     branches: [main]
 
+# A newer push to a pull-request branch supersedes the older run. Everything that
+# is not a pull_request (push to main) gets a group unique to its run, so main
+# runs are never cancelled and never replaced while pending - release-deploy
+# looks for a successful main CI run per commit.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -13,14 +21,18 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
-# Route to an existing public runner verified against the tool-path ownership
-# checks. Eligibility is narrower than the generic Linux pool; preserve those
-# checks and keep private runners excluded. One eligible runner serializes this
-# CI queue; cold isolated toolchain downloads still apply.
+# Route to the `arcana-dbs-ci` pool on the arcana-dbs host: three runners
+# (arcana-dbs, arcana-dbs-2, arcana-dbs-3), so up to three of these jobs run at
+# once instead of queueing behind a single slot. arcana-dbs-2/-3 run as a
+# separate unprivileged user (ci-dbs-ci: no sudo rules, no docker) inside a
+# low-priority, capped systemd slice because that host also serves the production
+# databases and the Vault primary. Keep the tool-path ownership checks (scripts/
+# ci-isolate-rust.py) and keep private runners excluded. Cold isolated toolchain
+# downloads still apply.
 jobs:
   personal-provider:
     name: Personal provider foundation (Rust 1.97.1)
-    runs-on: [self-hosted, Linux, X64, arcana-dbs]
+    runs-on: [arcana-dbs-ci]
     timeout-minutes: 20
     env:
       CARGO_BUILD_JOBS: 2
@@ -49,7 +61,7 @@ jobs:
 
   lint:
     name: Lint (fmt + clippy + audit + deny)
-    runs-on: [self-hosted, Linux, X64, arcana-dbs]
+    runs-on: [arcana-dbs-ci]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Isolate Rust state for this job
@@ -213,7 +225,7 @@ jobs:
 
   test:
     name: Test (linux)
-    runs-on: [self-hosted, Linux, X64, arcana-dbs]
+    runs-on: [arcana-dbs-ci]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Isolate Rust state for this job
@@ -267,7 +279,7 @@ jobs:
 
   fuzz-smoke:
     name: Fuzz smoke (DISK-0012, 80s)
-    runs-on: [self-hosted, Linux, X64, arcana-dbs]
+    runs-on: [arcana-dbs-ci]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Isolate Rust state for this job
@@ -334,7 +346,7 @@ jobs:
             build_kind: native
           - target: aarch64-unknown-linux-gnu
             build_kind: aarch64
-    runs-on: [self-hosted, Linux, X64, arcana-dbs]
+    runs-on: [arcana-dbs-ci]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Isolate Rust state for this job
