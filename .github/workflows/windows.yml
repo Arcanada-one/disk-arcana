@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# Same rule as ci.yml: supersede older pull_request runs of the same ref only.
+concurrency:
+  group: windows-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     name: windows-${{ matrix.target }}
