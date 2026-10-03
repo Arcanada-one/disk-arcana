@@ -69,12 +69,19 @@ def crate(name):
 def fuzz():
     if os.environ.get('CI_LINKER_BOOTSTRAP') == 'zig':
         raise Unmeasured('full fuzz requires native sanitizer-capable linker; zig skip is not success')
+    # cargo-fuzz does not expose Cargo's --locked flag. Refuse stale lockfiles
+    # before it can resolve/build, then check that the tool kept the lock intact.
+    run(['cargo', '+nightly', 'metadata', '--locked', '--format-version', '1',
+         '--manifest-path', 'fuzz/Cargo.toml'])
+    lock = (ROOT / 'fuzz/Cargo.lock').read_bytes()
     run(['cargo', '+nightly', 'fuzz', '--version'], ROOT / 'fuzz')
     targets = tomllib.loads((ROOT / 'fuzz/Cargo.toml').read_text())['bin']
     if not targets:
         raise Unmeasured('no fuzz targets declared')
     for target in targets:
         output = run(['cargo', '+nightly', 'fuzz', 'run', target['name'], '--', '-max_total_time=600'], ROOT / 'fuzz')
+        if (ROOT / 'fuzz/Cargo.lock').read_bytes() != lock:
+            raise Unmeasured('cargo-fuzz changed the locked source; preserve mutation evidence')
         if not re.search(r'Done [1-9]\d* runs in', output):
             raise Unmeasured(f"fuzzer did not report actual execution: {target['name']}")
     print(f'{len(targets)} passed (all declared fuzz targets, 600 seconds each)')

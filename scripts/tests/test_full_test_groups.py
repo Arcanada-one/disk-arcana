@@ -59,6 +59,13 @@ class FullTestGroups(unittest.TestCase):
                 self.assertNotIn('--test', command)
                 self.assertNotIn('--lib', command)
 
+    def test_fuzz_stale_lock_stops_before_any_campaign(self):
+        with patch.object(runner, 'run', side_effect=subprocess.CalledProcessError(101, ['cargo'])) as execute:
+            self.assertEqual(runner.main(['fuzz']), 101)
+            self.assertEqual(execute.call_count, 1)
+            self.assertIn('--locked', execute.call_args.args[0])
+            self.assertIn('metadata', execute.call_args.args[0])
+
     def test_profile_declares_all_groups_and_real_runner(self):
         profile = json.loads((runner.ROOT / '.arcana/verify.json').read_text())
         groups = {k: v for k, v in profile['deployables'].items() if 'full_test' in v}
