@@ -37,6 +37,13 @@ attempt, object/revision, kind, length and digest cannot change. Identical retry
 returns stable evidence; changed identity or object/attempt collision conflicts.
 An untracked file cannot acquire a reservation and later be adopted as provenance.
 
+In the fresh capture profile, all parts of the same realm/capture/cancellation
+generation must retain the same complete descriptor identity, including allocated
+IDs. A new operation ID does not allow a different descriptor for another part.
+Reservation checks this within its SQLite transaction before inserting either
+row. Startup refuses retained cross-part conflicts before scanning object bytes;
+it does not rewrite or delete the contradictory inventory.
+
 Stage creates an exclusive file, checks exact length/SHA-256/note UTF-8, syncs the
 file, renames without replacement and syncs both directories/new ancestors.
 Only then can one SQLite transaction change PREPARED to DURABLE and persist local
@@ -103,3 +110,9 @@ Authorization, cross-person denial, shared receipt/outcome registration,
 publication/cancellation, cleanup, TLS/exporters, release admission, lifecycle
 fences, encrypted realm provisioning, capacity and deployment remain separate
 implementation and verification obligations.
+
+The capture inventory regression tests exercise actual file-backed SQLite
+reservations, conflict rollback and connection reopen without invoking the Linux
+filesystem provider. They do not establish openat2 confinement, process-crash
+durability or production authorization. Those require the separate provider and
+runtime checks above.
