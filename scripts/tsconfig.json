@@ -1,0 +1,11 @@
+{
+  "extends": "../plugins/obsidian/tsconfig.json",
+  "compilerOptions": {
+    "typeRoots": [
+      "../plugins/obsidian/node_modules/@types"
+    ]
+  },
+  "include": [
+    "verify-personal-capture-vectors.mjs"
+  ]
+}

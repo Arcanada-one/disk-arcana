@@ -1,0 +1,91 @@
+{
+  "schema": "VerifyProfile/v1",
+  "deployables": {
+    ".": {
+      "full_test": [
+        "python3",
+        "scripts/full-test-group.py",
+        "root"
+      ],
+      "full_test_timeout_seconds": 7200
+    },
+    "crates/disk-cli": {
+      "full_test": [
+        "python3",
+        "../../scripts/full-test-group.py",
+        "disk-cli"
+      ],
+      "full_test_timeout_seconds": 1800
+    },
+    "crates/disk-client": {
+      "full_test": [
+        "python3",
+        "../../scripts/full-test-group.py",
+        "disk-client"
+      ],
+      "full_test_timeout_seconds": 1800
+    },
+    "crates/disk-core": {
+      "full_test": [
+        "python3",
+        "../../scripts/full-test-group.py",
+        "disk-core"
+      ],
+      "full_test_timeout_seconds": 1800
+    },
+    "crates/disk-gui": {
+      "full_test": [
+        "python3",
+        "../../scripts/full-test-group.py",
+        "disk-gui"
+      ],
+      "full_test_timeout_seconds": 1800
+    },
+    "crates/disk-personal": {
+      "full_test": [
+        "python3",
+        "../../scripts/full-test-group.py",
+        "disk-personal"
+      ],
+      "full_test_timeout_seconds": 1800
+    },
+    "crates/disk-proto": {
+      "full_test": [
+        "python3",
+        "../../scripts/full-test-group.py",
+        "disk-proto"
+      ],
+      "full_test_timeout_seconds": 1800
+    },
+    "crates/disk-server": {
+      "full_test": [
+        "python3",
+        "../../scripts/full-test-group.py",
+        "disk-server"
+      ],
+      "full_test_timeout_seconds": 1800
+    },
+    "crates/disk-storage": {
+      "full_test": [
+        "python3",
+        "../../scripts/full-test-group.py",
+        "disk-storage"
+      ],
+      "full_test_timeout_seconds": 1800
+    },
+    "fuzz": {
+      "full_test": [
+        "python3",
+        "../scripts/full-test-group.py",
+        "fuzz"
+      ],
+      "full_test_timeout_seconds": 3600
+    },
+    "plugins/obsidian": {
+      "tsconfig": [
+        "plugins/obsidian/tsconfig.json",
+        "plugins/obsidian/tsconfig.generated.json"
+      ]
+    }
+  }
+}
