@@ -75,3 +75,27 @@ ancestors outside their temporary tree. Fixture file and directory permissions
 remain real; explicit writable-parent and foreign-owner arms verify refusal.
 Unexpected bootstrap is blocked, while bootstrap tests mock all subprocesses.
 This is fixture isolation, not a relaxation of the production path checks.
+
+## Strict checking of generated plugin JavaScript
+
+The build retains source parameter, return, field and variable types as JSDoc
+from the TypeScript AST (`plugins/obsidian/typed-jsdoc.mjs`). The bundle is still
+checked by the unchanged strict `tsconfig.generated.json`; compiler errors are
+not suppressed. The explicit CommonJS entry preserves the default getter and
+non-enumerable `__esModule` marker without untyped interoperability helpers.
+Bundled class references use their actual local declarations rather than the
+nominal private members of separate imported source classes.
+
+This generator handles the syntax used by this plugin. It rejects type
+assertions, destructured parameters and rest parameters that it cannot retain
+faithfully. Prefer runtime narrowing or contextual types to erased assertions.
+The tests compile emitted positive and incompatible-return examples, verify
+unsupported syntax fails, and load the actual generated CommonJS export.
+Regenerate `main.js` with `npm run build`; never patch that output by hand.
+
+The CLI status smoke owns its vault under its temporary directory, including
+quoted paths. The ACL documentation example is executable and belongs to the
+ACL-check method; role-resolution behavior is unchanged. The detached fuzz lock
+must describe the current workspace dependencies and retain the compatible
+async-trait generator revision. A locked metadata/check success only establishes
+that prerequisite, not execution of the four full fuzz campaigns.

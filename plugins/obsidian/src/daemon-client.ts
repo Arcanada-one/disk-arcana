@@ -79,6 +79,6 @@ export class DaemonClient {
     if (response.status < 200 || response.status >= 300) {
       throw new Error(`Disk Arcana daemon returned HTTP ${response.status}`);
     }
-    return response.json as T;
+    return response.json;
   }
 }

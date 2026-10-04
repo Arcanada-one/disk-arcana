@@ -1,8 +1,7 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 import type DiskArcanaPlugin from "./main";
 import { normalizeLoopbackUrl } from "./daemon-client";
-import { sanitizeSettings } from "./settings-model";
-import type { ConflictAction } from "./contracts";
+import { isConflictAction, sanitizeSettings } from "./settings-model";
 
 export { DEFAULT_SETTINGS, sanitizeSettings, type DiskArcanaSettings } from "./settings-model";
 
@@ -57,7 +56,8 @@ export class DiskArcanaSettingTab extends PluginSettingTab {
           })
           .setValue(this.plugin.settings.defaultConflictAction)
           .onChange(async (value) => {
-            this.plugin.settings.defaultConflictAction = value as ConflictAction;
+            if (!isConflictAction(value)) return;
+            this.plugin.settings.defaultConflictAction = value;
             await this.plugin.saveSettings();
           })
       );

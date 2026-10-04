@@ -559,14 +559,19 @@ client_key  = "/etc/disk-arcana/client.key"
 
 [[share]]
 name = "test-vault"
-path = "/tmp/disk-e2e-vault"
+path = __VAULT_PATH__
 "#;
 
     let bin = env!("CARGO_BIN_EXE_disk");
     let dir = tempfile::tempdir().unwrap();
     let cfg_path = dir.path().join("disk.toml");
-    std::fs::write(&cfg_path, CONFIG_UNREACHABLE_SERVER).unwrap();
-    std::fs::create_dir_all("/tmp/disk-e2e-vault").unwrap();
+    let vault = dir.path().join("vault");
+    std::fs::create_dir(&vault).unwrap();
+    // JSON string escaping is valid for this TOML basic string, including
+    // quotes/backslashes in a caller-provided temporary-directory path.
+    let quoted_vault = serde_json::to_string(vault.to_str().unwrap()).unwrap();
+    let config = CONFIG_UNREACHABLE_SERVER.replace("__VAULT_PATH__", &quoted_vault);
+    std::fs::write(&cfg_path, config).unwrap();
 
     let mut child = Command::new(bin)
         .args([
