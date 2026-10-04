@@ -1,0 +1,481 @@
+{
+  "schema": "CanaryPlan/v2",
+  "id": "persist240-runner-29e76",
+  "owner": "PERSIST same owner term_7182995b-234d-4791-b2ce-b0aa685b0963",
+  "environment": "arcana-devs-owned-local-bounded-no-remote-provider",
+  "read_only": false,
+  "subject": {
+    "schema": "GitCanarySubject/v1",
+    "commit": "29e76c502e742012c3e09566b8272fdeec0697c0",
+    "tree": "dd97eec1e8c944d37899d7ea3ae7d9a330aa8da1",
+    "evidence": {
+      "path": "source.json",
+      "sha256": "6e01fcae4cf21eb784705a3e02a17f8c9174538671caf6fc5e7172202aac9314",
+      "source_field": "commit"
+    }
+  },
+  "probes": [
+    {
+      "id": "complete-disk-proto",
+      "kind": "process",
+      "argv": [
+        "/usr/bin/python3.12",
+        "-B",
+        "scripts/full-test-group.py",
+        "disk-proto"
+      ],
+      "cwd": ".",
+      "env_keys": [
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "CARGO_TARGET_DIR",
+        "CARGO_NET_OFFLINE"
+      ],
+      "timeout_seconds": 120,
+      "capture_limit_bytes": 1048576,
+      "mutating": true,
+      "entities": [
+        "code_unit:scripts/full-test-group.py"
+      ],
+      "executable_sha256": "e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f",
+      "execution_files": [
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/.arcana/verify.json",
+          "sha256": "942b095400295d61f1ad8226b6bbed71290983e5328936f4d392ab526b6f1504"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/.cargo/config.toml",
+          "sha256": "944aabd2690f42b21b063d7afeeaaf3860732b6bbdd77576314cd3c3d78ae272"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/Cargo.lock",
+          "sha256": "c6de4766728ca1783a9d7ef017acb6a2964c579c1ffc6d49513e0598b3a818d8"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/Cargo.toml",
+          "sha256": "169ef3418f47c49f1f905e5e6015e012333cd8ebea5e0fd8e5d868e8f8e5d06c"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-cli/Cargo.toml",
+          "sha256": "ce4262f4c857c6de4119fa68c07ae996951324ffb6ca6068526d8c2f21e8e149"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-client/Cargo.toml",
+          "sha256": "6afe0b77141eaa72d8f252cfb2121e24725a6820df69af0fdb12012743d84a11"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-core/Cargo.toml",
+          "sha256": "c5d45a1f5b693597e40a485fcd4586134f552a13e6818b5f941333b8ab9fb968"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-gui/Cargo.toml",
+          "sha256": "a817749dc475a32dfd35fe2420420cf3ed82c4acafaaf3488e7247fc5695be2a"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-personal/Cargo.toml",
+          "sha256": "b09218412ae7a5fb16725a21dbf858c86462fc0e7ebbd55fc40b7af3713ee269"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-proto/Cargo.toml",
+          "sha256": "1994a7b9ec286349ca412d54c583874afa936f51d4a816a095f1186a0bb9c6f0"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-proto/build.rs",
+          "sha256": "aee51b68d93c72a2448e10612a1e905ab2c1e962c27fb231cd5546a1a63437a5"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-proto/src/lib.rs",
+          "sha256": "1695a2e17edda1687ca7dcf36054eca4e7bd070b293edea91c4247cb9c45400d"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-server/Cargo.toml",
+          "sha256": "7de14dbbc93062c1eaac7b1bbfb153123fcb8ba903c71144eb5bbcebfad2edac"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-storage/Cargo.toml",
+          "sha256": "11f208dc327a0158d50005a5b021c25cf3f51f1b79370a6f64dd91046800e98b"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/fuzz/Cargo.lock",
+          "sha256": "887abecc3dea8aac5d35802ab251e6539a7ac96bfdf5650e829edc9b8bf3a135"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/fuzz/Cargo.toml",
+          "sha256": "c2246c49f8e0347069f8794eef1db58160521c1c5f9e90fa7f188a1043b5311e"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/plugins/obsidian/package-lock.json",
+          "sha256": "f8e1fb9772c739b5371031656c3997655de87cee807a4bd8c02246dec9e95857"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/proto/disk.proto",
+          "sha256": "b5981a6f04f08b05ea8440fe4ead201463ad02307916876f400084ae4e637c6c"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/rust-toolchain.toml",
+          "sha256": "e0eeaad88b35bdeee8af9771ba21f5e5636310566e8e08ccc0d7c9e20c14e0ca"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/ci-isolate-rust.py",
+          "sha256": "1c892a952f35bed0dcf27f112785086329d39628ff7b329ccee07801c73f5c58"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/full-test-group.py",
+          "sha256": "57f0228c418333f878d561a9740f54a13d6b88abdb6488f24821b804227669de"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/full-test.env.example",
+          "sha256": "9112541cefc0a692e88b988d4237a8f9a8230f6a8d13a3793d7718c7f8a2c4e3"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/tests/test_ci_isolate_rust.py",
+          "sha256": "b3937f57783f4d18929f4b219de0bfe3828b24b46bb08283600d5801a0f8785e"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/tests/test_full_test_groups.py",
+          "sha256": "ac265e0d784d55853bd4ee80cb298cc085ac65bcc9e957f0a6d2beded2fda6d3"
+        },
+        {
+          "path": "/home/dev/.cargo/bin/rustup",
+          "sha256": "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71"
+        },
+        {
+          "path": "/home/dev/.local/bin/protoc",
+          "sha256": "e718992c5733ece01264f160c0890229770791e51c9612a2b34dc17f83ab3773"
+        },
+        {
+          "path": "/home/dev/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+          "sha256": "828980723df339d62434390e9fb8ef8831036583343ae2316b7ab5646b5c1953"
+        },
+        {
+          "path": "/home/dev/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc",
+          "sha256": "d3a664c970a9fd8361b64194861bebc1ae37b9054e5ee3400dc1c9e691797eea"
+        },
+        {
+          "path": "/home/dev/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustdoc",
+          "sha256": "3b0c7aef20e0dfdfe2dd19ddb0b40d3b744f76318a44031813f501e1912934df"
+        }
+      ],
+      "expect": {
+        "exit_codes": [
+          0
+        ],
+        "stdout_contains": [
+          "--no-default-features",
+          "--all-features",
+          "test result: ok. 7 passed"
+        ]
+      }
+    },
+    {
+      "id": "storage-refusal",
+      "kind": "process",
+      "argv": [
+        "/usr/bin/python3.12",
+        "-B",
+        "scripts/full-test-group.py",
+        "disk-storage"
+      ],
+      "cwd": ".",
+      "env_keys": [
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "CARGO_TARGET_DIR",
+        "CARGO_NET_OFFLINE"
+      ],
+      "timeout_seconds": 120,
+      "capture_limit_bytes": 1048576,
+      "mutating": true,
+      "entities": [
+        "code_unit:scripts/full-test-group.py",
+        "config_key:DISK_FULL_TEST_REMOTE_SANDBOX"
+      ],
+      "executable_sha256": "e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f",
+      "execution_files": [
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/.arcana/verify.json",
+          "sha256": "942b095400295d61f1ad8226b6bbed71290983e5328936f4d392ab526b6f1504"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/.cargo/config.toml",
+          "sha256": "944aabd2690f42b21b063d7afeeaaf3860732b6bbdd77576314cd3c3d78ae272"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/Cargo.lock",
+          "sha256": "c6de4766728ca1783a9d7ef017acb6a2964c579c1ffc6d49513e0598b3a818d8"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/Cargo.toml",
+          "sha256": "169ef3418f47c49f1f905e5e6015e012333cd8ebea5e0fd8e5d868e8f8e5d06c"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-cli/Cargo.toml",
+          "sha256": "ce4262f4c857c6de4119fa68c07ae996951324ffb6ca6068526d8c2f21e8e149"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-client/Cargo.toml",
+          "sha256": "6afe0b77141eaa72d8f252cfb2121e24725a6820df69af0fdb12012743d84a11"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-core/Cargo.toml",
+          "sha256": "c5d45a1f5b693597e40a485fcd4586134f552a13e6818b5f941333b8ab9fb968"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-gui/Cargo.toml",
+          "sha256": "a817749dc475a32dfd35fe2420420cf3ed82c4acafaaf3488e7247fc5695be2a"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-personal/Cargo.toml",
+          "sha256": "b09218412ae7a5fb16725a21dbf858c86462fc0e7ebbd55fc40b7af3713ee269"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-proto/Cargo.toml",
+          "sha256": "1994a7b9ec286349ca412d54c583874afa936f51d4a816a095f1186a0bb9c6f0"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-proto/build.rs",
+          "sha256": "aee51b68d93c72a2448e10612a1e905ab2c1e962c27fb231cd5546a1a63437a5"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-proto/src/lib.rs",
+          "sha256": "1695a2e17edda1687ca7dcf36054eca4e7bd070b293edea91c4247cb9c45400d"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-server/Cargo.toml",
+          "sha256": "7de14dbbc93062c1eaac7b1bbfb153123fcb8ba903c71144eb5bbcebfad2edac"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-storage/Cargo.toml",
+          "sha256": "11f208dc327a0158d50005a5b021c25cf3f51f1b79370a6f64dd91046800e98b"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/fuzz/Cargo.lock",
+          "sha256": "887abecc3dea8aac5d35802ab251e6539a7ac96bfdf5650e829edc9b8bf3a135"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/fuzz/Cargo.toml",
+          "sha256": "c2246c49f8e0347069f8794eef1db58160521c1c5f9e90fa7f188a1043b5311e"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/plugins/obsidian/package-lock.json",
+          "sha256": "f8e1fb9772c739b5371031656c3997655de87cee807a4bd8c02246dec9e95857"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/proto/disk.proto",
+          "sha256": "b5981a6f04f08b05ea8440fe4ead201463ad02307916876f400084ae4e637c6c"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/rust-toolchain.toml",
+          "sha256": "e0eeaad88b35bdeee8af9771ba21f5e5636310566e8e08ccc0d7c9e20c14e0ca"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/ci-isolate-rust.py",
+          "sha256": "1c892a952f35bed0dcf27f112785086329d39628ff7b329ccee07801c73f5c58"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/full-test-group.py",
+          "sha256": "57f0228c418333f878d561a9740f54a13d6b88abdb6488f24821b804227669de"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/full-test.env.example",
+          "sha256": "9112541cefc0a692e88b988d4237a8f9a8230f6a8d13a3793d7718c7f8a2c4e3"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/tests/test_ci_isolate_rust.py",
+          "sha256": "b3937f57783f4d18929f4b219de0bfe3828b24b46bb08283600d5801a0f8785e"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/tests/test_full_test_groups.py",
+          "sha256": "ac265e0d784d55853bd4ee80cb298cc085ac65bcc9e957f0a6d2beded2fda6d3"
+        },
+        {
+          "path": "/home/dev/.cargo/bin/rustup",
+          "sha256": "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71"
+        },
+        {
+          "path": "/home/dev/.local/bin/protoc",
+          "sha256": "e718992c5733ece01264f160c0890229770791e51c9612a2b34dc17f83ab3773"
+        },
+        {
+          "path": "/home/dev/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+          "sha256": "828980723df339d62434390e9fb8ef8831036583343ae2316b7ab5646b5c1953"
+        },
+        {
+          "path": "/home/dev/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc",
+          "sha256": "d3a664c970a9fd8361b64194861bebc1ae37b9054e5ee3400dc1c9e691797eea"
+        },
+        {
+          "path": "/home/dev/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustdoc",
+          "sha256": "3b0c7aef20e0dfdfe2dd19ddb0b40d3b744f76318a44031813f501e1912934df"
+        }
+      ],
+      "expect": {
+        "exit_codes": [
+          127
+        ],
+        "stderr_contains": [
+          "separate sandbox authority required"
+        ]
+      }
+    },
+    {
+      "id": "offline-discovery",
+      "kind": "process",
+      "argv": [
+        "/usr/bin/python3.12",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts/tests",
+        "-p",
+        "test_*.py"
+      ],
+      "cwd": ".",
+      "env_keys": [
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "CARGO_TARGET_DIR",
+        "CARGO_NET_OFFLINE"
+      ],
+      "timeout_seconds": 120,
+      "capture_limit_bytes": 1048576,
+      "mutating": true,
+      "entities": [
+        "code_unit:scripts/tests/test_ci_isolate_rust.py"
+      ],
+      "executable_sha256": "e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f",
+      "execution_files": [
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/.arcana/verify.json",
+          "sha256": "942b095400295d61f1ad8226b6bbed71290983e5328936f4d392ab526b6f1504"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/.cargo/config.toml",
+          "sha256": "944aabd2690f42b21b063d7afeeaaf3860732b6bbdd77576314cd3c3d78ae272"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/Cargo.lock",
+          "sha256": "c6de4766728ca1783a9d7ef017acb6a2964c579c1ffc6d49513e0598b3a818d8"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/Cargo.toml",
+          "sha256": "169ef3418f47c49f1f905e5e6015e012333cd8ebea5e0fd8e5d868e8f8e5d06c"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-cli/Cargo.toml",
+          "sha256": "ce4262f4c857c6de4119fa68c07ae996951324ffb6ca6068526d8c2f21e8e149"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-client/Cargo.toml",
+          "sha256": "6afe0b77141eaa72d8f252cfb2121e24725a6820df69af0fdb12012743d84a11"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-core/Cargo.toml",
+          "sha256": "c5d45a1f5b693597e40a485fcd4586134f552a13e6818b5f941333b8ab9fb968"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-gui/Cargo.toml",
+          "sha256": "a817749dc475a32dfd35fe2420420cf3ed82c4acafaaf3488e7247fc5695be2a"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-personal/Cargo.toml",
+          "sha256": "b09218412ae7a5fb16725a21dbf858c86462fc0e7ebbd55fc40b7af3713ee269"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-proto/Cargo.toml",
+          "sha256": "1994a7b9ec286349ca412d54c583874afa936f51d4a816a095f1186a0bb9c6f0"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-proto/build.rs",
+          "sha256": "aee51b68d93c72a2448e10612a1e905ab2c1e962c27fb231cd5546a1a63437a5"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-proto/src/lib.rs",
+          "sha256": "1695a2e17edda1687ca7dcf36054eca4e7bd070b293edea91c4247cb9c45400d"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-server/Cargo.toml",
+          "sha256": "7de14dbbc93062c1eaac7b1bbfb153123fcb8ba903c71144eb5bbcebfad2edac"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/crates/disk-storage/Cargo.toml",
+          "sha256": "11f208dc327a0158d50005a5b021c25cf3f51f1b79370a6f64dd91046800e98b"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/fuzz/Cargo.lock",
+          "sha256": "887abecc3dea8aac5d35802ab251e6539a7ac96bfdf5650e829edc9b8bf3a135"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/fuzz/Cargo.toml",
+          "sha256": "c2246c49f8e0347069f8794eef1db58160521c1c5f9e90fa7f188a1043b5311e"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/plugins/obsidian/package-lock.json",
+          "sha256": "f8e1fb9772c739b5371031656c3997655de87cee807a4bd8c02246dec9e95857"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/proto/disk.proto",
+          "sha256": "b5981a6f04f08b05ea8440fe4ead201463ad02307916876f400084ae4e637c6c"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/rust-toolchain.toml",
+          "sha256": "e0eeaad88b35bdeee8af9771ba21f5e5636310566e8e08ccc0d7c9e20c14e0ca"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/ci-isolate-rust.py",
+          "sha256": "1c892a952f35bed0dcf27f112785086329d39628ff7b329ccee07801c73f5c58"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/full-test-group.py",
+          "sha256": "57f0228c418333f878d561a9740f54a13d6b88abdb6488f24821b804227669de"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/full-test.env.example",
+          "sha256": "9112541cefc0a692e88b988d4237a8f9a8230f6a8d13a3793d7718c7f8a2c4e3"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/tests/test_ci_isolate_rust.py",
+          "sha256": "b3937f57783f4d18929f4b219de0bfe3828b24b46bb08283600d5801a0f8785e"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/tests/test_full_test_groups.py",
+          "sha256": "ac265e0d784d55853bd4ee80cb298cc085ac65bcc9e957f0a6d2beded2fda6d3"
+        },
+        {
+          "path": "/home/dev/.cargo/bin/rustup",
+          "sha256": "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71"
+        },
+        {
+          "path": "/home/dev/.local/bin/protoc",
+          "sha256": "e718992c5733ece01264f160c0890229770791e51c9612a2b34dc17f83ab3773"
+        },
+        {
+          "path": "/home/dev/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo",
+          "sha256": "828980723df339d62434390e9fb8ef8831036583343ae2316b7ab5646b5c1953"
+        },
+        {
+          "path": "/home/dev/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc",
+          "sha256": "d3a664c970a9fd8361b64194861bebc1ae37b9054e5ee3400dc1c9e691797eea"
+        },
+        {
+          "path": "/home/dev/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustdoc",
+          "sha256": "3b0c7aef20e0dfdfe2dd19ddb0b40d3b744f76318a44031813f501e1912934df"
+        }
+      ],
+      "expect": {
+        "exit_codes": [
+          0
+        ],
+        "stderr_contains": [
+          "Ran 31 tests",
+          "OK"
+        ]
+      }
+    }
+  ]
+}
