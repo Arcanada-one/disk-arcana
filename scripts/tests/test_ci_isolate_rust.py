@@ -2,6 +2,7 @@
 """Offline fixtures: no network, toolchain installation or runner-wide writes."""
 import importlib.util
 import hashlib
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -68,6 +69,23 @@ class IsolationTest(unittest.TestCase):
         for name in isolation.PROXIES:
             self.assertEqual((cargo / 'bin' / name).resolve(), cargo / 'bin/rustup')
         self.assertEqual(cargo.stat().st_mode & 0o777, 0o700)
+
+    def test_install_root_is_owned_and_declared(self):
+        values = self.prepare()
+        install_root = Path(values['CARGO_INSTALL_ROOT'])
+        self.assertEqual(install_root, Path(values['CARGO_HOME']))
+        self.assertTrue(install_root.is_relative_to(self.root))
+        self.assertFalse(install_root.is_relative_to(self.home))
+        repository = Path(__file__).resolve().parents[2]
+        profile = json.loads((repository / '.arcana/verify.json').read_text())
+        declarations = {}
+        for name in profile['env_declaration_files']:
+            for line in (repository / name).read_text().splitlines():
+                if line.strip() and not line.lstrip().startswith('#'):
+                    key, value = line.split('=', 1)
+                    declarations[key.strip()] = value.strip()
+        self.assertIn('CARGO_INSTALL_ROOT', declarations)
+        self.assertEqual(declarations['CARGO_INSTALL_ROOT'], '')
 
     def test_missing_path_uses_protected_standard_rustup(self):
         os.environ['PATH'] = ''
