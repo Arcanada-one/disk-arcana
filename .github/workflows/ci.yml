@@ -33,13 +33,16 @@ jobs:
   personal-provider:
     name: Personal provider foundation (Rust 1.97.1)
     runs-on: [arcana-dbs-ci]
-    timeout-minutes: 20
+    # Existing foundation budget (20m) plus the unchanged full-group limit (30m)
+    # and five minutes for setup/reporting. No inner test timeout is weakened.
+    timeout-minutes: 55
     env:
       CARGO_BUILD_JOBS: 2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Isolate Rust state for this job
         run: python3 scripts/ci-isolate-rust.py prepare
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
@@ -57,7 +60,43 @@ jobs:
           PATH="$(dirname "$PERSONAL_CARGO_BIN"):$PATH"
           export PERSONAL_CARGO_BIN PERSONAL_RUSTC_BIN PATH
           export CARGO_TARGET_DIR="$RUNNER_TEMP/personal-provider-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          # A fresh capability observation; failure preserves the environment gap.
+          python3 - <<'PYPROBE'
+          import ctypes, json, os, platform, sys
+          if sys.platform != "linux" or platform.machine() not in ("x86_64", "aarch64"):
+              raise SystemExit("required supported Linux openat2 ABI unavailable")
+          class OpenHow(ctypes.Structure):
+              _fields_ = [("flags", ctypes.c_uint64), ("mode", ctypes.c_uint64), ("resolve", ctypes.c_uint64)]
+          libc = ctypes.CDLL(None, use_errno=True)
+          root = os.open(".", os.O_RDONLY | os.O_DIRECTORY)
+          how = OpenHow(os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, 0, 0x0d)
+          try:
+              ctypes.set_errno(0)
+              fd = libc.syscall(437, root, b".", ctypes.byref(how), ctypes.sizeof(how))
+              error = ctypes.get_errno()
+              print(json.dumps({"probe": "read-only openat2", "resolve": 13, "errno": error, "success": fd >= 0}), flush=True)
+              if fd < 0:
+                  raise SystemExit(127)
+              os.close(fd)
+          finally:
+              os.close(root)
+          PYPROBE
           bash scripts/test-personal-provider.sh
+          # Execute the declared group itself. Historical foundation CI is not
+          # full-group evidence. Preserve the profile's 1800-second deadline.
+          command -v timeout
+          python3 --version
+          git rev-parse HEAD
+          sha256sum scripts/full-test-group.py .arcana/verify.json Cargo.lock
+          set +e
+          (
+            cd crates/disk-personal
+            timeout --signal=TERM --kill-after=10s 1800s python3 ../../scripts/full-test-group.py disk-personal
+          )
+          personal_full_exit=$?
+          set -e
+          printf 'PERSONAL_FULL_PROCESS_EXIT=%s\n' "$personal_full_exit"
+          exit "$personal_full_exit"
 
   lint:
     name: Lint (fmt + clippy + audit + deny)
