@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Execute declared complete groups. Never consume prior CI logs or verdicts."""
 import ctypes
+import json
 import os
 from pathlib import Path
 import re
@@ -17,17 +18,76 @@ class Unmeasured(Exception):
     """A required environment or positive test execution is missing."""
 
 
-def run(command, cwd=ROOT, positive=False):
+def check_unittest(output):
+    counts = re.findall(r'^Ran (\d+) tests? in .+$', output, re.MULTILINE)
+    ending = re.search(r'^OK(?: \(skipped=(\d+)\))?\s*\Z', output, re.MULTILINE)
+    if not counts or int(counts[-1]) == 0 or not ending:
+        raise Unmeasured('unittest discovery has no completed positive inventory')
+    if int(ending[1] or 0):
+        raise Unmeasured('unittest discovery left skipped tests unexecuted')
+
+
+def vitest_inventory(report, plugin):
+    if report.get('success') is not True or report.get('numFailedTests') != 0:
+        raise Unmeasured('Vitest report is unsuccessful or incomplete')
+    inventory = {}
+    for suite in report.get('testResults', []):
+        try:
+            path = Path(suite['name']).resolve().relative_to(plugin.resolve()).as_posix()
+        except (KeyError, ValueError) as exc:
+            raise Unmeasured('Vitest file is outside the plugin inventory') from exc
+        for case in suite.get('assertionResults', []):
+            key = (path, case.get('fullName'))
+            status = case.get('status')
+            if not key[1] or key in inventory or status not in ('passed', 'skipped', 'pending'):
+                raise Unmeasured('Vitest duplicate, todo, failed or unknown case')
+            inventory[key] = status
+    passed = sum(v == 'passed' for v in inventory.values())
+    skipped = len(inventory) - passed
+    if not passed or report.get('numTotalTests') != len(inventory):
+        raise Unmeasured('Vitest empty/wholly skipped or inconsistent inventory')
+    if (report.get('numPassedTests') != passed or report.get('numPendingTests') != skipped
+            or report.get('numTodoTests') != 0):
+        raise Unmeasured('Vitest summary disagrees with executed/skipped inventory')
+    return inventory
+
+
+def check_plugin_pair(ordinary, paired, plugin):
+    base = vitest_inventory(ordinary, plugin)
+    integration = vitest_inventory(paired, plugin)
+    skipped = {k for k, status in base.items() if status != 'passed'}
+    if any(k[0] != 'test/daemon-integration.test.ts' for k in skipped):
+        raise Unmeasured('ordinary Vitest run has an unaccounted skipped test')
+    if any(status != 'passed' for status in integration.values()) or set(integration) != skipped:
+        raise Unmeasured('daemon integration did not execute the exact deferred inventory')
+
+
+def lock_state():
+    return {name: (ROOT / name).read_bytes() for name in
+            ('Cargo.lock', 'fuzz/Cargo.lock', 'plugins/obsidian/package-lock.json')}
+
+
+def run(command, cwd=ROOT, positive=False, suite=None, env=None):
     """Preserve raw output and failure; zero/wholly skipped tests are not evidence."""
     print('+ ' + ' '.join(command), flush=True)
+    locks = lock_state()
     try:
-        result = subprocess.run(command, cwd=cwd, capture_output=True, text=True)
+        result = subprocess.run(command, cwd=cwd, capture_output=True, text=True,
+                                env={**os.environ, **(env or {})})
     except FileNotFoundError as exc:
         raise Unmeasured(f'missing executable: {command[0]}') from exc
     print(result.stdout, end='', flush=True)
     print(result.stderr, end='', file=sys.stderr, flush=True)
+    mutated = any(not (ROOT / name).is_file() or (ROOT / name).read_bytes() != data
+                  for name, data in locks.items())
+    if mutated:
+        print('Source lockfile changed during command; preserve raw mutation evidence', file=sys.stderr)
     if result.returncode:
         raise subprocess.CalledProcessError(result.returncode, command)
+    if mutated:
+        raise Unmeasured('source lockfile changed during command')
+    if suite == 'unittest':
+        check_unittest(result.stderr)
     if positive and not re.search(r'\b[1-9]\d* passed\b', result.stdout):
         raise Unmeasured('runner completed without a positive test count')
     if positive and re.search(r'\b[1-9]\d* ignored\b', result.stdout):
@@ -87,6 +147,21 @@ def fuzz():
     print(f'{len(targets)} passed (all declared fuzz targets, 600 seconds each)')
 
 
+def plugin_tests():
+    plugin = ROOT / 'plugins/obsidian'
+    with tempfile.TemporaryDirectory(prefix='disk-plugin-accounting-') as directory:
+        base, paired = (Path(directory) / n for n in ('ordinary.json', 'integration.json'))
+        run(['npm', 'test', '--', '--reporter=json', f'--outputFile={base}'], plugin,
+            env={'DISK_PLUGIN_INTEGRATION': '0'})
+        run(['bash', 'scripts/test-obsidian-integration.sh', str(paired)])
+        try:
+            ordinary, integration = json.loads(base.read_text()), json.loads(paired.read_text())
+        except (OSError, ValueError) as exc:
+            raise Unmeasured('missing or invalid fresh Vitest inventory') from exc
+        print(json.dumps({'ordinary': ordinary, 'paired_integration': integration}))
+        check_plugin_pair(ordinary, integration, plugin)
+
+
 def root():
     # Check known missing prerequisites before any broad work; never spend a
     # partial run and report it as a complete repository measurement.
@@ -94,7 +169,7 @@ def root():
     storage_preflight()
     for name in CRATES:
         crate(name)
-    run(['python3', '-m', 'unittest', 'discover', '-s', 'scripts/tests', '-p', 'test_*.py'])
+    run(['python3', '-m', 'unittest', 'discover', '-s', 'scripts/tests', '-p', 'test_*.py'], suite='unittest')
     run(['python3', 'scripts/audit-metadb-selftest.py'])
     for test in sorted((ROOT / 'deploy/linux/tests').glob('test-*.sh')):
         run(['bash', str(test)])
@@ -102,8 +177,7 @@ def root():
     run(['npm', 'run', 'typecheck'], plugin)
     run(['node', 'node_modules/typescript/bin/tsc', '-p', 'tsconfig.generated.json', '--noEmit'], plugin)
     run(['node', str(plugin / 'node_modules/typescript/bin/tsc'), '-p', 'scripts/tsconfig.json', '--noEmit'])
-    run(['npm', 'test'], plugin, positive=True)
-    run(['bash', 'scripts/test-obsidian-integration.sh'])
+    plugin_tests()
     run(['bash', 'scripts/load-test-harness.sh', 'all'])
     fuzz()
 

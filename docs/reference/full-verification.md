@@ -6,7 +6,12 @@ executes source commands; it accepts neither logs nor cached verdicts. Invoke a
 command from its declared group directory, with dependencies already installed.
 Python 3.11+, the selected Rust toolchain, native C/linker/protoc, and the plugin's
 locked npm installation are prerequisites. Set a task-owned `TMPDIR` and Cargo
-target directory. No dependency installation occurs inside the runner.
+target directory. The root composition invokes `test-obsidian-integration.sh`, which runs `npm ci`
+(including the package's installation lifecycle scripts) and Cargo build/run.
+Cargo invocations use `--locked`; registry/cache downloads can still occur.
+Every runner child command checks the workspace, fuzz and plugin lockfile bytes
+before/after execution. Mutation cannot yield success; failed-command output is
+retained. This is not an offline or zero-installation workflow.
 
 Each Cargo group runs the **entire package** in no-default-feature and all-feature
 configurations, including ignored tests and doctests. It does not select individual
@@ -43,3 +48,11 @@ admit PR238/PR239 or replace their immutable receipts. Existing CI success, skip
 coverage, local ENOSYS and source review remain separate evidence. Resulting-main,
 independent review, full graph admission and runtime authority require their own
 receipts.
+
+Unittest discovery is accounted from its stderr summary: zero execution and any
+unexecuted skips remain unmeasured. Plugin accounting uses fresh JSON assertion
+inventories, not a human-readable passed counter. Only skipped cases in
+`test/daemon-integration.test.ts` can be deferred, and the subsequent real daemon
+integration must pass exactly those file/full-name identities. Other skips,
+pending/todo cases, duplicate identities and inconsistent totals cannot be hidden
+by positive cases. Existing daemon/filesystem/SQLite postconditions remain intact.
