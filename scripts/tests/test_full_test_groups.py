@@ -44,6 +44,22 @@ class FullTestGroups(unittest.TestCase):
             self.assertEqual(runner.main(['disk-storage']), 127)
             execute.assert_not_called()
 
+    def test_storage_opt_in_and_credentials_do_not_establish_authority(self):
+        # Synthetic values only; no cloud client or subprocess is invoked.
+        environment = {'DISK_FULL_TEST_REMOTE_SANDBOX': 'authorized',
+                       'DISK_B2_BUCKET': 'synthetic-bucket',
+                       'DISK_B2_KEY_ID': 'synthetic-key',
+                       'DISK_B2_APP_KEY': 'synthetic-secret',
+                       'DISK_R2_ACCOUNT_ID': 'synthetic-account',
+                       'DISK_R2_BUCKET': 'synthetic-bucket',
+                       'DISK_R2_ACCESS_KEY_ID': 'synthetic-key',
+                       'DISK_R2_SECRET_ACCESS_KEY': 'synthetic-secret'}
+        for group in ('disk-storage', 'root'):
+            with self.subTest(group=group), patch.dict(runner.os.environ, environment, clear=True), \
+                    patch.object(runner, 'personal_preflight'), patch.object(runner, 'run') as execute:
+                self.assertEqual(runner.main([group]), 127)
+                execute.assert_not_called()
+
     def test_root_missing_preflight_cannot_run_partial_suite(self):
         with patch.object(runner, 'personal_preflight', side_effect=runner.Unmeasured('ENOSYS')), patch.object(runner, 'run') as execute:
             self.assertEqual(runner.main(['root']), 127)

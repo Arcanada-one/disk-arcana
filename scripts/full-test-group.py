@@ -115,6 +115,14 @@ def storage_preflight():
     # authorized disposable sandbox and must explicitly opt into these writes.
     if os.environ.get('DISK_FULL_TEST_REMOTE_SANDBOX') != 'authorized':
         raise Unmeasured('complete storage includes ignored B2/R2 live-bucket tests; separate sandbox authority required')
+    # No authenticated disposable account/bucket grant consumer is wired here.
+    # An opt-in or credentials cannot prove scope, exclusive smoke/demo.bin
+    # cleanup custody, or current revocation status. Keep the full group closed
+    # until the existing authority owner supplies a verifiable binding and its
+    # consumer is implemented/reviewed. Never invent a local grant format.
+    raise Unmeasured('storage authority consumer unavailable: authenticated B2/R2 '
+                     'account/bucket, scoped grant, cleanup custody and current '
+                     'revocation binding are not verified; opt-in is insufficient')
 
 
 def crate(name):
