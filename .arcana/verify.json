@@ -87,5 +87,8 @@
         "plugins/obsidian/tsconfig.generated.json"
       ]
     }
-  }
+  },
+  "env_declaration_files": [
+    "scripts/full-test.env.example"
+  ]
 }

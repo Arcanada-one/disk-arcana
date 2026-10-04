@@ -20,6 +20,27 @@ class IsolationTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()
+        # The fixture owns its tree, not the host ancestors selected by TMPDIR.
+        # Model only those external ancestors as trusted. All metadata inside the
+        # fixture remains real, including the negative permission/ownership arms.
+        real_stat = Path.stat
+        ancestors = set(self.root.parents)
+        def fixture_stat(path, *args, **kwargs):
+            info = real_stat(path, *args, **kwargs)
+            if path in ancestors:
+                values = list(info)
+                values[0] &= ~0o022
+                values[4] = 0
+                return os.stat_result(values)
+            return info
+        self.stat_patch = patch.object(Path, 'stat', fixture_stat)
+        self.stat_patch.start()
+        self.addCleanup(self.stat_patch.stop)
+        # Unexpected fallback must never download/install during offline fixtures.
+        self.bootstrap_patch = patch.object(isolation, 'bootstrap',
+                                            side_effect=AssertionError('unexpected bootstrap'))
+        self.bootstrap_patch.start()
+        self.addCleanup(self.bootstrap_patch.stop)
         self.home = self.root / 'home'
         self.bin = self.home / '.cargo/bin'
         self.bin.mkdir(parents=True)
@@ -118,7 +139,27 @@ class IsolationTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'different home'):
                 isolation.verify('1.97.1')
 
+    def test_group_writable_parent_is_rejected(self):
+        self.home.chmod(0o770)
+        with self.assertRaisesRegex(ValueError, 'writable by another account'):
+            isolation.protected_executable(self.executable)
+
+    def test_foreign_owner_is_rejected(self):
+        fixture_stat = Path.stat
+        def foreign_owner(path, *args, **kwargs):
+            info = fixture_stat(path, *args, **kwargs)
+            if path == self.home:
+                values = list(info)
+                values[4] = os.getuid() + 10000
+                return os.stat_result(values)
+            return info
+        with patch.object(Path, 'stat', foreign_owner):
+            with self.assertRaisesRegex(ValueError, 'unexpected owner'):
+                isolation.protected_executable(self.executable)
+
     def bootstrap_env(self):
+        # These tests exercise bootstrap itself with every subprocess mocked.
+        self.bootstrap_patch.stop()
         root = self.root / 'bootstrap'
         root.mkdir(mode=0o700)
         env = dict(os.environ, CARGO_HOME=str(root / 'cargo'), RUSTUP_HOME=str(root / 'rustup'))

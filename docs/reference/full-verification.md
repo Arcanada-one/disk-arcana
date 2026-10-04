@@ -56,3 +56,22 @@ inventories, not a human-readable passed counter. Only skipped cases in
 integration must pass exactly those file/full-name identities. Other skips,
 pending/todo cases, duplicate identities and inconsistent totals cannot be hidden
 by positive cases. Existing daemon/filesystem/SQLite postconditions remain intact.
+
+## Runner configuration and bounded canaries
+
+`scripts/full-test.env.example` declares the runner inputs and is registered in
+`.arcana/verify.json`. It is documentation, not an authorization file or an
+implicitly loaded environment. In particular, setting the remote sandbox flag
+never grants permission to access a provider.
+
+A process canary may execute a complete small group (for example `disk-proto`,
+both feature modes) and refusal controls on an exact committed source. That
+measures runner behavior only; it does not admit the repository-wide group or
+transfer an older change-admission receipt. Keep its plan, original source
+binding and result together, and submit them to the canonical Program verifier.
+
+The offline Rust-isolation fixtures normalize only metadata of external host
+ancestors outside their temporary tree. Fixture file and directory permissions
+remain real; explicit writable-parent and foreign-owner arms verify refusal.
+Unexpected bootstrap is blocked, while bootstrap tests mock all subprocesses.
+This is fixture isolation, not a relaxation of the production path checks.
