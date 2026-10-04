@@ -113,6 +113,7 @@ jobs:
       - name: Rust isolation helper fixtures
         run: |
           python3 scripts/tests/test_ci_isolate_rust.py
+          python3 -B scripts/tests/test_ci_export_linux_server.py
           python3 scripts/tests/test_full_test_groups.py
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
       - name: Ensure protoc is available
@@ -390,6 +391,8 @@ jobs:
     runs-on: [arcana-dbs-ci]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Isolate Rust state for this job
         run: python3 scripts/ci-isolate-rust.py prepare
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4  # stable 2026-07-30
@@ -450,3 +453,16 @@ jobs:
           else
             cargo build --release --target ${{ matrix.target }} --workspace
           fi
+      - name: Prepare exact Linux server export
+        id: server_export
+        env:
+          EXPECTED_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BUILD_TARGET: ${{ matrix.target }}
+        run: python3 scripts/ci-export-linux-server.py
+      - name: Upload exact Linux server build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1, existing Windows pin
+        with:
+          name: disk-arcana-server-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.server_export.outputs.directory }}
+          if-no-files-found: error
+          retention-days: 1
