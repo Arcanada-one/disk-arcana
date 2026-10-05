@@ -28,8 +28,8 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 sha2 = "=0.10.9"
-uuid = "=1.24.0"
-rustix = { version = "=1.1.4", features = ["fs", "process"] }
+uuid = "=1.26.1"
+rustix = { version = "=1.1.5", features = ["fs", "process"] }
 
 [dev-dependencies]
 tempfile = "=3.27.0"
