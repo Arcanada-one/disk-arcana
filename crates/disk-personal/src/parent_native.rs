@@ -196,7 +196,7 @@ impl Outcome {
     }
     /// Projection is usable only after the matching native durable outcome
     /// passes validation; it never wraps a synthetic02F LocalCommit.
-    fn receipt(&self, request: &Request) -> Result<Receipt> {
+    pub(crate) fn receipt(&self, request: &Request) -> Result<Receipt> {
         match self {
             Self::Stored(s)
                 if s.realm_id.0 == request.realm()
@@ -499,6 +499,9 @@ impl Request {
             self.selected.as_ref().map(|p| p.part_id.as_str())
         ])
         .to_string()
+    }
+    pub(crate) fn selected_size(&self) -> Result<usize> {
+        usize::try_from(self.selected()?.size_bytes).map_err(|_| Refusal::Unavailable)
     }
     pub fn selected_object(&self) -> Result<ObjectKey> {
         let p = self.selected()?;

@@ -26,3 +26,8 @@ pub mod parent_native;
 /// Linux handle-relative journal primitive; no mount or runtime admission.
 #[cfg(target_os = "linux")]
 pub mod parent_journal;
+
+#[cfg(target_os = "linux")]
+pub mod parent_inventory;
+#[cfg(target_os = "linux")]
+pub mod parent_vfs;

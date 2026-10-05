@@ -197,6 +197,55 @@ Auth reconciliation without changing native receipt meanings. Do not wire the
 primitive straight to Parent::Committed or cast synthetic02F as that provider.
 Auth Disk resolve/access/effect/outcome producer transport remains with the
 existing Auth/CAB source owner; Data first-intent/recovery is not that protocol.
-The encrypted provisioner/verified directory-handle source remains with existing
-Infra/provisioner owners. Neither source dependency is a request for credentials,
+Infra operational discovery found no maintained admitted provisioner/verified
+directory-handle source reference in its existing scope. The missing source
+binding remains a PERSIST integration obligation; no provisioner custody owner
+has been identified. Neither source dependency is a request for credentials,
 mount activation or live effects. Production main/startup remain denied.
+
+## Descriptor-relative file IO and native inventory readback
+
+`parent_vfs::Directory` supplies synchronous file operations anchored to an
+already admitted directory FD, with closed inventory, rollback and exact native
+object names. Existing files require same-device, current-owner, single-link,
+regular0600 metadata; the directory requires0700 and the expected inode.
+Every open uses openat2 confinement, with no syscall or path fallback. A scoped
+exclusive writer lock retains all page-file handles through the callback. File
+sizes and positional IO are bounded; short reads zero-fill but return the actual
+byte count, so a future SQLite adapter must report short IO rather than success.
+New objects are exclusive creations, never opened for overwrite. Write/sync or
+uncertain creation errors poison this Directory instance across callbacks;
+there is no reset method. Recovery requires a separately admitted recovery path.
+No removal, truncation, shared-memory or mmap shortcut is supplied.
+
+This is the file-IO portion of a VFS, NOT a registered SQLite VFS. In particular,
+it does not implement the SQLite ABI, rollback recovery/commit/delete protocol,
+WAL, database locking levels, or the complete NativeBackend transaction. These
+remain Disk-owned source obligations, not a request for runtime permission and
+not silently reassigned to Infra. A future ABI binding must map short reads and
+IO errors correctly and preserve the scoped lock/uncertainty contract. Existing
+SQLx pathname access is not substituted for that binding.
+
+`parent_inventory::verify_original_readback` connects actual native journal
+inspection with actual confined object reads. It requires a unique unchanged
+original-effect match, exact selected receipt, bounded length and hash/body
+validation. Missing or ambiguous journal records remain Pending; they never
+establish fresh/no-commit. The result exposes only the original outcome, not
+private bytes or a release capability. The caller must retain an authentic
+capture/access fence and supply independently authenticated original lineage.
+The result is a consistency check, not durable transaction or Auth admission.
+No NativeBackend::Committed result is manufactured from this readback helper.
+
+The local environment returns ENOSYS for openat2 independently of Rustix, as
+measured with a bounded read-only libc syscall probe. The reported Linux6.8
+release supports the upstream interface introduced in5.6, but active seccomp
+filters can return errno without executing a syscall. The specific filter or
+host implementation responsible is not established by the probe. Local real
+filesystem checks remain unavailable; their failing logs are retained. Do not
+change confinement or turn environment refusal into passing tests.
+
+Primary interface references: [Linux openat2](https://man7.org/linux/man-pages/man2/openat2.2.html),
+[Linux seccomp filters](https://kernel.org/doc/html/latest/userspace-api/seccomp_filter.html),
+and [SQLite file methods](https://sqlite.org/c3ref/io_methods.html).
+These describe API semantics; they do not attest the current sandbox filter or
+provide a deployment/runtime grant.
