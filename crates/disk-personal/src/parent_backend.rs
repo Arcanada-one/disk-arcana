@@ -224,10 +224,26 @@ impl SqliteBackend {
                     "SELECT outcome FROM owner_journal WHERE resource=?1",
                     &[text(r.resource_identity())],
                 )?;
-                for row in rows {
+                if rows.len() > 1 {
+                    return Ok(Observation::Corrupt);
+                }
+                if let Some(row) = rows.first() {
                     let outcome = Outcome::parse(string(&row[0])?.as_bytes())?;
                     if matches!(outcome, Outcome::Cleaned(_)) {
+                        if !outcome.matches_original_effect(&e.original)
+                            || !r.accepts_operation(
+                                crate::parent_adapter::Operation::CleanupCancelled,
+                            )
+                        {
+                            return Err(Refusal::Conflict);
+                        }
+                        let cancellation =
+                            CancelledResource::parse(string(&cancelled)?.as_bytes(), r)?;
+                        cancellation.verify_cleaned(r, &outcome)?;
                         return Ok(Observation::CancelledCleaned { outcome });
+                    }
+                    if r.accepts_operation(crate::parent_adapter::Operation::CleanupCancelled) {
+                        return Ok(Observation::Corrupt);
                     }
                 }
                 return Ok(Observation::CleanupPending);
@@ -237,23 +253,34 @@ impl SqliteBackend {
             "SELECT state FROM attempts WHERE resource=?1",
             &[text(r.resource_identity())],
         )?;
-        if !attempts.is_empty() && attempts[0][0] != text("committed") {
-            return Ok(Observation::Prepared);
-        }
         let rows = self.query(
             "SELECT outcome FROM objects WHERE resource=?1",
             &[text(r.resource_identity())],
         )?;
+        // The original journal is evidence even when inventory or attempt rows
+        // are missing. Never create a fresh PREPARED over orphan commit evidence.
+        let journal = self.query(
+            "SELECT outcome,owner_receipt,sequence FROM owner_journal WHERE resource=?1",
+            &[text(r.resource_identity())],
+        )?;
+        if attempts == vec![vec![text("prepared")]] {
+            return Ok(if rows.is_empty() && journal.is_empty() {
+                Observation::Prepared
+            } else {
+                Observation::Corrupt
+            });
+        }
         if rows.len() == 1 {
             if attempts.len() != 1 {
                 return Ok(Observation::Corrupt);
             }
             let outcome = Outcome::parse(string(&rows[0][0])?.as_bytes())?;
             outcome.receipt(r)?;
-            let journal = self.query(
-                "SELECT outcome,owner_receipt,sequence FROM owner_journal WHERE resource=?1",
-                &[text(r.resource_identity())],
-            )?;
+            if !outcome.matches_original_effect(&e.original)
+                || !outcome.matches_operation(crate::parent_adapter::Operation::Stage)
+            {
+                return Err(Refusal::Conflict);
+            }
             let proposal = self.query(
                 "SELECT proposal FROM attempts WHERE resource=?1",
                 &[text(r.resource_identity())],
@@ -273,7 +300,7 @@ impl SqliteBackend {
                 outcome,
             });
         }
-        if !rows.is_empty() || !attempts.is_empty() {
+        if !rows.is_empty() || !attempts.is_empty() || !journal.is_empty() {
             return Ok(Observation::Corrupt);
         }
         Ok(match e.disposition {

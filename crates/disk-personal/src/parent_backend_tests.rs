@@ -316,3 +316,146 @@ fn sync_fault_matrix_keeps_bytes_inventory_and_owner_journal_atomic() {
     assert!(prepared_seen);
     assert!(committed_seen);
 }
+
+// These controls change trusted original-effect lineage, never the descriptor,
+// bytes, persisted outcome, or existing journal. Fixtures do not confer authority.
+fn changed_lineage(r: &Request, name: &str, field: &str) -> NativeCommitContext {
+    let mut value = fixture()[name].clone();
+    value[field] = match field {
+        "deployment_generation" | "process_generation" => serde_json::json!("2"),
+        _ => serde_json::json!("00000000-0000-4000-8000-000000000099"),
+    };
+    let outcome = Outcome::parse(&serde_json::to_vec(&value).unwrap()).unwrap();
+    NativeCommitContext::from_control_readback(
+        context(r, name, OriginalDisposition::ExistingOrUnknown).lease,
+        outcome.clone(),
+        outcome.original_identity(),
+        r,
+        OriginalDisposition::ExistingOrUnknown,
+    )
+    .unwrap()
+}
+fn lineage_snapshot(db: &SqliteBackend) -> Vec<Vec<Vec<Value>>> {
+    [
+        "SELECT * FROM captures",
+        "SELECT * FROM attempts",
+        "SELECT * FROM objects",
+        "SELECT * FROM owner_journal",
+    ]
+    .iter()
+    .map(|sql| db.query(sql, &[]).unwrap())
+    .collect()
+}
+#[test]
+fn review_r1_stored_success_and_readback_require_original_lineage() {
+    let db = backend(MemoryVfs::default(), true);
+    let r = request(false);
+    let e = context(&r, "stored", OriginalDisposition::FencedNoCommit);
+    let body = vec![b'A'; 4096];
+    db.stage_context(&e, &r, &body).unwrap();
+    let before = lineage_snapshot(&db);
+    for field in [
+        "owner_commit_id",
+        "operation_id",
+        "process_generation",
+        "deployment_generation",
+    ] {
+        let changed = changed_lineage(&r, "stored", field);
+        assert!(db.observe_context(&changed, &r).is_err(), "{field}");
+        assert!(db.stage_context(&changed, &r, &body).is_err(), "{field}");
+        assert!(db.read_context(&changed, &r, 4096).is_err(), "{field}");
+        assert_eq!(lineage_snapshot(&db), before, "{field}");
+    }
+    assert!(matches!(
+        db.observe_context(&e, &r).unwrap(),
+        Observation::Durable { .. }
+    ));
+    assert!(db.stage_context(&e, &r, &body).unwrap().is_some());
+    assert_eq!(db.read_context(&e, &r, 4096).unwrap(), body);
+    assert_eq!(lineage_snapshot(&db), before);
+}
+#[test]
+fn review_r1_cleaned_observation_requires_original_lineage_and_cancellation() {
+    let db = backend(MemoryVfs::default(), true);
+    let r = request(true);
+    let e = context(&r, "cleaned", OriginalDisposition::ExistingOrUnknown);
+    let c = CancelledResource::parse(
+        &serde_json::to_vec(&fixture()["cleanup_resolution"]["grant"]["resource"]).unwrap(),
+        &r,
+    )
+    .unwrap();
+    let keys = c.objects(&r).unwrap();
+    db.tombstone_context(&e, &r, &keys, &c).unwrap();
+    db.cleanup_context(&e, &r, &keys, &c).unwrap();
+    let before = lineage_snapshot(&db);
+    for field in [
+        "owner_commit_id",
+        "operation_id",
+        "process_generation",
+        "deployment_generation",
+    ] {
+        let changed = changed_lineage(&r, "cleaned", field);
+        assert!(db.observe_context(&changed, &r).is_err(), "{field}");
+        assert!(
+            db.cleanup_context(&changed, &r, &keys, &c).is_err(),
+            "{field}"
+        );
+        assert_eq!(lineage_snapshot(&db), before, "{field}");
+    }
+    assert!(matches!(
+        db.observe_context(&e, &r).unwrap(),
+        Observation::CancelledCleaned { .. }
+    ));
+    assert!(db.cleanup_context(&e, &r, &keys, &c).unwrap().is_some());
+    assert_eq!(lineage_snapshot(&db), before);
+    let mut changed = serde_json::to_value(&c).unwrap();
+    changed["owner_outcome_id"] = serde_json::json!("00000000-0000-4000-8000-000000000099");
+    db.query(
+        "UPDATE captures SET cancelled=?1",
+        &[text(serde_json::to_string(&changed).unwrap())],
+    )
+    .unwrap();
+    let corrupt = lineage_snapshot(&db);
+    assert!(db.observe_context(&e, &r).is_err());
+    assert_eq!(lineage_snapshot(&db), corrupt);
+}
+#[test]
+fn review_r2_orphan_journal_and_incoherent_attempt_refuse_before_prepared() {
+    for state in ["orphan", "committed", "prepared"] {
+        let db = backend(MemoryVfs::default(), true);
+        let r = request(false);
+        let e = context(&r, "stored", OriginalDisposition::FencedNoCommit);
+        let body = vec![b'A'; 4096];
+        assert!(matches!(
+            db.observe_context(&e, &r).unwrap(),
+            Observation::Unseen
+        ));
+        db.stage_context(&e, &r, &body).unwrap();
+        db.query("DELETE FROM objects", &[]).unwrap();
+        match state {
+            "orphan" => {
+                db.query("DELETE FROM attempts", &[]).unwrap();
+            }
+            "prepared" => {
+                db.query("UPDATE attempts SET state='prepared'", &[])
+                    .unwrap();
+            }
+            _ => (),
+        }
+        let before = lineage_snapshot(&db);
+        assert!(
+            matches!(db.observe_context(&e, &r).unwrap(), Observation::Corrupt),
+            "{state}"
+        );
+        let unknown = context(&r, "stored", OriginalDisposition::ExistingOrUnknown);
+        assert!(
+            matches!(
+                db.observe_context(&unknown, &r).unwrap(),
+                Observation::Corrupt
+            ),
+            "{state}"
+        );
+        assert!(db.stage_context(&e, &r, &body).is_err());
+        assert_eq!(lineage_snapshot(&db), before, "{state}");
+    }
+}
