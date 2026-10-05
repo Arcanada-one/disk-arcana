@@ -21,6 +21,7 @@ class ExportBoundaries(unittest.TestCase):
         self.binary = self.root / 'synthetic-elf'
         data = bytearray(64)
         data[:6] = b'\x7fELF\x02\x01'
+        data[16:18] = (2).to_bytes(2, 'little')
         data[18:20] = (62).to_bytes(2, 'little')
         self.binary.write_bytes(data)
         self.binary.chmod(0o700)
@@ -148,6 +149,76 @@ class SourceBinding(unittest.TestCase):
         self.env['CARGO_TARGET_DIR'] = str(self.root)
         with patch.dict(os.environ, self.env, clear=True):
             with self.assertRaisesRegex(ValueError, 'foreign_target_root'): module.main()
+
+
+class CliOutputs(unittest.TestCase):
+    def setUp(self):
+        ExportBoundaries.setUp(self)
+        self.workspace = self.root / 'workspace'
+        self.target = self.workspace / 'target'
+        (self.target / 'debug/deps').mkdir(parents=True)
+        self.rows = []
+        for name, kind, source in [('disk', 'bin', 'src/main.rs'),
+                                   ('it_local_e2e_writeback', 'test', 'tests/it_local_e2e_writeback.rs')]:
+            src = self.workspace / 'crates/disk-cli' / source
+            src.parent.mkdir(parents=True, exist_ok=True)
+            src.write_text('// synthetic source')
+            binary = self.target / 'debug' / ('disk' if name == 'disk' else 'deps/it_local_e2e_writeback-fixture')
+            binary.write_bytes(self.binary.read_bytes())
+            binary.chmod(0o700)
+            self.rows.append({'reason': 'compiler-artifact', 'target': {'name': name, 'kind': [kind], 'src_path': str(src)},
+                              'profile': {'test': name != 'disk'}, 'features': ['fixture'], 'executable': str(binary)})
+        self.rows.append({'reason': 'build-finished', 'success': True})
+        self.log = self.root / 'cargo.jsonl'
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def cli(self):
+        self.log.write_text(''.join(json.dumps(row) + '\n' for row in self.rows))
+        with patch.dict(os.environ, {'GITHUB_WORKSPACE': str(self.workspace)}):
+            return module.export_cli(self.log, self.target, self.root, {'fixture_only': True})
+
+    def test_both_outputs_have_exact_hashes_and_original_daemon_binding(self):
+        outputs = self.cli()
+        self.assertEqual(len(outputs), 2)
+        for output, row in zip(outputs, self.rows):
+            manifest = json.loads((output / 'BUILD.json').read_text())
+            self.assertEqual(manifest['binary_sha256'], hashlib.sha256(Path(row['executable']).read_bytes()).hexdigest())
+            self.assertEqual(manifest['original_daemon_path'], self.rows[0]['executable'])
+            self.assertEqual(manifest['cargo_artifact'], row)
+
+    def test_missing_daemon_refuses(self):
+        self.rows.pop(0)
+        with self.assertRaisesRegex(ValueError, 'missing_successful'): self.cli()
+
+    def test_unsuccessful_cargo_refuses(self):
+        self.rows[-1]['success'] = False
+        with self.assertRaisesRegex(ValueError, 'missing_successful'): self.cli()
+
+    def test_duplicate_driver_refuses(self):
+        self.rows.insert(0, self.rows[1])
+        with self.assertRaisesRegex(ValueError, 'ambiguous'): self.cli()
+
+    def test_foreign_output_refuses(self):
+        self.rows[1]['executable'] = str(self.binary)
+        with self.assertRaisesRegex(ValueError, 'foreign_cargo_output'): self.cli()
+
+    def test_foreign_source_refuses(self):
+        self.rows[1]['target']['src_path'] = str(self.binary)
+        with self.assertRaisesRegex(ValueError, 'ambiguous_or_foreign'): self.cli()
+
+    def test_object_elf_refuses_and_rolls_back_pair(self):
+        binary = Path(self.rows[1]['executable'])
+        data = bytearray(binary.read_bytes()); data[16:18] = (1).to_bytes(2, 'little'); binary.write_bytes(data)
+        with self.assertRaisesRegex(ValueError, 'not_matching_linux_elf'): self.cli()
+        self.assertEqual(list(self.root.glob('server-export.*')), [])
+
+    def test_daemon_cargo_two_link_copy(self):
+        os.link(self.rows[0]['executable'], self.target / 'debug/deps/disk-fixture')
+        for output in self.cli():
+            manifest = json.loads((output / 'BUILD.json').read_text())
+            self.assertEqual((output / manifest['binary']).stat().st_nlink, 1)
 
 
 if __name__ == '__main__':

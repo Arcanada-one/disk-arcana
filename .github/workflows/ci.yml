@@ -270,6 +270,8 @@ jobs:
     runs-on: [arcana-dbs-ci]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Isolate Rust state for this job
         run: python3 scripts/ci-isolate-rust.py prepare
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4  # stable 2026-07-30
@@ -303,7 +305,24 @@ jobs:
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov --locked --quiet
       - name: cargo test
-        run: cargo test --workspace --all-features
+        run: |
+          set -euo pipefail
+          cargo test --workspace --all-features --message-format=json | tee "$CI_ISOLATED_RUST_ROOT/cargo-test.jsonl"
+      - name: Prepare exact CLI driver and daemon export
+        id: cli_export
+        env:
+          EXPECTED_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BUILD_TARGET: x86_64-unknown-linux-gnu
+        run: python3 scripts/ci-export-linux-server.py --cli "$CI_ISOLATED_RUST_ROOT/cargo-test.jsonl"
+      - name: Upload exact CLI driver and daemon
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: disk-cli-executables-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ steps.cli_export.outputs.directory0 }}
+            ${{ steps.cli_export.outputs.directory1 }}
+          if-no-files-found: error
+          retention-days: 1
       - name: Scanner load harness (1K + 10K, DISK-0012 G3)
         run: bash scripts/load-test-harness.sh all
       - name: Coverage gate (≥80 % lines, DISK-0032)
