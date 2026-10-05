@@ -322,7 +322,7 @@ impl CancelledResource {
         }
         Ok(())
     }
-    fn objects(&self, r: &Request) -> Result<Vec<ObjectKey>> {
+    pub(crate) fn objects(&self, r: &Request) -> Result<Vec<ObjectKey>> {
         self.validate(r)?;
         Ok(r.expected
             .iter()
@@ -502,6 +502,21 @@ impl Request {
     }
     pub(crate) fn selected_size(&self) -> Result<usize> {
         usize::try_from(self.selected()?.size_bytes).map_err(|_| Refusal::Unavailable)
+    }
+    pub(crate) fn capture_id(&self) -> &str {
+        &self.expected[0].capture_id
+    }
+    pub(crate) fn selected_receipt_json(&self) -> Result<String> {
+        serde_json::to_string(self.selected()?).map_err(|_| Refusal::Unavailable)
+    }
+    pub(crate) fn part_resource_identities(&self) -> Vec<String> {
+        self.expected
+            .iter()
+            .map(|p| {
+                serde_json::json!([self.descriptor_identity(), Some(p.part_id.as_str())])
+                    .to_string()
+            })
+            .collect()
     }
     pub fn selected_object(&self) -> Result<ObjectKey> {
         let p = self.selected()?;

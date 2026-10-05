@@ -31,3 +31,9 @@ pub mod parent_journal;
 pub mod parent_inventory;
 #[cfg(target_os = "linux")]
 pub mod parent_vfs;
+
+#[cfg(target_os = "linux")]
+pub mod parent_sqlite;
+
+#[cfg(target_os = "linux")]
+pub mod parent_backend;

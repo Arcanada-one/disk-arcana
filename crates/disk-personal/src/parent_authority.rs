@@ -191,6 +191,13 @@ impl<L> Effect<L> {
     }
     /// Backend adapters receive a borrowed authenticated lease, never a public
     /// grant serialization. Its Control callback must still be live.
+    pub(crate) fn require_backend_operation(
+        &self,
+        r: &Request,
+        operation: Operation,
+    ) -> Result<()> {
+        self.matches(r, operation)
+    }
     pub fn native_lease(&self) -> &L {
         &self.lease
     }

@@ -22,6 +22,7 @@ path = "src/bin/disk-personal-fixture-worker.rs"
 required-features = ["synthetic-fixtures"]
 
 [dependencies]
+disk-personal-sqlite = { path = "sqlite-abi" }
 sqlx.workspace = true
 tokio.workspace = true
 serde.workspace = true
