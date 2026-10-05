@@ -11,3 +11,9 @@ pub mod fixture_support;
 pub mod capture_binding;
 
 pub mod startup;
+
+/// Disabled parent orchestration; no registered production authority or storage.
+pub mod parent_adapter;
+
+/// Structural native reference/error codec; never an authorization boundary.
+pub mod parent_wire;

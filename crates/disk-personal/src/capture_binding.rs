@@ -170,6 +170,140 @@ impl CaptureDescriptor {
     }
 }
 
+/// Exact Shared ObjectReceipt shape, with no authority or producer provenance.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ObjectReceipt {
+    schema_version: String,
+    realm_id: String,
+    capture_id: String,
+    part_id: String,
+    object_id: String,
+    object_revision: String,
+    sha256: String,
+    #[serde(deserialize_with = "integer")]
+    size_bytes: u64,
+    media_type: String,
+    request_fingerprint: String,
+    #[serde(deserialize_with = "integer")]
+    cancellation_generation: u64,
+}
+
+impl CaptureDescriptor {
+    /// Complete structural counterpart of CAB TrustedDiskVerifier's receipt set.
+    /// Call only inside an authenticated producer readback; slices are exact
+    /// bytes obtained under that lease, not browser claims or metadata caches.
+    pub fn verify_receipt_set(&self, items: &[(&[u8], &[u8])]) -> Result<(), InvalidBinding> {
+        if items.len() != self.0.parts.len() {
+            return Err(InvalidBinding);
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for (receipt, body) in items {
+            self.verify_receipt_bytes(receipt, body)?;
+            let r: ObjectReceipt = serde_json::from_slice(receipt).map_err(|_| InvalidBinding)?;
+            if !seen.insert(r.part_id) {
+                return Err(InvalidBinding);
+            }
+        }
+        Ok(())
+    }
+
+    /// Structural/actual-byte half of trusted readback. Caller MUST separately
+    /// authenticate Disk/Auth receipt lineage, original attempt and live access.
+    /// Success here does not issue a TrustedDiskVerifier proof or authorize IO.
+    pub fn verify_receipt_bytes(
+        &self,
+        receipt_json: &[u8],
+        bytes: &[u8],
+    ) -> Result<(), InvalidBinding> {
+        if receipt_json.len() > 4096 || bytes.len() > 1_048_576 {
+            return Err(InvalidBinding);
+        }
+        let r: ObjectReceipt = serde_json::from_slice(receipt_json).map_err(|_| InvalidBinding)?;
+        let p = self
+            .0
+            .parts
+            .iter()
+            .find(|p| p.part_id == r.part_id)
+            .ok_or(InvalidBinding)?;
+        if r.schema_version != VERSION
+            || r.realm_id != self.0.realm_id
+            || r.capture_id != self.0.capture_id
+            || r.object_id != p.object_id
+            || r.object_revision != p.object_revision
+            || r.sha256 != p.sha256
+            || r.size_bytes != p.size_bytes
+            || r.media_type != p.media_type
+            || r.request_fingerprint != self.0.request_fingerprint
+            || r.cancellation_generation != self.0.cancellation_generation
+            || bytes.len() as u64 != p.size_bytes
+            || format!("{:x}", Sha256::digest(bytes)) != p.sha256
+            || std::str::from_utf8(bytes).is_err()
+        {
+            return Err(InvalidBinding);
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod parent_readback_tests {
+    use super::*;
+    #[test]
+    fn receipt_binds_all_allocations_and_actual_equal_length_body() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/capture-canonical.json")).unwrap();
+        let d = &fixture["descriptor"];
+        let parsed = CaptureDescriptor::parse(&serde_json::to_vec(d).unwrap()).unwrap();
+        let p = &d["parts"][0];
+        let mut r = json!({"schemaVersion":"personal-capture/v1","realmId":d["realmId"],
+            "captureId":d["captureId"],"partId":p["partId"],"objectId":p["objectId"],
+            "objectRevision":p["objectRevision"],"sha256":p["sha256"],"sizeBytes":p["sizeBytes"],
+            "mediaType":p["mediaType"],"requestFingerprint":d["requestFingerprint"],
+            "cancellationGeneration":d["cancellationGeneration"]});
+        assert!(parsed
+            .verify_receipt_bytes(&serde_json::to_vec(&r).unwrap(), b"abc")
+            .is_ok());
+        assert!(parsed
+            .verify_receipt_bytes(&serde_json::to_vec(&r).unwrap(), b"xyz")
+            .is_err());
+        for field in [
+            "realmId",
+            "captureId",
+            "partId",
+            "objectId",
+            "objectRevision",
+            "sha256",
+            "mediaType",
+            "requestFingerprint",
+            "schemaVersion",
+        ] {
+            let mut wrong = r.clone();
+            wrong[field] = json!("substituted");
+            assert!(parsed
+                .verify_receipt_bytes(&serde_json::to_vec(&wrong).unwrap(), b"abc")
+                .is_err());
+        }
+        for field in ["sizeBytes", "cancellationGeneration"] {
+            let mut wrong = r.clone();
+            wrong[field] = json!(999);
+            assert!(parsed
+                .verify_receipt_bytes(&serde_json::to_vec(&wrong).unwrap(), b"abc")
+                .is_err());
+        }
+        let encoded = serde_json::to_vec(&r).unwrap();
+        assert!(parsed.verify_receipt_set(&[(&encoded, b"abc")]).is_ok());
+        assert!(parsed.verify_receipt_set(&[]).is_err());
+        assert!(parsed
+            .verify_receipt_set(&[(&encoded, b"abc"), (&encoded, b"abc")])
+            .is_err());
+        r["authority"] = json!(true);
+        assert!(parsed
+            .verify_receipt_bytes(&serde_json::to_vec(&r).unwrap(), b"abc")
+            .is_err());
+    }
+}
+
 #[cfg(all(target_os = "linux", feature = "synthetic-fixtures"))]
 impl CaptureDescriptor {
     pub(crate) fn allocation(
