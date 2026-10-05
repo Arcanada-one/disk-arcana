@@ -191,6 +191,7 @@ impl<L> Effect<L> {
     }
     /// Backend adapters receive a borrowed authenticated lease, never a public
     /// grant serialization. Its Control callback must still be live.
+    #[cfg(target_os = "linux")]
     pub(crate) fn require_backend_operation(
         &self,
         r: &Request,

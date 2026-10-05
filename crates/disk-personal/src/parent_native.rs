@@ -500,15 +500,19 @@ impl Request {
         ])
         .to_string()
     }
+    #[cfg(target_os = "linux")]
     pub(crate) fn selected_size(&self) -> Result<usize> {
         usize::try_from(self.selected()?.size_bytes).map_err(|_| Refusal::Unavailable)
     }
+    #[cfg(target_os = "linux")]
     pub(crate) fn capture_id(&self) -> &str {
         &self.expected[0].capture_id
     }
+    #[cfg(target_os = "linux")]
     pub(crate) fn selected_receipt_json(&self) -> Result<String> {
         serde_json::to_string(self.selected()?).map_err(|_| Refusal::Unavailable)
     }
+    #[cfg(target_os = "linux")]
     pub(crate) fn part_resource_identities(&self) -> Vec<String> {
         self.expected
             .iter()
