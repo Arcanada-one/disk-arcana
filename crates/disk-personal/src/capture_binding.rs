@@ -1,5 +1,5 @@
 //! Structural parity with Shared personal-capture/v1; never an authority.
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
@@ -12,7 +12,7 @@ const MAX_COUNTER: u64 = 9_007_199_254_740_990;
 pub struct InvalidBinding;
 
 // JavaScript's input is a Number, so JSON 1.0, 1e0 and -0 have integer semantics.
-fn integer<'de, D: Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+pub(crate) fn integer<'de, D: Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
     let value = serde_json::Number::deserialize(d)?;
     let n = value
         .as_f64()
@@ -171,25 +171,46 @@ impl CaptureDescriptor {
 }
 
 /// Exact Shared ObjectReceipt shape, with no authority or producer provenance.
-#[derive(Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ObjectReceipt {
-    schema_version: String,
-    realm_id: String,
-    capture_id: String,
-    part_id: String,
-    object_id: String,
-    object_revision: String,
+pub(crate) struct ObjectReceipt {
+    pub(crate) schema_version: String,
+    pub(crate) realm_id: String,
+    pub(crate) capture_id: String,
+    pub(crate) part_id: String,
+    pub(crate) object_id: String,
+    pub(crate) object_revision: String,
     sha256: String,
     #[serde(deserialize_with = "integer")]
-    size_bytes: u64,
-    media_type: String,
-    request_fingerprint: String,
+    pub(crate) size_bytes: u64,
+    pub(crate) media_type: String,
+    pub(crate) request_fingerprint: String,
     #[serde(deserialize_with = "integer")]
-    cancellation_generation: u64,
+    pub(crate) cancellation_generation: u64,
 }
 
 impl CaptureDescriptor {
+    /// Expected structural values only, never issued/authenticated receipts.
+    pub(crate) fn expected_receipts(&self) -> Vec<ObjectReceipt> {
+        self.0
+            .parts
+            .iter()
+            .map(|p| ObjectReceipt {
+                schema_version: VERSION.into(),
+                realm_id: self.0.realm_id.clone(),
+                capture_id: self.0.capture_id.clone(),
+                part_id: p.part_id.clone(),
+                object_id: p.object_id.clone(),
+                object_revision: p.object_revision.clone(),
+                sha256: p.sha256.clone(),
+                size_bytes: p.size_bytes,
+                media_type: p.media_type.clone(),
+                request_fingerprint: self.0.request_fingerprint.clone(),
+                cancellation_generation: self.0.cancellation_generation,
+            })
+            .collect()
+    }
+
     /// Complete structural counterpart of CAB TrustedDiskVerifier's receipt set.
     /// Call only inside an authenticated producer readback; slices are exact
     /// bytes obtained under that lease, not browser claims or metadata caches.
@@ -243,6 +264,44 @@ impl CaptureDescriptor {
             return Err(InvalidBinding);
         }
         Ok(())
+    }
+}
+
+#[cfg(all(target_os = "linux", feature = "synthetic-fixtures"))]
+impl CaptureDescriptor {
+    pub(crate) fn allocation(
+        &self,
+        realm: &str,
+        part_id: &str,
+        request: &crate::provider::types::Request,
+    ) -> crate::provider::types::Result<()> {
+        use crate::provider::types::{Error, Kind};
+        request.validate()?;
+        let p = self
+            .0
+            .parts
+            .iter()
+            .find(|p| p.part_id == part_id)
+            .ok_or(Error::InvalidInput)?;
+        if self.0.realm_id != realm
+            || p.object_id != request.object_id
+            || p.object_revision != request.revision_id
+            || p.size_bytes != request.expected_len
+            || p.sha256 != request.sha256
+            || (p.role == "note") != (request.kind == Kind::Note)
+        {
+            return Err(Error::Conflict);
+        }
+        Ok(())
+    }
+    pub(crate) fn realm(&self) -> &str {
+        &self.0.realm_id
+    }
+    pub(crate) fn capture(&self) -> &str {
+        &self.0.capture_id
+    }
+    pub(crate) fn generation(&self) -> i64 {
+        self.0.cancellation_generation as i64
     }
 }
 
@@ -301,43 +360,5 @@ mod parent_readback_tests {
         assert!(parsed
             .verify_receipt_bytes(&serde_json::to_vec(&r).unwrap(), b"abc")
             .is_err());
-    }
-}
-
-#[cfg(all(target_os = "linux", feature = "synthetic-fixtures"))]
-impl CaptureDescriptor {
-    pub(crate) fn allocation(
-        &self,
-        realm: &str,
-        part_id: &str,
-        request: &crate::provider::types::Request,
-    ) -> crate::provider::types::Result<()> {
-        use crate::provider::types::{Error, Kind};
-        request.validate()?;
-        let p = self
-            .0
-            .parts
-            .iter()
-            .find(|p| p.part_id == part_id)
-            .ok_or(Error::InvalidInput)?;
-        if self.0.realm_id != realm
-            || p.object_id != request.object_id
-            || p.object_revision != request.revision_id
-            || p.size_bytes != request.expected_len
-            || p.sha256 != request.sha256
-            || (p.role == "note") != (request.kind == Kind::Note)
-        {
-            return Err(Error::Conflict);
-        }
-        Ok(())
-    }
-    pub(crate) fn realm(&self) -> &str {
-        &self.0.realm_id
-    }
-    pub(crate) fn capture(&self) -> &str {
-        &self.0.capture_id
-    }
-    pub(crate) fn generation(&self) -> i64 {
-        self.0.cancellation_generation as i64
     }
 }

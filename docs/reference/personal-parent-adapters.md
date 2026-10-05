@@ -95,3 +95,61 @@ never an HTTP grant. `verify_receipt_set` checks complete descriptor membership
 and duplicate parts, as well as each exact body. The authenticated producer
 transport must bind native receipt/outcome/attempt provenance and live access
 before returning CAB proof. Product retains terminal publication/cancellation.
+
+## Concrete native binding (successor to e9b82)
+
+`parent_native::NativeContract` now supplies concrete deployment selection,
+protected references, parsed capture request, ObjectReceipt and native Disk
+owner-outcome types for `Parent`. `Outcome` admits only the existing
+`disk_stored` and `disk_cleaned` closed records. IDs and decimal-string u64
+counters reject coercion/overflow; native registration JSON round-trips the
+producer fixtures. JSON encoding is not JCS/signature issuance. No Product
+committed/cancelled outcome can be parsed as a Disk outcome. Nothing constructs
+these outcomes from synthetic `LocalCommit`.
+
+`parent_authority::NativeAuthority` implements the parent Authority interface.
+Its `Control` transport callback supplies actual provisioner/Auth observations
+while holding the corresponding nonserializable native leases. The adapter
+compares complete deployment/config/executable/key-domain selection, realm,
+operation, full descriptor identity and selected part before entering storage.
+The private Startup/Effect wrappers cannot be constructed, cloned or deserialized
+by request handlers. A structurally parsed selector is never a live wrapper.
+`Control` must perform real authenticated observation and retain revocation
+exclusion; a caller-provided implementation or cached boolean is not supported.
+The two internal identity strings are exact comparison keys, NOT replacements
+for the Shared requestFingerprint or Auth request-signing canonicalization.
+
+Native durable verification binds all original owner receipt, participant,
+process/deployment generation, operation, capture, owner commit, sequence,
+resource-binding digest and storage receipt identity to authenticated original
+Auth readback. Current process generation must not replace historical lineage.
+A lost registration remains pending. Registration cannot submit a Product
+terminal outcome or a stored outcome under a cleanup operation.
+
+`parent_native::NativeStorage` is the concrete parent Storage adapter. Its
+NativeBackend supplies admitted handle-relative VFS/native-journal operations,
+not caller-provided callbacks. The adapter checks the body before mutation,
+checks returned Disk outcome against the selected native object, and performs
+actual SHA256/length/UTF8 readback over bounded backend bytes before success.
+This is a new implementation layer, not a type alias or a synthetic provider
+cast. Backend observation is still required to distinguish positively new work
+from unknown prior work; the adapter never invents no-commit evidence.
+
+Cleanup decodes the exact native cancelled resource, checks descriptor realm,
+capture, fingerprint, terminal revision, cancellation generation+1 and complete
+part membership. It derives the allowed object/revision set from the original
+descriptor, never from a caller path or prefix. It passes only that set to the
+backend, validates the returned disk_cleaned object set and Product outcome
+reference, then authenticates original effect lineage before registration.
+Tombstone-before-unlink ordering remains in Parent under the common lease.
+
+The native fixture file contains selected unchanged values from Program's
+hash-pinned wire-closure fixtures and records the source SHA256. Tests exercise
+these concrete adapters, not a replacement invented wire protocol. Fake leaf
+Control/NativeBackend implementations prove field checks and invocation order;
+they do not attest live authentication, encrypted storage, durable journals or
+concurrent revocation. Real deployment-specific Control and NativeBackend
+implementations remain unregistered and absent. The production binary still
+exits78. Implementing those providers must preserve the admitted handle/lease
+contracts; merely instantiating a struct or copying fixture values cannot enable
+production. This does not claim complete parent/runtime delivery.

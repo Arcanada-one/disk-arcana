@@ -17,3 +17,8 @@ pub mod parent_adapter;
 
 /// Structural native reference/error codec; never an authorization boundary.
 pub mod parent_wire;
+
+/// Native startup/Auth binding checks around the authenticated control port.
+pub mod parent_authority;
+/// Concrete native type and storage binding; no production IO installed.
+pub mod parent_native;

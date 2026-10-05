@@ -1,0 +1,472 @@
+{
+  "source_sha256": "e8ffd2b015a09b505ff63b6f032de1060f69e513696431f976dd0e507e5d7767",
+  "source": "Program integrations/arganize-me/personal-owner/disk-contract/reference/fixtures/wire-closure-fixtures.json",
+  "descriptor": {
+    "schemaVersion": "personal-capture/v1",
+    "realmId": "00000000-0000-4000-8000-000000000001",
+    "captureId": "00000000-0000-4000-8000-00000000000a",
+    "conversationId": "00000000-0000-4000-8000-00000000000b",
+    "messageId": "00000000-0000-4000-8000-00000000000c",
+    "expectedConversationRevision": 0,
+    "operation": "append_message",
+    "idempotencyKey": "00000000-0000-4000-8000-00000000000d",
+    "requestFingerprint": "7779462fc598265e767960e9d20e9e39172aca529f310c3a48da899798237576",
+    "cancellationGeneration": 0,
+    "parts": [
+      {
+        "partId": "00000000-0000-4000-8000-000000000014",
+        "role": "note",
+        "objectId": "00000000-0000-4000-8000-000000000015",
+        "objectRevision": "00000000-0000-4000-8000-000000000016",
+        "sha256": "6896d9ea3f73a4434f5832bc65714e7d066f177373f36f34dc8a6f735daa41b1",
+        "sizeBytes": 4096,
+        "mediaType": "text/plain;charset=utf-8"
+      }
+    ]
+  },
+  "stored": {
+    "owner_receipt_id": "00000000-0000-4000-8000-0000000000dd",
+    "realm_id": "00000000-0000-4000-8000-000000000001",
+    "deployment_generation": "1",
+    "participant_id": "00000000-0000-4000-8000-00000000006e",
+    "process_generation": "1",
+    "operation_id": "00000000-0000-4000-8000-0000000000c9",
+    "intent_id": "00000000-0000-4000-8000-00000000000a",
+    "owner_commit_id": "00000000-0000-4000-8000-0000000004c5",
+    "local_seq": "1",
+    "resource_binding_digest": "6949b0d11e34e34a5360abafe6f817d44f0c3d3d55a028b9ee3e5511f34d9bcb",
+    "kind": "disk_stored",
+    "object_receipt": {
+      "schemaVersion": "personal-capture/v1",
+      "realmId": "00000000-0000-4000-8000-000000000001",
+      "captureId": "00000000-0000-4000-8000-00000000000a",
+      "partId": "00000000-0000-4000-8000-000000000014",
+      "objectId": "00000000-0000-4000-8000-000000000015",
+      "objectRevision": "00000000-0000-4000-8000-000000000016",
+      "sha256": "6896d9ea3f73a4434f5832bc65714e7d066f177373f36f34dc8a6f735daa41b1",
+      "sizeBytes": 4096,
+      "mediaType": "text/plain;charset=utf-8",
+      "requestFingerprint": "7779462fc598265e767960e9d20e9e39172aca529f310c3a48da899798237576",
+      "cancellationGeneration": 0
+    },
+    "storage_receipt_id": "00000000-0000-4000-8000-0000000000dc"
+  },
+  "cleaned": {
+    "owner_receipt_id": "00000000-0000-4000-8000-000000000104",
+    "realm_id": "00000000-0000-4000-8000-000000000001",
+    "deployment_generation": "1",
+    "participant_id": "00000000-0000-4000-8000-00000000006e",
+    "process_generation": "1",
+    "operation_id": "00000000-0000-4000-8000-00000000012d",
+    "intent_id": "00000000-0000-4000-8000-00000000000a",
+    "owner_commit_id": "00000000-0000-4000-8000-0000000004ec",
+    "local_seq": "2",
+    "resource_binding_digest": "157427812df0dba78646808342208bc0ab158397d6dfdc1d473ead7c7f4974d7",
+    "kind": "disk_cleaned",
+    "cancelled_owner_outcome_id": "00000000-0000-4000-8000-0000000000fc",
+    "cancellation": {
+      "schemaVersion": "personal-capture/v1",
+      "purpose": "cancel_unpublished_capture",
+      "realmId": "00000000-0000-4000-8000-000000000001",
+      "captureId": "00000000-0000-4000-8000-00000000000a",
+      "requestFingerprint": "7779462fc598265e767960e9d20e9e39172aca529f310c3a48da899798237576",
+      "intentRevision": 2,
+      "cancellationGeneration": 1
+    },
+    "cleaned_objects": [
+      {
+        "part_id": "00000000-0000-4000-8000-000000000014",
+        "object_id": "00000000-0000-4000-8000-000000000015",
+        "object_revision": "00000000-0000-4000-8000-000000000016"
+      }
+    ]
+  },
+  "product_committed": {
+    "owner_receipt_id": "00000000-0000-4000-8000-0000000000f0",
+    "realm_id": "00000000-0000-4000-8000-000000000001",
+    "deployment_generation": "1",
+    "participant_id": "00000000-0000-4000-8000-000000000064",
+    "process_generation": "1",
+    "operation_id": "00000000-0000-4000-8000-0000000000c9",
+    "intent_id": "00000000-0000-4000-8000-00000000000a",
+    "owner_commit_id": "00000000-0000-4000-8000-0000000004d8",
+    "local_seq": "3",
+    "resource_binding_digest": "157427812df0dba78646808342208bc0ab158397d6dfdc1d473ead7c7f4974d7",
+    "kind": "product_committed",
+    "capture_status": {
+      "schemaVersion": "personal-capture/v1",
+      "descriptor": {
+        "schemaVersion": "personal-capture/v1",
+        "realmId": "00000000-0000-4000-8000-000000000001",
+        "captureId": "00000000-0000-4000-8000-00000000000a",
+        "conversationId": "00000000-0000-4000-8000-00000000000b",
+        "messageId": "00000000-0000-4000-8000-00000000000c",
+        "expectedConversationRevision": 0,
+        "operation": "append_message",
+        "idempotencyKey": "00000000-0000-4000-8000-00000000000d",
+        "requestFingerprint": "7779462fc598265e767960e9d20e9e39172aca529f310c3a48da899798237576",
+        "cancellationGeneration": 0,
+        "parts": [
+          {
+            "partId": "00000000-0000-4000-8000-000000000014",
+            "role": "note",
+            "objectId": "00000000-0000-4000-8000-000000000015",
+            "objectRevision": "00000000-0000-4000-8000-000000000016",
+            "sha256": "6896d9ea3f73a4434f5832bc65714e7d066f177373f36f34dc8a6f735daa41b1",
+            "sizeBytes": 4096,
+            "mediaType": "text/plain;charset=utf-8"
+          }
+        ]
+      },
+      "intentRevision": 3,
+      "state": "committed",
+      "receipts": [
+        {
+          "schemaVersion": "personal-capture/v1",
+          "realmId": "00000000-0000-4000-8000-000000000001",
+          "captureId": "00000000-0000-4000-8000-00000000000a",
+          "partId": "00000000-0000-4000-8000-000000000014",
+          "objectId": "00000000-0000-4000-8000-000000000015",
+          "objectRevision": "00000000-0000-4000-8000-000000000016",
+          "sha256": "6896d9ea3f73a4434f5832bc65714e7d066f177373f36f34dc8a6f735daa41b1",
+          "sizeBytes": 4096,
+          "mediaType": "text/plain;charset=utf-8",
+          "requestFingerprint": "7779462fc598265e767960e9d20e9e39172aca529f310c3a48da899798237576",
+          "cancellationGeneration": 0
+        }
+      ],
+      "manifestId": "00000000-0000-4000-8000-00000000001e",
+      "conversationRevision": 1
+    },
+    "publication_id": "00000000-0000-4000-8000-00000000001e",
+    "manifest_digest": "024e402df47ce98004963592ed3bb0a4c431dd5fe3c488fd984f209afb5b98e3",
+    "storage_receipt_ids": [
+      "00000000-0000-4000-8000-0000000000dc"
+    ]
+  },
+  "cleanup_resolution": {
+    "wire_version": "auth-personal/1-proposed",
+    "amendment_version": "disk-wire-closure/1-proposed",
+    "profile_id": "organize-me.synthetic/1",
+    "request_id": "00000000-0000-4000-8000-000000000190",
+    "auth_seq": "60",
+    "observed_at": "2026-09-07T16:00:00.000Z",
+    "result": "resolved",
+    "grant": {
+      "grant_id": "00000000-0000-4000-8000-00000000178f",
+      "root_grant_id": "00000000-0000-4000-8000-00000000178e",
+      "parent_grant_id": "00000000-0000-4000-8000-00000000178e",
+      "operation_id": "00000000-0000-4000-8000-00000000012d",
+      "issuer": "https://auth.synthetic.invalid/one",
+      "subject": null,
+      "session": null,
+      "authority_kind": "maintenance",
+      "authority_ref": "00000000-0000-4000-8000-000000000136",
+      "authority_version": "1",
+      "actor_client_id": "product-a-runtime",
+      "consumer_client_id": "disk-a-runtime",
+      "delegation_id": null,
+      "realm_id": "00000000-0000-4000-8000-000000000001",
+      "realm_binding_version": "1",
+      "purpose": "personal.recovery",
+      "operation": "maintenance.cleanup_cancelled",
+      "resource": {
+        "kind": "cancellation",
+        "intent_id": "00000000-0000-4000-8000-00000000000a",
+        "terminal_intent_revision": 2,
+        "cancellation_generation": 1,
+        "owner_outcome_id": "00000000-0000-4000-8000-0000000000fc",
+        "part_ids": [
+          "00000000-0000-4000-8000-000000000014"
+        ],
+        "cancellation": {
+          "schemaVersion": "personal-capture/v1",
+          "purpose": "cancel_unpublished_capture",
+          "realmId": "00000000-0000-4000-8000-000000000001",
+          "captureId": "00000000-0000-4000-8000-00000000000a",
+          "requestFingerprint": "7779462fc598265e767960e9d20e9e39172aca529f310c3a48da899798237576",
+          "intentRevision": 2,
+          "cancellationGeneration": 1
+        }
+      },
+      "capture_binding": {
+        "descriptor": {
+          "schemaVersion": "personal-capture/v1",
+          "realmId": "00000000-0000-4000-8000-000000000001",
+          "captureId": "00000000-0000-4000-8000-00000000000a",
+          "conversationId": "00000000-0000-4000-8000-00000000000b",
+          "messageId": "00000000-0000-4000-8000-00000000000c",
+          "expectedConversationRevision": 0,
+          "operation": "append_message",
+          "idempotencyKey": "00000000-0000-4000-8000-00000000000d",
+          "requestFingerprint": "7779462fc598265e767960e9d20e9e39172aca529f310c3a48da899798237576",
+          "cancellationGeneration": 0,
+          "parts": [
+            {
+              "partId": "00000000-0000-4000-8000-000000000014",
+              "role": "note",
+              "objectId": "00000000-0000-4000-8000-000000000015",
+              "objectRevision": "00000000-0000-4000-8000-000000000016",
+              "sha256": "6896d9ea3f73a4434f5832bc65714e7d066f177373f36f34dc8a6f735daa41b1",
+              "sizeBytes": 4096,
+              "mediaType": "text/plain;charset=utf-8"
+            }
+          ]
+        },
+        "status": {
+          "schemaVersion": "personal-capture/v1",
+          "descriptor": {
+            "schemaVersion": "personal-capture/v1",
+            "realmId": "00000000-0000-4000-8000-000000000001",
+            "captureId": "00000000-0000-4000-8000-00000000000a",
+            "conversationId": "00000000-0000-4000-8000-00000000000b",
+            "messageId": "00000000-0000-4000-8000-00000000000c",
+            "expectedConversationRevision": 0,
+            "operation": "append_message",
+            "idempotencyKey": "00000000-0000-4000-8000-00000000000d",
+            "requestFingerprint": "7779462fc598265e767960e9d20e9e39172aca529f310c3a48da899798237576",
+            "cancellationGeneration": 0,
+            "parts": [
+              {
+                "partId": "00000000-0000-4000-8000-000000000014",
+                "role": "note",
+                "objectId": "00000000-0000-4000-8000-000000000015",
+                "objectRevision": "00000000-0000-4000-8000-000000000016",
+                "sha256": "6896d9ea3f73a4434f5832bc65714e7d066f177373f36f34dc8a6f735daa41b1",
+                "sizeBytes": 4096,
+                "mediaType": "text/plain;charset=utf-8"
+              }
+            ]
+          },
+          "intentRevision": 2,
+          "state": "cancelled",
+          "cancellation": {
+            "schemaVersion": "personal-capture/v1",
+            "purpose": "cancel_unpublished_capture",
+            "realmId": "00000000-0000-4000-8000-000000000001",
+            "captureId": "00000000-0000-4000-8000-00000000000a",
+            "requestFingerprint": "7779462fc598265e767960e9d20e9e39172aca529f310c3a48da899798237576",
+            "intentRevision": 2,
+            "cancellationGeneration": 1
+          }
+        }
+      },
+      "audience": "urn:arcanada:disk:personal",
+      "policy_version": "personal-policy/1-proposed",
+      "policy_epoch": "1",
+      "deployment_generation": "1",
+      "participant_config_version": "1",
+      "key_domain_ref": "synthetic-key-domain-a",
+      "issued_at": "2026-09-07T15:59:59.000Z",
+      "expires_at": "2026-09-07T16:04:59.000Z",
+      "fingerprint": "40b10288e97793b5118e738197c9be8ecbbb285aa9cf51a6038f3065c136ecd6"
+    },
+    "consumer": {
+      "participant_id": "00000000-0000-4000-8000-00000000006e",
+      "role": "disk",
+      "process_generation": "1",
+      "boot_id": "00000000-0000-4000-8000-00000000006f",
+      "deployment_generation": "1"
+    },
+    "invoker": {
+      "client_id": "product-a-runtime",
+      "participant": {
+        "participant_id": "00000000-0000-4000-8000-000000000064",
+        "role": "product",
+        "process_generation": "1",
+        "boot_id": "00000000-0000-4000-8000-000000000065",
+        "deployment_generation": "1"
+      }
+    },
+    "flow": {
+      "flow_id": "00000000-0000-4000-8000-00000000012f",
+      "operation_id": "00000000-0000-4000-8000-00000000012d",
+      "realm_id": "00000000-0000-4000-8000-000000000001",
+      "policy_epoch": "1",
+      "execute_before": "2026-09-07T16:00:29.000Z",
+      "state": "active",
+      "product_participant": {
+        "participant_id": "00000000-0000-4000-8000-000000000064",
+        "role": "product",
+        "process_generation": "1",
+        "boot_id": "00000000-0000-4000-8000-000000000065",
+        "deployment_generation": "1"
+      }
+    },
+    "allocation_binding": {
+      "owner_binding_id": "00000000-0000-4000-8000-0000000000d3",
+      "binding_digest": "157427812df0dba78646808342208bc0ab158397d6dfdc1d473ead7c7f4974d7",
+      "registration_seq": "10",
+      "owner_outcome_id": "00000000-0000-4000-8000-0000000000d4",
+      "core": {
+        "realm_id": "00000000-0000-4000-8000-000000000001",
+        "participant": {
+          "participant_id": "00000000-0000-4000-8000-000000000064",
+          "role": "product",
+          "process_generation": "1",
+          "boot_id": "00000000-0000-4000-8000-000000000065",
+          "deployment_generation": "1"
+        },
+        "grant_id": "00000000-0000-4000-8000-0000000000ca",
+        "flow_id": "00000000-0000-4000-8000-0000000000c8",
+        "lease_id": "00000000-0000-4000-8000-0000000000cb",
+        "operation_id": "00000000-0000-4000-8000-0000000000c9",
+        "policy_epoch": "1",
+        "owner_revision": 1,
+        "capture_binding": {
+          "descriptor": {
+            "schemaVersion": "personal-capture/v1",
+            "realmId": "00000000-0000-4000-8000-000000000001",
+            "captureId": "00000000-0000-4000-8000-00000000000a",
+            "conversationId": "00000000-0000-4000-8000-00000000000b",
+            "messageId": "00000000-0000-4000-8000-00000000000c",
+            "expectedConversationRevision": 0,
+            "operation": "append_message",
+            "idempotencyKey": "00000000-0000-4000-8000-00000000000d",
+            "requestFingerprint": "7779462fc598265e767960e9d20e9e39172aca529f310c3a48da899798237576",
+            "cancellationGeneration": 0,
+            "parts": [
+              {
+                "partId": "00000000-0000-4000-8000-000000000014",
+                "role": "note",
+                "objectId": "00000000-0000-4000-8000-000000000015",
+                "objectRevision": "00000000-0000-4000-8000-000000000016",
+                "sha256": "6896d9ea3f73a4434f5832bc65714e7d066f177373f36f34dc8a6f735daa41b1",
+                "sizeBytes": 4096,
+                "mediaType": "text/plain;charset=utf-8"
+              }
+            ]
+          },
+          "status": {
+            "schemaVersion": "personal-capture/v1",
+            "descriptor": {
+              "schemaVersion": "personal-capture/v1",
+              "realmId": "00000000-0000-4000-8000-000000000001",
+              "captureId": "00000000-0000-4000-8000-00000000000a",
+              "conversationId": "00000000-0000-4000-8000-00000000000b",
+              "messageId": "00000000-0000-4000-8000-00000000000c",
+              "expectedConversationRevision": 0,
+              "operation": "append_message",
+              "idempotencyKey": "00000000-0000-4000-8000-00000000000d",
+              "requestFingerprint": "7779462fc598265e767960e9d20e9e39172aca529f310c3a48da899798237576",
+              "cancellationGeneration": 0,
+              "parts": [
+                {
+                  "partId": "00000000-0000-4000-8000-000000000014",
+                  "role": "note",
+                  "objectId": "00000000-0000-4000-8000-000000000015",
+                  "objectRevision": "00000000-0000-4000-8000-000000000016",
+                  "sha256": "6896d9ea3f73a4434f5832bc65714e7d066f177373f36f34dc8a6f735daa41b1",
+                  "sizeBytes": 4096,
+                  "mediaType": "text/plain;charset=utf-8"
+                }
+              ]
+            },
+            "intentRevision": 1,
+            "state": "awaiting_bytes"
+          }
+        },
+        "owner_receipt_id": "00000000-0000-4000-8000-0000000000d2",
+        "binding_kind": "intent_allocated",
+        "resource": {
+          "kind": "intent",
+          "intent_id": "00000000-0000-4000-8000-00000000000a",
+          "intent_revision": 1,
+          "conversation_id": "00000000-0000-4000-8000-00000000000b",
+          "message_id": "00000000-0000-4000-8000-00000000000c",
+          "expected_conversation_revision": 0,
+          "parts": [
+            {
+              "part_id": "00000000-0000-4000-8000-000000000014",
+              "part_kind": "note",
+              "object_id": "00000000-0000-4000-8000-000000000015",
+              "object_revision": "00000000-0000-4000-8000-000000000016",
+              "sha256": "6896d9ea3f73a4434f5832bc65714e7d066f177373f36f34dc8a6f735daa41b1",
+              "size_bytes": 4096,
+              "media_type": "text/plain;charset=utf-8"
+            }
+          ]
+        }
+      }
+    },
+    "storage_bindings": [],
+    "product_outcome": {
+      "owner_outcome_id": "00000000-0000-4000-8000-0000000000fc",
+      "outcome_digest": "c742db0e22feda771306d3f43c44acecbb44ee905daf76f65a8b32e5e9f14044",
+      "registration_seq": "40",
+      "provenance": {
+        "issuer": "https://auth.synthetic.invalid/one",
+        "realm_binding_version": "1",
+        "participant_config_version": "1",
+        "grant_id": "00000000-0000-4000-8000-0000000000fe",
+        "root_grant_id": "00000000-0000-4000-8000-0000000000fe",
+        "parent_grant_id": null,
+        "flow_id": "00000000-0000-4000-8000-00000000012f",
+        "lease_id": "00000000-0000-4000-8000-0000000000fd",
+        "policy_epoch": "1",
+        "participant": {
+          "participant_id": "00000000-0000-4000-8000-000000000064",
+          "role": "product",
+          "process_generation": "1",
+          "boot_id": "00000000-0000-4000-8000-000000000065",
+          "deployment_generation": "1"
+        },
+        "authority_kind": "maintenance",
+        "authority_ref": "00000000-0000-4000-8000-000000000136",
+        "authority_version": "1"
+      },
+      "outcome": {
+        "owner_receipt_id": "00000000-0000-4000-8000-0000000000fa",
+        "realm_id": "00000000-0000-4000-8000-000000000001",
+        "deployment_generation": "1",
+        "participant_id": "00000000-0000-4000-8000-000000000064",
+        "process_generation": "1",
+        "operation_id": "00000000-0000-4000-8000-00000000012d",
+        "intent_id": "00000000-0000-4000-8000-00000000000a",
+        "owner_commit_id": "00000000-0000-4000-8000-0000000004e2",
+        "local_seq": "2",
+        "resource_binding_digest": "157427812df0dba78646808342208bc0ab158397d6dfdc1d473ead7c7f4974d7",
+        "kind": "product_cancelled",
+        "capture_status": {
+          "schemaVersion": "personal-capture/v1",
+          "descriptor": {
+            "schemaVersion": "personal-capture/v1",
+            "realmId": "00000000-0000-4000-8000-000000000001",
+            "captureId": "00000000-0000-4000-8000-00000000000a",
+            "conversationId": "00000000-0000-4000-8000-00000000000b",
+            "messageId": "00000000-0000-4000-8000-00000000000c",
+            "expectedConversationRevision": 0,
+            "operation": "append_message",
+            "idempotencyKey": "00000000-0000-4000-8000-00000000000d",
+            "requestFingerprint": "7779462fc598265e767960e9d20e9e39172aca529f310c3a48da899798237576",
+            "cancellationGeneration": 0,
+            "parts": [
+              {
+                "partId": "00000000-0000-4000-8000-000000000014",
+                "role": "note",
+                "objectId": "00000000-0000-4000-8000-000000000015",
+                "objectRevision": "00000000-0000-4000-8000-000000000016",
+                "sha256": "6896d9ea3f73a4434f5832bc65714e7d066f177373f36f34dc8a6f735daa41b1",
+                "sizeBytes": 4096,
+                "mediaType": "text/plain;charset=utf-8"
+              }
+            ]
+          },
+          "intentRevision": 2,
+          "state": "cancelled",
+          "cancellation": {
+            "schemaVersion": "personal-capture/v1",
+            "purpose": "cancel_unpublished_capture",
+            "realmId": "00000000-0000-4000-8000-000000000001",
+            "captureId": "00000000-0000-4000-8000-00000000000a",
+            "requestFingerprint": "7779462fc598265e767960e9d20e9e39172aca529f310c3a48da899798237576",
+            "intentRevision": 2,
+            "cancellationGeneration": 1
+          }
+        }
+      }
+    },
+    "resource_binding_id": "00000000-0000-4000-8000-0000000000d3",
+    "descriptor_digest": "56ec9c6781884810c924fa1049b8a8b0ec4aa2725b2b508cad3c52536e380054"
+  }
+}
