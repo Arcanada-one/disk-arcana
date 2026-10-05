@@ -21,7 +21,13 @@ pub trait File: Send {
     fn size(&mut self) -> io::Result<u64>;
 }
 pub trait Vfs: Send + Sync + 'static {
-    fn open(&self, name: &str, create: bool, exclusive: bool) -> io::Result<Box<dyn File>>;
+    fn open(
+        &self,
+        name: &str,
+        create: bool,
+        exclusive: bool,
+        read_only: bool,
+    ) -> io::Result<Box<dyn File>>;
     fn exists(&self, name: &str) -> io::Result<bool>;
     fn delete(&self, name: &str, sync_directory: bool) -> io::Result<()>;
 }
@@ -52,6 +58,7 @@ struct Handle {
     context: *mut Context,
     provider: *mut Arc<dyn Vfs>,
     is_main: bool,
+    writable: bool,
 }
 struct Registration {
     vfs: Box<sql::sqlite3_vfs>,
@@ -124,9 +131,14 @@ unsafe extern "C" fn open(
             || flags
                 & (sql::SQLITE_OPEN_DELETEONCLOSE | sql::SQLITE_OPEN_MEMORY | sql::SQLITE_OPEN_WAL)
                 != 0
-            || flags & sql::SQLITE_OPEN_READWRITE == 0
+            || flags & (sql::SQLITE_OPEN_READWRITE | sql::SQLITE_OPEN_READONLY) == 0
+            || (flags & sql::SQLITE_OPEN_READONLY != 0
+                && (name == "inventory.sqlite"
+                    || flags & (sql::SQLITE_OPEN_CREATE | sql::SQLITE_OPEN_READWRITE) != 0))
         {
-            return Err(io::Error::other("unsupported SQLite open"));
+            return Err(io::Error::other(format!(
+                "unsupported SQLite open name={name} flags={flags}"
+            )));
         }
         let provider = provider(ctx)?;
         let is_main = name == "inventory.sqlite";
@@ -157,6 +169,7 @@ unsafe extern "C" fn open(
             name,
             flags & sql::SQLITE_OPEN_CREATE != 0,
             flags & sql::SQLITE_OPEN_EXCLUSIVE != 0,
+            flags & sql::SQLITE_OPEN_READONLY != 0,
         )?;
         ptr::write(
             f.cast::<Handle>(),
@@ -167,6 +180,7 @@ unsafe extern "C" fn open(
                 context: (*v).pAppData.cast(),
                 provider: Box::into_raw(Box::new(provider)),
                 is_main,
+                writable: flags & sql::SQLITE_OPEN_READWRITE != 0,
             },
         );
         reservation.active = false;
@@ -226,6 +240,12 @@ unsafe extern "C" fn write(
     let h = handle(f);
     let ctx = &*h.context;
     guarded(ctx, || {
+        if !h.writable {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "read-only SQLite handle",
+            ));
+        }
         if n < 0 || offset < 0 || n > 16 * 1024 * 1024 {
             return Err(io::Error::other("invalid write range"));
         }
@@ -239,6 +259,12 @@ unsafe extern "C" fn write(
 unsafe extern "C" fn truncate(f: *mut sql::sqlite3_file, len: i64) -> c_int {
     let h = handle(f);
     guarded(&*h.context, || {
+        if !h.writable {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "read-only SQLite handle",
+            ));
+        }
         if len < 0 {
             return Err(io::Error::other("negative truncate"));
         }
@@ -737,7 +763,7 @@ mod tests {
             main_open: AtomicBool::new(false),
         });
         let memory = provider.vfs.lock().unwrap().as_ref().unwrap().clone();
-        let mut file = memory.open("inventory.sqlite", true, true).unwrap();
+        let mut file = memory.open("inventory.sqlite", true, true, false).unwrap();
         file.write(0, b"abc").unwrap();
         let mut h = Handle {
             base: sql::sqlite3_file { pMethods: &METHODS },
@@ -746,6 +772,7 @@ mod tests {
             context: &mut *provider,
             provider: Box::into_raw(Box::new(memory)),
             is_main: false,
+            writable: true,
         };
         let f = (&mut h as *mut Handle).cast::<sql::sqlite3_file>();
         let mut b = [9u8; 5];

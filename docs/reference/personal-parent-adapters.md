@@ -335,3 +335,13 @@ and corrected results are retained separately. No unchanged old source suite,
 whole31FULL, artifact CLI, provider or runtime activation is performed. Supported
 current-head Linux CI, Program's whole admission, real Auth/provisioner bindings
 and runtime/storage authority remain separate evidence/activation conditions.
+
+The recovery fault matrix also exercises read-only rollback-journal opens after
+IO failure; the ABI and descriptor provider enforce read-only write/truncate
+refusal instead of assuming every journal handle is writable. The controlled
+SQLite stage path measured eight sync boundaries; fault injection at each of
+eight positions plus the no-fault boundary verifies nine distinct cases. Reopen
+must expose either no committed bytes/journal, retained PREPARED, or matching
+COMMITTED bytes/inventory/original journal. It must never expose a split commit.
+These are SQLite source/ABI fault controls on the explicit test storage leaf;
+they are not filesystem power-loss or encrypted-mount evidence.

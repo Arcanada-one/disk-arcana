@@ -4,25 +4,35 @@ use std::{
     collections::BTreeMap,
     io,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
 };
 #[derive(Default)]
 struct State {
     files: Mutex<BTreeMap<String, Vec<u8>>>,
-    fail_sync: AtomicBool,
+    sync_count: AtomicU64,
+    fail_at_sync: AtomicU64,
 }
 #[derive(Clone, Default)]
 pub struct MemoryVfs(Arc<State>);
 impl MemoryVfs {
+    pub fn sync_count(&self) -> u64 {
+        self.0.sync_count.load(Ordering::Acquire)
+    }
+    pub fn fail_after_syncs(&self, skip: u64) {
+        self.0
+            .fail_at_sync
+            .store(self.sync_count() + skip + 1, Ordering::Release);
+    }
     pub fn fail_next_sync(&self) {
-        self.0.fail_sync.store(true, Ordering::Release);
+        self.fail_after_syncs(0);
     }
 }
 struct Handle {
     state: Arc<State>,
     name: String,
+    read_only: bool,
 }
 impl File for Handle {
     fn read(&mut self, o: u64, b: &mut [u8]) -> io::Result<usize> {
@@ -38,6 +48,9 @@ impl File for Handle {
         Ok(n)
     }
     fn write(&mut self, o: u64, b: &[u8]) -> io::Result<()> {
+        if self.read_only {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "readonly"));
+        }
         let mut files = self.state.files.lock().unwrap();
         let f = files
             .get_mut(&self.name)
@@ -54,6 +67,9 @@ impl File for Handle {
         Ok(())
     }
     fn truncate(&mut self, n: u64) -> io::Result<()> {
+        if self.read_only {
+            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "readonly"));
+        }
         if n > 16 * 1024 * 1024 {
             return Err(io::Error::other("range"));
         }
@@ -67,7 +83,9 @@ impl File for Handle {
         Ok(())
     }
     fn sync(&mut self) -> io::Result<()> {
-        if self.state.fail_sync.swap(false, Ordering::AcqRel) {
+        let count = self.state.sync_count.fetch_add(1, Ordering::AcqRel) + 1;
+        if self.state.fail_at_sync.load(Ordering::Acquire) == count {
+            self.state.fail_at_sync.store(0, Ordering::Release);
             Err(io::Error::from_raw_os_error(5))
         } else {
             Ok(())
@@ -85,7 +103,13 @@ impl File for Handle {
     }
 }
 impl Vfs for MemoryVfs {
-    fn open(&self, n: &str, create: bool, exclusive: bool) -> io::Result<Box<dyn File>> {
+    fn open(
+        &self,
+        n: &str,
+        create: bool,
+        exclusive: bool,
+        read_only: bool,
+    ) -> io::Result<Box<dyn File>> {
         let mut files = self.0.files.lock().unwrap();
         if files.contains_key(n) {
             if exclusive {
@@ -99,6 +123,7 @@ impl Vfs for MemoryVfs {
         Ok(Box::new(Handle {
             state: self.0.clone(),
             name: n.into(),
+            read_only,
         }))
     }
     fn exists(&self, n: &str) -> io::Result<bool> {

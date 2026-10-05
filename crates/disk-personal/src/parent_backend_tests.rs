@@ -261,3 +261,58 @@ fn missing_or_changed_original_journal_is_corrupt_not_durable() {
     ));
     assert!(db.read_context(&e, &r, 4096).is_err());
 }
+
+#[test]
+fn sync_fault_matrix_keeps_bytes_inventory_and_owner_journal_atomic() {
+    let mut prepared_seen = false;
+    let mut committed_seen = false;
+    let baseline = MemoryVfs::default();
+    let control = backend(baseline.clone(), true);
+    let before = baseline.sync_count();
+    let r = request(false);
+    let e = context(&r, "stored", OriginalDisposition::FencedNoCommit);
+    assert!(control
+        .stage_context(&e, &r, &vec![b'A'; 4096])
+        .unwrap()
+        .is_some());
+    let actual_syncs = baseline.sync_count() - before;
+    assert!(actual_syncs > 0 && actual_syncs < 32);
+    drop(control);
+    println!(
+        "actual stage sync boundaries={actual_syncs}; fault cases plus no-fault boundary={}",
+        actual_syncs + 1
+    );
+    for skip in 0..=actual_syncs {
+        let vfs = MemoryVfs::default();
+        let db = backend(vfs.clone(), true);
+        let r = request(false);
+        let e = context(&r, "stored", OriginalDisposition::FencedNoCommit);
+        vfs.fail_after_syncs(skip);
+        let result = db.stage_context(&e, &r, &vec![b'A'; 4096]);
+        if matches!(result, Ok(Some(_))) {
+            assert_eq!(db.read_context(&e, &r, 4096).unwrap(), vec![b'A'; 4096]);
+        } else {
+            assert!(db.uncertain.get());
+        }
+        drop(db);
+        let db = backend(vfs, false);
+        let objects = db.query("SELECT count(*) FROM objects", &[]).unwrap();
+        let journal = db.query("SELECT count(*) FROM owner_journal", &[]).unwrap();
+        assert_eq!(objects, journal, "split transaction at sync fault {skip}");
+        let observation = db.observe_context(&e, &r).unwrap();
+        match observation {
+            Observation::Prepared => {
+                prepared_seen = true;
+                assert_eq!(objects, vec![vec![Value::Integer(0)]]);
+            }
+            Observation::Durable { .. } => {
+                committed_seen = true;
+                assert_eq!(db.read_context(&e, &r, 4096).unwrap(), vec![b'A'; 4096]);
+            }
+            Observation::Unseen => assert_eq!(objects, vec![vec![Value::Integer(0)]]),
+            _ => panic!("incoherent state after controlled sync fault {skip}"),
+        }
+    }
+    assert!(prepared_seen);
+    assert!(committed_seen);
+}

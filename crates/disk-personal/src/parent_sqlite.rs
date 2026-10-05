@@ -44,7 +44,7 @@ impl Root {
         }
         Ok(())
     }
-    fn open(&self, name: &str, create: bool, exclusive: bool) -> io::Result<File> {
+    fn open(&self, name: &str, create: bool, exclusive: bool, read_only: bool) -> io::Result<File> {
         self.ready()?;
         if !matches!(
             name,
@@ -55,7 +55,13 @@ impl Root {
         ) {
             return Err(io::Error::other("SQLite namespace denied"));
         }
-        let mut flags = OFlags::RDWR | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK;
+        let mut flags = (if read_only {
+            OFlags::RDONLY
+        } else {
+            OFlags::RDWR
+        }) | OFlags::NOFOLLOW
+            | OFlags::CLOEXEC
+            | OFlags::NONBLOCK;
         if create {
             flags |= OFlags::CREATE;
         }
@@ -195,17 +201,23 @@ impl SqlFile for DescriptorFile {
     }
 }
 impl Vfs for DescriptorVfs {
-    fn open(&self, name: &str, create: bool, exclusive: bool) -> io::Result<Box<dyn SqlFile>> {
+    fn open(
+        &self,
+        name: &str,
+        create: bool,
+        exclusive: bool,
+        read_only: bool,
+    ) -> io::Result<Box<dyn SqlFile>> {
         if !matches!(name, "inventory.sqlite" | "inventory.sqlite-journal") {
             return Err(io::Error::other("WAL/shared-memory open denied"));
         }
         Ok(Box::new(DescriptorFile {
-            file: self.root.open(name, create, exclusive)?,
+            file: self.root.open(name, create, exclusive, read_only)?,
             root: self.root.clone(),
         }))
     }
     fn exists(&self, name: &str) -> io::Result<bool> {
-        match self.root.open(name, false, false) {
+        match self.root.open(name, false, false, true) {
             Ok(_) => Ok(true),
             Err(e) if e.raw_os_error() == Some(2) => Ok(false),
             Err(e) => Err(e),
@@ -217,7 +229,7 @@ impl Vfs for DescriptorVfs {
         }
         // No directory traversal/symlink follows; only the closed rollback name.
         // Ignore missing only, and always fsync the directory after unlink.
-        match self.root.open(name, false, false) {
+        match self.root.open(name, false, false, true) {
             Ok(_) => (),
             Err(e) if e.raw_os_error() == Some(2) => return Ok(()),
             Err(e) => return Err(e),
