@@ -1,6 +1,7 @@
 //! Private SQLite C ABI boundary. Callbacks own their file handles; a connection
 //! owns registration, descriptor provider and all statements until close. No
 //! default VFS registration, pathname fallback, WAL, mmap or shared memory.
+mod registration;
 use libsqlite3_sys as sql;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::io;
@@ -416,14 +417,10 @@ impl Connection {
         // SAFETY: initialized SQLite owns its default VFS; all callback pointers
         // and boxed data below remain stable until unregister after db close.
         unsafe {
-            let registration_id = NEXT
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
-                    (n < 128).then_some(n + 1)
-                })
-                .map_err(|_| Error {
-                    code: sql::SQLITE_FULL,
-                    io: Some("VFS registration capacity".into()),
-                })?;
+            let registration_id = registration::reserve(&NEXT).ok_or_else(|| Error {
+                code: sql::SQLITE_FULL,
+                io: Some("VFS registration capacity".into()),
+            })?;
             let rc = sql::sqlite3_initialize();
             if rc != sql::SQLITE_OK {
                 return Err(Error { code: rc, io: None });

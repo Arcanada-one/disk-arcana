@@ -11,7 +11,25 @@ import tempfile
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
-CRATES = tuple(Path(p).name for p in tomllib.loads((ROOT / 'Cargo.toml').read_text())['workspace']['members'])
+def workspace_crates(root):
+    """Keep exact member paths and Cargo package selectors as separate identities."""
+    members = tomllib.loads((root / 'Cargo.toml').read_text())['workspace']['members']
+    crates = {}
+    for member in members:
+        path = Path(member)
+        if path.is_absolute() or '..' in path.parts or any(c in member for c in '*?['):
+            raise ValueError('workspace member must be an explicit contained path')
+        manifest = tomllib.loads((root / path / 'Cargo.toml').read_text())
+        name = manifest['package']['name']
+        if not isinstance(name, str) or not name or name in ('root', 'fuzz') or name in crates:
+            raise ValueError('workspace package selector must be unique and unambiguous')
+        crates[name] = path.as_posix()
+    if len(set(crates.values())) != len(crates):
+        raise ValueError('workspace member path must be unique')
+    return crates
+
+
+CRATES = workspace_crates(ROOT)
 
 
 class Unmeasured(Exception):

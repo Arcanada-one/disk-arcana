@@ -149,12 +149,36 @@ class FullTestGroups(unittest.TestCase):
     def test_profile_declares_all_groups_and_real_runner(self):
         profile = json.loads((runner.ROOT / '.arcana/verify.json').read_text())
         groups = {k: v for k, v in profile['deployables'].items() if 'full_test' in v}
-        self.assertEqual(set(groups), {'.', 'fuzz', *(f'crates/{n}' for n in runner.CRATES)})
+        self.assertEqual(set(groups), {'.', 'fuzz', *runner.CRATES.values()})
         for group, declaration in groups.items():
             command = declaration['full_test']
             self.assertEqual(command[0], 'python3')
             self.assertEqual((runner.ROOT / group / command[1]).resolve(), PATH)
-            self.assertIn(command[2], (*runner.CRATES, 'root', 'fuzz'))
+            expected = 'root' if group == '.' else 'fuzz' if group == 'fuzz' else next(
+                name for name, path in runner.CRATES.items() if path == group)
+            self.assertEqual(command[2], expected)
+
+    def test_nested_members_preserve_manifest_names_and_distinct_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            members = ['crates/first/sqlite-abi', 'crates/second/sqlite-abi']
+            (root / 'Cargo.toml').write_text('[workspace]\nmembers = ' + json.dumps(members))
+            for member, name in zip(members, ['first-sqlite', 'second-sqlite']):
+                (root / member).mkdir(parents=True)
+                (root / member / 'Cargo.toml').write_text('[package]\nname = ' + json.dumps(name))
+            self.assertEqual(runner.workspace_crates(root), dict(zip(['first-sqlite', 'second-sqlite'], members)))
+            (root / members[1] / 'Cargo.toml').write_text('[package]\nname = "first-sqlite"')
+            self.assertRaises(ValueError, runner.workspace_crates, root)
+
+    def test_nested_sqlite_group_selects_actual_package_unfiltered(self):
+        self.assertEqual(runner.CRATES['disk-personal-sqlite'], 'crates/disk-personal/sqlite-abi')
+        self.assertNotIn('sqlite-abi', runner.CRATES)
+        with patch.object(runner, 'run') as execute:
+            self.assertEqual(runner.main(['disk-personal-sqlite']), 0)
+            commands = [c.args[0] for c in execute.call_args_list]
+            self.assertEqual(commands, [
+                ['cargo', 'test', '-p', 'disk-personal-sqlite', '--locked', feature, '--', '--include-ignored']
+                for feature in ('--no-default-features', '--all-features')])
 
 
 if __name__ == '__main__':

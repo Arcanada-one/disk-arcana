@@ -86,6 +86,14 @@
         "plugins/obsidian/tsconfig.json",
         "plugins/obsidian/tsconfig.generated.json"
       ]
+    },
+    "crates/disk-personal/sqlite-abi": {
+      "full_test": [
+        "python3",
+        "../../../scripts/full-test-group.py",
+        "disk-personal-sqlite"
+      ],
+      "full_test_timeout_seconds": 1800
     }
   },
   "env_declaration_files": [
