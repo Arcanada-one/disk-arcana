@@ -153,3 +153,50 @@ implementations remain unregistered and absent. The production binary still
 exits78. Implementing those providers must preserve the admitted handle/lease
 contracts; merely instantiating a struct or copying fixture values cannot enable
 production. This does not claim complete parent/runtime delivery.
+
+## Descriptor-relative native journal primitive
+
+`parent_journal` performs actual Linux IO over an already supplied directory
+handle. It is a reusable storage prerequisite, not a SQLite VFS, NativeBackend
+implementation, encrypted-mount verifier or runtime admission constructor.
+The trusted provisioner must supply an existing0700 current-UID directory with
+matching device/inode and existing0600 single-link writer.lock. There is no
+pathname constructor, root creation, missing-mount fallback or storage scan
+before the caller's admission. The caller must retain startup/access/effect
+permission and exclusive ownership excluding untrusted same-UID/host mutation.
+Descriptor checks cannot protect against a privileged hostile host.
+
+All entries use openat2 with BENEATH, NO_SYMLINKS and NO_XDEV. Unsupported syscalls
+return their original IO error; there is no weaker openat fallback. File checks
+require regular0600 current-owner single-link same-device entries. Reads are
+bounded to16384 bytes and metadata changes during read refuse. Each scan opens a
+fresh directory description to avoid sharing an exhausted directory cursor.
+
+The source-local record format `disk-local-owner-journal/1-source` contains the
+original effect lease and unchanged native Disk owner outcome. This is an
+internal disk format, not a new public wire record or Auth OutcomeRecord. The
+journal limits retained records to128, enforces unique effect lease, owner
+receipt and local sequence, and compares exact original lineage before write.
+A record is written exclusively to its lease's pending file, file-synced, renamed
+without replacement and directory-synced. Partial/pending/corrupt entries never
+auto-promote or get truncated/unlinked. Matching retained bytes return Existing,
+which is an observation, not proof that an earlier unknown call completed.
+Missing entries never prove no-commit. No cleanup, reset, prune or broad deletion
+API is provided. Tests remove only their newly created disposable fixture roots.
+
+Writer serialization uses an existing file and nonblocking flock. Explicit
+unlock releases the shared open-file description when synchronous IO has
+returned, including after a concurrent fork. This does not weaken the separate
+02F SQLx abandoned-worker descriptor-retention contract. No async IO, SQL worker,
+background commit or thread cancellation is introduced by this primitive.
+
+A journal-only fsync is not atomic object+inventory+Auth completion. The remaining
+Disk-owned integration is a safe production inventory/VFS and native backend
+transaction protocol that composes object durability, this local record and
+Auth reconciliation without changing native receipt meanings. Do not wire the
+primitive straight to Parent::Committed or cast synthetic02F as that provider.
+Auth Disk resolve/access/effect/outcome producer transport remains with the
+existing Auth/CAB source owner; Data first-intent/recovery is not that protocol.
+The encrypted provisioner/verified directory-handle source remains with existing
+Infra/provisioner owners. Neither source dependency is a request for credentials,
+mount activation or live effects. Production main/startup remain denied.

@@ -528,6 +528,55 @@ impl Outcome {
     }
 }
 
+impl Id {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+impl Outcome {
+    pub fn owner_receipt_id(&self) -> &str {
+        match self {
+            Self::Stored(s) => &s.owner_receipt_id.0,
+            Self::Cleaned(s) => &s.owner_receipt_id.0,
+        }
+    }
+    pub fn local_sequence(&self) -> u64 {
+        match self {
+            Self::Stored(s) => s.local_seq.0,
+            Self::Cleaned(s) => s.local_seq.0,
+        }
+    }
+    /// Exact local lineage projection, not authenticated original-effect proof.
+    pub fn original_identity(&self) -> OriginalEffect {
+        match self {
+            Self::Stored(s) => OriginalEffect {
+                owner_receipt_id: s.owner_receipt_id.clone(),
+                realm_id: s.realm_id.clone(),
+                deployment_generation: s.deployment_generation.clone(),
+                participant_id: s.participant_id.clone(),
+                process_generation: s.process_generation.clone(),
+                operation_id: s.operation_id.clone(),
+                intent_id: s.intent_id.clone(),
+                owner_commit_id: s.owner_commit_id.clone(),
+                local_seq: s.local_seq.clone(),
+                resource_binding_digest: s.resource_binding_digest.clone(),
+            },
+            Self::Cleaned(s) => OriginalEffect {
+                owner_receipt_id: s.owner_receipt_id.clone(),
+                realm_id: s.realm_id.clone(),
+                deployment_generation: s.deployment_generation.clone(),
+                participant_id: s.participant_id.clone(),
+                process_generation: s.process_generation.clone(),
+                operation_id: s.operation_id.clone(),
+                intent_id: s.intent_id.clone(),
+                owner_commit_id: s.owner_commit_id.clone(),
+                local_seq: s.local_seq.clone(),
+                resource_binding_digest: s.resource_binding_digest.clone(),
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "parent_native_tests.rs"]
 mod tests;

@@ -22,3 +22,7 @@ pub mod parent_wire;
 pub mod parent_authority;
 /// Concrete native type and storage binding; no production IO installed.
 pub mod parent_native;
+
+/// Linux handle-relative journal primitive; no mount or runtime admission.
+#[cfg(target_os = "linux")]
+pub mod parent_journal;
