@@ -1,9 +1,12 @@
 # Explicit full verification groups
 
 `.arcana/verify.json` declares executable `full_test` commands for the repository,
-all eight Cargo members, and the detached fuzz package. `scripts/full-test-group.py`
+all Cargo members, including `crates/disk-personal/sqlite-abi`, and the detached fuzz package. `scripts/full-test-group.py`
 executes source commands; it accepts neither logs nor cached verdicts. Invoke a
 command from its declared group directory, with dependencies already installed.
+Member paths come from the workspace manifest; package selectors come from each
+member manifest. The nested SQLite group selects `disk-personal-sqlite`, not the
+directory basename `sqlite-abi`.
 Python 3.11+, the selected Rust toolchain, native C/linker/protoc, and the plugin's
 locked npm installation are prerequisites. Set a task-owned `TMPDIR` and Cargo
 target directory. The root composition invokes `test-obsidian-integration.sh`, which runs `npm ci`
