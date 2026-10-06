@@ -44,6 +44,16 @@ class ReceiverControls(unittest.TestCase):
             decision = reuse.select(ROOT, lambda *_: (evidence, manifest), lambda *_: proof)
         self.assertEqual(decision["mode"], "reuse")
 
+    def test_changed_or_unknown_pre_post_inputs_never_seed_reuse(self):
+        known = {"complete": True, "digest": "fixture"}
+        self.assertTrue(reuse.execution_equivalence(known, known)["complete"])
+        for before, after in (({**known, "complete": False}, known),
+                              (known, {**known, "complete": False}),
+                              ({**known, "complete": False}, {**known, "complete": False}),
+                              (known, {**known, "digest": "changed"})):
+            with self.subTest(before=before, after=after):
+                self.assertFalse(reuse.execution_equivalence(before, after)["complete"])
+
     def test_old_missing_manifest_cold(self):
         current, _, _, _ = inputs()
         def absent(*_):

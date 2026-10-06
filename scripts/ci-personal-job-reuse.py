@@ -385,6 +385,16 @@ def final_status(decision, guard, steps, reused=None, suite_exit=None):
             raise ValueError("reuse cannot conceal execution/setup failure")
 
 
+def execution_equivalence(before, after):
+    """A successful cold job never erases changed/unknown external inputs."""
+    complete = before.get("complete") is True and after.get("complete") is True
+    equal = before == after
+    return {"schema": "PersonalExecutionInputEquivalence/v1", "complete": complete and equal,
+            "before_sha256": sha(canonical_json(before)), "after_sha256": sha(canonical_json(after)),
+            "equal": equal, "reason": "qualified unchanged inputs" if complete and equal
+            else "changed or unknown pre/post tool/environment; execution remains non-reusable"}
+
+
 def write(path, value):
     path.write_text(json.dumps(value, sort_keys=True) + "\n")
 
@@ -452,7 +462,15 @@ def main():
         current, raw = snapshot(ROOT)
         if current["head"] != decision["current"]["head"] or current["closure"] != decision["current"]["closure"]:
             raise ValueError("source input closure changed during execution")
-        receiving = {**current, "schema": "PersonalJobExecution/v1", "tests_executed_now": True,
+        before = decision["current"]["tool_environment_binding"]
+        after = current["tool_environment_binding"]
+        equivalence = execution_equivalence(before, after)
+        # Keep the actual after inventory, but refuse reuse if either captured
+        # stage was unknown or the original setup altered effective inputs.
+        current["tool_environment_binding"] = {**after, "complete": equivalence["complete"]}
+        receiving = {**current, "input_equivalence": equivalence,
+                     "before_tool_environment_binding": before,
+                     "schema": "PersonalJobExecution/v1", "tests_executed_now": True,
                      "suite_exit": suite_exit, "current_steps_success": True,
                      "full_log_sha256": sha((directory / "full.log").read_bytes()),
                      "prior_identity": {"source_commit": current["head"], "checkout_commit": current["head"],

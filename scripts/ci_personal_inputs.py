@@ -16,6 +16,7 @@ import tarfile
 import time
 import tomllib
 
+POLICY_SCHEMA = 'PersonalExternalInputPolicy/v1'
 MAX_FILES = 12000
 MAX_BYTES = 192 * 1024 * 1024
 MAX_FILE = 32 * 1024 * 1024
@@ -378,7 +379,8 @@ def rust_inputs(inventory, tools):
 
 def qualify_external(repo, tools=None):
     inventory = Inventory()
-    result = {'schema': 'PersonalExternalInputs/v1', 'complete': False,
+    result = {'schema': 'PersonalExternalInputs/v1', 'policy_schema': POLICY_SCHEMA,
+              'policy_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), 'complete': False,
               'python': {'complete': False}, 'cargo': {'complete': False}, 'rust': {'complete': False}, 'unknown': []}
     for label, fn in (('python', lambda: python_inputs(inventory)),
                       ('cargo', lambda: cargo_inputs(inventory, repo)),
