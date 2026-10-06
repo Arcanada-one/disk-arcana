@@ -122,7 +122,7 @@ def environment_binding():
 
 
 
-def dependency_identity(tools):
+def dependency_identity(tools, external):
     """Bounded, read-only ELF dependency inventory; ambiguity stays unknown."""
     files, unknown = {}, []
     try:
@@ -133,6 +133,7 @@ def dependency_identity(tools):
         for name, path in re.findall(r"^\s*(\S+)\s+[^\n]*=> (\S+)$", cache, re.MULTILINE):
             candidates.setdefault(name, set()).add(path)
         pending = [Path(t["path"]) for t in tools.values()]
+        pending += [Path(p) for p in external["python"].get("extension_files", {})]
         while pending:
             path = pending.pop().resolve(strict=True)
             if str(path) in files:
@@ -161,12 +162,12 @@ def dependency_identity(tools):
             path = Path(config)
             if path.is_file():
                 files[config] = sha(path.read_bytes())
-        # Python imports beyond ELF and Cargo's mutable external configuration
-        # need a qualified non-secret reference, not a digest of credentials.
-        unknown.append("Python import and mutable Cargo/registry config reference not qualified")
+        if not external["complete"]:
+            unknown.extend(external["unknown"])
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
         unknown.append(str(exc))
-    return {"complete": not unknown, "files": files, "unknown": unknown}
+    return {"complete": not unknown and external["complete"], "files": files,
+            "external": external, "unknown": unknown}
 
 
 def snapshot(repo):
@@ -181,7 +182,11 @@ def snapshot(repo):
             tools[name] = tool_identity(name)
         except (ValueError, OSError, subprocess.SubprocessError) as exc:
             errors.append(str(exc))
-    dependency_binding = dependency_identity(tools)
+    external_spec = importlib.util.spec_from_file_location("personal_external_inputs", repo / "scripts/ci_personal_inputs.py")
+    external_module = importlib.util.module_from_spec(external_spec)
+    external_spec.loader.exec_module(external_module)
+    external = external_module.qualify_external(repo, tools)
+    dependency_binding = dependency_identity(tools, external)
     binding = {"environment": environment, "tools": tools, "dependencies": dependency_binding,
                "system": platform.system(), "machine": platform.machine(),
                "kernel": platform.release(), "complete": not errors and environment["complete"] and dependency_binding["complete"],
