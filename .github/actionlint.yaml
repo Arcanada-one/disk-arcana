@@ -11,6 +11,8 @@ self-hosted-runner:
     - arcana-agents
     - arcana-devs
     - arcana-dbs
+    # CI pool on the arcana-dbs host: arcana-dbs, arcana-dbs-2, arcana-dbs-3.
+    - arcana-dbs-ci
     - arcana-prod
     - arcana-prod-ci
     - disk-arcana-stage
