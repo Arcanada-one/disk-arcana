@@ -26,11 +26,11 @@ DEP = "crates/disk-personal"
 COMMAND = ["python3", "../../scripts/full-test-group.py", "disk-personal"]
 MODES = ["--no-default-features", "--all-features"]
 CANDIDATE = "receipts/graph/persist3b78-personal-provider/full-suite.json"
-# Independently qualified 1502 release; conditional-wrapper support is separate.
+# Independently qualified cddb release; current receiving admission is separate.
 # A newer consumer needs reviewed adoption, never a latest-green lookup or a
 # caller-provided executable.
-PROGRAM = "1502ec75f193f29634e3aaa93e07ffb7421dc307"
-BUNDLE_SHA = "827591a78c043c5dcaeb64b10f82e8ea898a292a13f225f274c522ef4901fa77"
+PROGRAM = "cddbc7c105f5df0064d7af40cf293b75eea22973"
+BUNDLE_SHA = "fb316c0bb645df15b7b20945ce20a2f7ab60a31f726d57607cede3ebd71305f5"
 KNOWN_ENV = {"PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "SHELL",
              "USER", "LOGNAME", "PWD", "OLDPWD", "SHLVL", "_", "TMPDIR",
              "CARGO_HOME", "RUSTUP_HOME", "CARGO_BUILD_JOBS", "CARGO_TERM_COLOR",
@@ -291,7 +291,7 @@ def canonical_proof(repo, current, evidence):
     data = json.loads(manifest.read_text())
     if data.get("program_ref") != PROGRAM:
         raise ValueError("canonical source pin differs")
-    # Exact manifest digest above is independently signature-qualified 1502.
+    # Exact manifest digest above is independently signature-qualified cddb.
     # Validate every member BEFORE importing any code, never a PR override.
     for item in data["files"]:
         path = bundle / item["path"]
