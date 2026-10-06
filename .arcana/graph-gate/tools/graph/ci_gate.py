@@ -3355,7 +3355,7 @@ def selftest_gate2b() -> tuple[list[dict], int]:
         ok_stale, _, _ = sshsig.verify_detached(msg2.read_bytes(), (d / "m.sig").read_text(),
                                                 (d / "k.pub").read_text(), SIGNING_NAMESPACE)
         check("RE-SIGN TRAP: `ssh-keygen -Y sign` over an existing .sig exits 0 and keeps the STALE signature, "
-              "which then does NOT verify over the new bytes — the defect gate3a fixes", 
+              "which then does NOT verify over the new bytes — the defect gate3a fixes",
               r_noclean.returncode == 0 and kept_stale and not ok_stale,
               exit_code=r_noclean.returncode, kept_stale=kept_stale, stale_verifies=ok_stale)
         # (b) the fix: remove the target first, exactly as cmd_bundle now does
