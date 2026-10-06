@@ -575,7 +575,7 @@ def check_receipt(doc: dict, schema: dict, disabled=frozenset()) -> list[dict]:
         for f in vspec["required"]:
             if f not in v and f not in ("output_ref", "exit_code"):
                 c.add("RECEIPT_MISSING_FIELD", f"verifier {v.get('id')}: {f}")
-        if v.get("kind") == "canary":
+        if v.get("kind") in {"canary", "shell_behavior"}:
             canary_entities.update(v.get("entities") or [])
             canary_rows.append(v)
         if v.get("kind") == "endpoint_probe":

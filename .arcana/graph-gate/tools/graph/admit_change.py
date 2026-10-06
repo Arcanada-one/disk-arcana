@@ -523,33 +523,57 @@ def corrupt_one_byte(data: bytes) -> tuple[bytes, int, str]:
     return data + b"\n", len(data), "appended a newline (no alphanumeric byte to flip)"
 
 
-PROGRAM_REF_PIN_RE = re.compile(r"^\s*program_ref:\s*['\"]?([0-9a-f]{40})['\"]?\s*(?:#.*)?$")
+PROGRAM_REF_PIN_RE = re.compile(
+    r"^[ \t]*program_ref:[ \t]*(?P<quote>['\"]?)(?P<ref>[0-9a-f]{40})(?P=quote)[ \t]*(?:#.*)?$")
+CANONICAL_WORKFLOW_PIN_RE = re.compile(
+    r"^[ \t]*uses:[ \t]*(?P<quote>['\"]?)"
+    r"Arcanada-one/arcanada-universal-program/\.github/workflows/graph-admission\.yml@"
+    r"(?P<ref>[0-9a-f]{40})(?P=quote)[ \t]*(?:#.*)?$")
 
 
 def pin_only_edit(repo: Path, base: str, head: str, path: str, expect_ref: str | None) -> tuple[bool, str]:
-    """→ (is a program_ref pin update and nothing else, why). Blobs are read from git, never the tree."""
-    import difflib
+    """→ (only paired canonical pin replacements, why). Read exact Git blobs, never the tree.
+
+    Both the caller input and its canonical reusable-workflow ref must follow the authenticated
+    head bundle. Compare lines in place and preserve every byte outside the replaced SHA: a new,
+    removed, moved or differently indented pin must not conceal a job/context/trust change.
+    """
     old = git_text_or_none(repo, "show", f"{base}:{path}")
     new = git_text_or_none(repo, "show", f"{head}:{path}")
     if old is None or new is None:
         side = "base" if old is None else "head"
-        return False, (f"the file is not UTF-8 text at {side}, so it cannot be a `program_ref:` pin line "
+        return False, (f"the file is not UTF-8 text at {side}, so it cannot be a canonical pin line "
                        f"— a binary path outside the bundle makes this an ordinary change, which is a "
                        f"verdict, not a traceback (A2-243 defect 3)")
     if not old or not new:
         return False, "the file is added or removed by this change, which is not an in-place pin update"
-    diff = [l for l in difflib.unified_diff(old.splitlines(), new.splitlines(), n=0, lineterm="")
-            if l[:1] in "+-" and not l.startswith(("---", "+++"))]
-    if not diff:
+    if old == new:
         return True, "no textual change"
-    for l in diff:
-        m = PROGRAM_REF_PIN_RE.match(l[1:])
-        if not m:
-            return False, f"a changed line is not a program_ref pin: {l[:90]!r}"
-        if l[0] == "+" and expect_ref and m.group(1) != expect_ref:
-            return False, (f"the new pin {m.group(1)[:12]} is not the head bundle's program_ref "
-                           f"{str(expect_ref)[:12]} — a caller that pins one SHA and vendors another")
-    return True, (f"{len(diff)} changed line(s), every one a program_ref pin, every new value equal to the "
+    if not isinstance(expect_ref, str) or not re.fullmatch(r"[0-9a-f]{40}", expect_ref):
+        return False, "no full40 program_ref from the head bundle — canonical pin replacements are unbound"
+    before, after = old.splitlines(keepends=True), new.splitlines(keepends=True)
+    if len(before) != len(after):
+        return False, "a pin or context line was added or removed, not replaced in place"
+    replacements = 0
+    for previous, current in zip(before, after):
+        if previous == current:
+            continue
+        for pattern in (PROGRAM_REF_PIN_RE, CANONICAL_WORKFLOW_PIN_RE):
+            was = pattern.fullmatch(previous.rstrip("\r\n"))
+            now = pattern.fullmatch(current.rstrip("\r\n"))
+            if was and now:
+                break
+        else:
+            return False, f"a changed line is not a paired canonical pin: {current[:90]!r}"
+        old_context = previous[:was.start("ref")] + previous[was.end("ref"):]
+        new_context = current[:now.start("ref")] + current[now.end("ref"):]
+        if old_context != new_context:
+            return False, "a pin's indentation, quoting, comment or line context changed"
+        if now.group("ref") != expect_ref:
+            return False, (f"the new pin {now.group('ref')[:12]} is not the head bundle's program_ref "
+                           f"{expect_ref[:12]} — a caller that pins one SHA and vendors another")
+        replacements += 1
+    return True, (f"{replacements} paired canonical pin replacement(s), every new value equal to the "
                   f"head bundle's program_ref {str(expect_ref)[:12]}")
 
 
@@ -2854,7 +2878,7 @@ def cashed_canary_ids(doc: dict, boundary_inferred: set[str]) -> set[str]:
              for vid in (rec.get("verifier_ids") or []) if isinstance(vid, str)}
     out = set()
     for v in doc.get("verifiers") or []:
-        if not isinstance(v, dict) or v.get("kind") != "canary":
+        if not isinstance(v, dict) or v.get("kind") not in {"canary", "shell_behavior"}:
             continue
         vid = v.get("id")
         if vid in cited or (set(v.get("entities") or []) & boundary_inferred):
@@ -2906,7 +2930,7 @@ def canary_coverage(repo: Path, rows: list[dict], cashed: set[str] | None = None
             problems.append(f"{vid}: {text}")
 
     for v in rows:
-        if not isinstance(v, dict) or v.get("kind") != "canary":
+        if not isinstance(v, dict) or v.get("kind") not in {"canary", "shell_behavior"}:
             continue
         vid, ref = v.get("id"), v.get("output_ref")
         if not isinstance(ref, str) or not schema_check.repo_relative(ref):
@@ -2931,6 +2955,25 @@ def canary_coverage(repo: Path, rows: list[dict], cashed: set[str] | None = None
             report(vid, f"{ref} is not a CanaryResult document (schema="
                         f"{doc.get('schema') if isinstance(doc, dict) else type(doc).__name__!r})")
             continue
+        # Shell behavior is a distinct mandatory codec, not a generic canary alias.
+        # Preserve committed/source/plan checks below, and require actual counted
+        # native process evidence rather than HTTP/v1 testimony for this new kind.
+        if v.get("kind") == "shell_behavior":
+            probes = doc.get("probes") or []
+            if not isinstance(probes, list):
+                probes = []
+            measured = (doc.get("schema") == "CanaryResult/v2" and probes
+                        and all(isinstance(p, dict) and p.get("kind") == "process" and p.get("executed")
+                                and p.get("capture_complete") and isinstance(p.get("output_checks"), list)
+                                for p in probes)
+                        and any(isinstance(c, dict) and c.get("matched")
+                                and isinstance(c.get("expected"), str) and re.search(
+                            r"\b[1-9]\d* (?:passed|passing|tests?)\b|Ran [1-9]\d* tests?|1\.\.[1-9]\d*",
+                            c.get("expected", ""))
+                            for p in probes for c in p.get("output_checks", [])))
+            if not measured:
+                report(vid, f"{ref} is not counted native shell process evidence")
+                continue
         rows_ok, binding, _doc = canary_evidence.consume(path, root, head, at_head=ref)
         if binding:
             report(vid, f"{ref} does not bind {str(head)[:12]}: " + "; ".join(binding[:3]))

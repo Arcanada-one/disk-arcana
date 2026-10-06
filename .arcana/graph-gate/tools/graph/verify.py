@@ -2705,7 +2705,7 @@ class Verify:
                 if sha_bytes(raw) != self.entities[eid]["node"].get("content_hash"):
                     verdict = "not_measured"
                     proof["reason"] = "shell head bytes differ from selected graph node"
-            self.record("v-shell-syntax-" + hashlib.sha256(eid.encode()).hexdigest()[:16], "config_schema",
+            self.record("v-shell-syntax-" + hashlib.sha256(eid.encode()).hexdigest()[:16], "shell_syntax",
                         "bash --noprofile --norc -n <exact bytes; Bats declarations translated, never executed>",
                         [eid], proof.get("exit_code", 125), json.dumps(proof), now_iso(), 0.0,
                         "shell syntax/closure: " + verdict, {eid: (verdict, "shell syntax/closure: " + verdict)})
@@ -2757,7 +2757,7 @@ class Verify:
                         tap_verified = False
                     if not tap_verified:
                         verdict, reason = "not_measured", "BATS_EXECUTION_MEMBERSHIP_NOT_MEASURED: full non-skipped TAP inventory required"
-            self.record("v-shell-behavior-" + hashlib.sha256(eid.encode()).hexdigest()[:16], "canary",
+            self.record("v-shell-behavior-" + hashlib.sha256(eid.encode()).hexdigest()[:16], "shell_behavior",
                         "consume source-bound native process fixture; no local execution", [eid],
                         1 if verdict == "failed" else 0, reason, now_iso(), 0.0, reason,
                         {eid: (verdict, reason)}, evidence_ref=evidence if evidence and verdict == "verified" else None)

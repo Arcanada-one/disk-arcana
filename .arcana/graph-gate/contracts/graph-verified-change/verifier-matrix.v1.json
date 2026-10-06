@@ -479,7 +479,7 @@
    "what": "compilation of the deployable that contains the affected caller / importer / controller / consumer at the head tree"
   },
   "shell_syntax": {
-   "kind": "config_schema",
+   "kind": "shell_syntax",
    "applies_to_nodes": [
     "code_unit"
    ],
@@ -487,7 +487,7 @@
    "verdict_rule": "Exact hash-bound Bash syntax; Bats test declarations translated without execution. Missing/ambiguous helpers, dynamic alias/eval/load and unmeasured registration remain not_measured; no behavior/runtime proof."
   },
   "shell_behavior": {
-   "kind": "canary",
+   "kind": "shell_behavior",
    "applies_to_nodes": [
     "code_unit"
    ],

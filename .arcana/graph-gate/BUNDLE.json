@@ -1,5 +1,5 @@
 {
- "bundle_digest": "sha256:7a51a1e5ed58a3c3b9f0bb42a27192433b66d6d7148e82b38c4e123ee7afb0fe",
+ "bundle_digest": "sha256:d110697baf7c0af58dc5fdf1372a553f94243a47e8b4a414211f02e8153d4656",
  "files": [
   {
    "blob_oid": "a2fb8091875f3b071739d5fcd75469b2fa20c5df",
@@ -12,14 +12,14 @@
    "sha256": "sha256:4dae90c65f044c60b3f52526106473ee8bae729119da80d04b589d0f87f5a3f3"
   },
   {
-   "blob_oid": "e6984ee218e8bd7a32795a3322626ffec0325250",
+   "blob_oid": "e35c0496a6db5c4be68aa90c64c745a7caee5f12",
    "path": "tools/graph/admit_change.py",
-   "sha256": "sha256:205d2df4546278e2d7534aebc9b4eeb3840b035157dfeb6dc5311c7acd59181e"
+   "sha256": "sha256:797b255f1e215e0c6111f4b8d75391f6c05f15be6bf779f18324cde227c87001"
   },
   {
-   "blob_oid": "9ad259a32d98e545789a06b14850750c547d5998",
+   "blob_oid": "b07cee814cefe2c00de8e9dfa025af6d2ff0eabd",
    "path": "tools/graph/schema_check.py",
-   "sha256": "sha256:1fa6df10761407aa49e2bdc63f4cd052c55a2c0c892132482da97d55c2e46d5b"
+   "sha256": "sha256:8ec105df5924957f90a0e156ca06c46eccbca90bac42f12cc905a0634d241c11"
   },
   {
    "blob_oid": "164670d3f05feead48c740cbb2a5286edd3da64c",
@@ -62,9 +62,9 @@
    "sha256": "sha256:78ea54f5ab290f09620b06411dea66e27652036312bea199c18215fc4b5f97d6"
   },
   {
-   "blob_oid": "40860eb34c8daf82709217277b64a9094aa94e98",
+   "blob_oid": "9e8614e54f28c096526f787f25e12ff121a39f49",
    "path": "tools/graph/verify.py",
-   "sha256": "sha256:af7c9e93f8a6efa53968478c767da7665bd8841606fc1093508de73fad2e8b26"
+   "sha256": "sha256:e07c45591259301c8464fa9ae566628df93f2c03c6e39f2b1ff3472f68385e8d"
   },
   {
    "blob_oid": "7f3da8c328f191b311964d5cd35871d67b2d367a",
@@ -102,9 +102,9 @@
    "sha256": "sha256:bcc2b9c986588c689a9ef015e04dcaf2e69971cf64c69e761138de70c19258a7"
   },
   {
-   "blob_oid": "7cc0ce86e871f067235a60c41b2c7522d0b7f759",
+   "blob_oid": "97e8e95f1128e7bfac2126b349e63c6aa7f40dab",
    "path": "tools/graph/ci_gate.py",
-   "sha256": "sha256:a46e7a3dbb9f487ef188b8cdaf680c7fc2abacda27d8c690699ef0045782f7fa"
+   "sha256": "sha256:eb780786ab1cf719596ae3f3f57506f1b1fc721dfd3242f2cc45820a0a5719e4"
   },
   {
    "blob_oid": "f97c4273c635f3e3215c13a0e063930951d7b48d",
@@ -117,14 +117,14 @@
    "sha256": "sha256:b4f35887c952e088726ae8b207036ed99bf860a1f2e1d5432288d7d1a77c7244"
   },
   {
-   "blob_oid": "b0aee3bcebb6564fb1cc3bb5985646bf52dd6866",
+   "blob_oid": "c8f8a5b039efe6498b74d04f7b3918110f932088",
    "path": "contracts/graph-verified-change/change-admission-receipt.v1.json",
-   "sha256": "sha256:c488ccfbbefabf625867f3eff2ce8bbcef322d7c847925790a1d25a22a959aaa"
+   "sha256": "sha256:4401bf6d2375785ae7151bcb0d5a0b663f0707cee323215705ee4b9e45231817"
   },
   {
-   "blob_oid": "d912ae07b6d99fdf15095edb94a3df854ba2d8b3",
+   "blob_oid": "d962f77924ac3d95b2e118c5f658fb2229bb4521",
    "path": "contracts/graph-verified-change/verifier-matrix.v1.json",
-   "sha256": "sha256:468baa7300c346b9b07d8ed299c13b73ef48dcd95f0587cbbe35b8bb3ab14748"
+   "sha256": "sha256:6d95428c6c833cdace1292ecedf9147d5d0f3e78da8ffbf06274f5db5291b63b"
   },
   {
    "blob_oid": "3deb84411b7a5580d20a679211f94efb4ccee6ba",
@@ -137,13 +137,13 @@
    "sha256": "sha256:9726c7cfbff3b3ae732eba91154409014f369c89c65315400d923ef5a2cac158"
   }
  ],
- "model": "claude-opus-5",
+ "model": "codex",
  "producer": {
   "source": "git object store at program_ref",
   "tool": "tools/graph/ci_gate.py",
   "version": "1.0.0"
  },
- "program_ref": "cddbc7c105f5df0064d7af40cf293b75eea22973",
+ "program_ref": "d33325d57904d2199c1bb39f7d37021db4e369c1",
  "program_repo": "Arcanada-one/arcanada-universal-program",
  "provisional_until_fable_review": true,
  "rule": "The workflow refuses unless every file's sha256 matches this manifest AND the caller's `program_ref` input matches `program_ref` here. The bundle is a VENDORED copy of one pinned program-repo SHA (the program repository is private and no shared credential exists to check it out from a caller's CI). A pull request that changes anything under the bundle directory is refused by the gate job \u2014 a bundle refresh is its own pull request. Each entry's `blob_oid` is the git object id the bytes were read at: `git hash-object <file>` must equal it, which is how a caller with no credential for the program repository can CONTRADICT this manifest offline (DEC-AUP-0036 R2). Every byte here was read from the object store at program_ref, never from a working tree (R1).",

@@ -222,7 +222,9 @@
     "doc_reference",
     "manual_review",
     "other",
-    "endpoint_probe"
+    "endpoint_probe",
+    "shell_syntax",
+    "shell_behavior"
    ],
    "optional": [
     "started_at_utc",
