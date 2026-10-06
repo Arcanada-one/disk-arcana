@@ -2441,3 +2441,10 @@ node_id_hint = "from-bf"
         }
     }
 }
+
+// One helper instance in this CLI test executable; no production module/export.
+#[cfg(all(test, target_os = "linux"))]
+mod cli_config_env_canary;
+#[cfg(all(test, target_os = "linux"))]
+#[path = "../../../test-support/env_probe.rs"]
+mod config_env_probe;

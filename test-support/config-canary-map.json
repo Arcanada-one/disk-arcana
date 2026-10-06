@@ -1,0 +1,479 @@
+{
+  "schema": "ConfigCanaryFixtureMap/v1",
+  "source_base": "d50316d9cca7b52d5f3031c096ca26660cec6f54",
+  "runtime_status": "NOT_MEASURED",
+  "groups": [
+    {
+      "group": "C01",
+      "reader": "code_unit:crates/disk-server/src/config.rs",
+      "reader_path": "crates/disk-server/src/config.rs",
+      "reader_sha256": "96b17925d9673b9de00eefd09135c287bc22edd08b526e62f81dd536a748150d",
+      "fixture": "crates/disk-server/tests/fixtures/config-environment.json",
+      "fixture_sha256": "32d57382686a7156f156652f18fcc58bc4282076ce6d785517e1091ee3d8808d",
+      "test": "crates/disk-server/tests/config_environment_canary.rs",
+      "defined_cases": 141,
+      "per_key_targeted_fixture_ids": {
+        "DISK_ACL_ALLOW_UNSIGNED": [
+          "C01-defaults",
+          "C01-unsigned-1",
+          "C01-unsigned-0",
+          "C01-unsigned-true",
+          "C01-unsigned-empty"
+        ],
+        "DISK_ACL_GNUPGHOME": [
+          "C01-defaults",
+          "C01-DISK_ACL_GNUPGHOME-override",
+          "C01-DISK_ACL_GNUPGHOME-empty"
+        ],
+        "DISK_ACL_SIG_PATH": [
+          "C01-defaults",
+          "C01-DISK_ACL_SIG_PATH-override",
+          "C01-DISK_ACL_SIG_PATH-empty"
+        ],
+        "DISK_ACL_YAML_PATH": [
+          "C01-defaults",
+          "C01-DISK_ACL_YAML_PATH-missing",
+          "C01-DISK_ACL_YAML_PATH-empty",
+          "C01-DISK_ACL_YAML_PATH-override"
+        ],
+        "DISK_ADMIN_TOKEN": [
+          "C01-defaults",
+          "C01-DISK_ADMIN_TOKEN-override",
+          "C01-DISK_ADMIN_TOKEN-empty"
+        ],
+        "DISK_AUTH_MODE": [
+          "C01-defaults",
+          "C01-auth-disabled",
+          "C01-auth-empty",
+          "C01-auth-enforce",
+          "C01-auth-local",
+          "C01-auth-invalid",
+          "C01-auth-key-missing",
+          "C01-auth-key-short",
+          "C01-auth-key-32",
+          "C01-oauth-actual-mode",
+          "C01-oauth-oidc-alias",
+          "C01-oauth-missing-DISK_OAUTH_ISSUER",
+          "C01-oauth-missing-DISK_OAUTH_CLIENT_ID",
+          "C01-oauth-missing-DISK_OAUTH_CLIENT_SECRET",
+          "C01-oauth-missing-DISK_OAUTH_REDIRECT_URI",
+          "C01-oauth-stub-url-missing",
+          "C01-oauth-stub-DISK_OAUTH_PUBLIC_BASE_URL",
+          "C01-oauth-stub-DISK_OAUTH_REDIRECT_URI",
+          "C01-oauth-dev-DISK_OAUTH_PUBLIC_BASE_URL",
+          "C01-oauth-dev-DISK_OAUTH_REDIRECT_URI",
+          "C01-email-url-missing",
+          "C01-email-stub",
+          "C01-email-dev",
+          "C01-email-log-auth-disabled"
+        ],
+        "DISK_BILLING_MODE": [
+          "C01-defaults",
+          "C01-billing-disabled",
+          "C01-billing-empty",
+          "C01-billing-enforce",
+          "C01-billing-local",
+          "C01-billing-stripe",
+          "C01-billing-invalid"
+        ],
+        "DISK_BIND_ADDR": [
+          "C01-defaults",
+          "C01-DISK_BIND_ADDR-override",
+          "C01-DISK_BIND_ADDR-invalid"
+        ],
+        "DISK_CA_MODE": [
+          "C01-defaults",
+          "C01-ca-http",
+          "C01-ca-stub",
+          "C01-ca-offline",
+          "C01-ca-STUB",
+          "C01-ca-invalid",
+          "C01-legacy-offline-precedence"
+        ],
+        "DISK_DB_PATH": [
+          "C01-defaults",
+          "C01-DISK_DB_PATH-missing",
+          "C01-DISK_DB_PATH-empty",
+          "C01-DISK_DB_PATH-override"
+        ],
+        "DISK_EMAIL_VERIFY_BASE_URL": [
+          "C01-defaults",
+          "C01-DISK_EMAIL_VERIFY_BASE_URL-override",
+          "C01-DISK_EMAIL_VERIFY_BASE_URL-empty",
+          "C01-email-stub",
+          "C01-email-dev"
+        ],
+        "DISK_EMAIL_VERIFY_MODE": [
+          "C01-defaults",
+          "C01-email-auth-disabled",
+          "C01-email-url-missing",
+          "C01-email-invalid",
+          "C01-email-stub",
+          "C01-email-dev",
+          "C01-email-disabled-disabled",
+          "C01-email-disabled-empty",
+          "C01-email-log",
+          "C01-email-log-auth-disabled"
+        ],
+        "DISK_EMAIL_VERIFY_TTL_SECS": [
+          "C01-defaults",
+          "C01-DISK_EMAIL_VERIFY_TTL_SECS-positive",
+          "C01-DISK_EMAIL_VERIFY_TTL_SECS-zero",
+          "C01-DISK_EMAIL_VERIFY_TTL_SECS-max",
+          "C01-DISK_EMAIL_VERIFY_TTL_SECS-overflow",
+          "C01-DISK_EMAIL_VERIFY_TTL_SECS-invalid",
+          "C01-DISK_EMAIL_VERIFY_TTL_SECS-negative",
+          "C01-DISK_EMAIL_VERIFY_TTL_SECS-empty"
+        ],
+        "DISK_ENROLLMENT_BIND_ADDR": [
+          "C01-defaults",
+          "C01-DISK_ENROLLMENT_BIND_ADDR-override",
+          "C01-DISK_ENROLLMENT_BIND_ADDR-invalid"
+        ],
+        "DISK_HEALTH_BIND_ADDR": [
+          "C01-defaults",
+          "C01-DISK_HEALTH_BIND_ADDR-override",
+          "C01-DISK_HEALTH_BIND_ADDR-invalid"
+        ],
+        "DISK_JWT_ISSUER": [
+          "C01-defaults",
+          "C01-DISK_JWT_ISSUER-override",
+          "C01-DISK_JWT_ISSUER-empty",
+          "C01-jwt-explicit-precedence"
+        ],
+        "DISK_JWT_JWKS_URI": [
+          "C01-defaults",
+          "C01-DISK_JWT_JWKS_URI-override",
+          "C01-DISK_JWT_JWKS_URI-empty",
+          "C01-jwt-explicit-precedence"
+        ],
+        "DISK_JWT_MODE": [
+          "C01-defaults",
+          "C01-jwt-local",
+          "C01-jwt-empty",
+          "C01-jwt-auth_arcana",
+          "C01-jwt-jwks",
+          "C01-jwt-oidc",
+          "C01-jwt-dual",
+          "C01-jwt-invalid"
+        ],
+        "DISK_JWT_SIGNING_KEY": [
+          "C01-defaults",
+          "C01-DISK_JWT_SIGNING_KEY-override",
+          "C01-DISK_JWT_SIGNING_KEY-empty",
+          "C01-auth-disabled",
+          "C01-auth-empty",
+          "C01-auth-enforce",
+          "C01-auth-local",
+          "C01-auth-key-short",
+          "C01-auth-key-32",
+          "C01-oauth-actual-mode",
+          "C01-oauth-oidc-alias",
+          "C01-oauth-missing-DISK_OAUTH_ISSUER",
+          "C01-oauth-missing-DISK_OAUTH_CLIENT_ID",
+          "C01-oauth-missing-DISK_OAUTH_CLIENT_SECRET",
+          "C01-oauth-missing-DISK_OAUTH_REDIRECT_URI",
+          "C01-oauth-stub-url-missing",
+          "C01-oauth-stub-DISK_OAUTH_PUBLIC_BASE_URL",
+          "C01-oauth-stub-DISK_OAUTH_REDIRECT_URI",
+          "C01-oauth-dev-DISK_OAUTH_PUBLIC_BASE_URL",
+          "C01-oauth-dev-DISK_OAUTH_REDIRECT_URI",
+          "C01-email-url-missing",
+          "C01-email-stub",
+          "C01-email-dev"
+        ],
+        "DISK_JWT_TTL_SECS": [
+          "C01-defaults",
+          "C01-DISK_JWT_TTL_SECS-positive",
+          "C01-DISK_JWT_TTL_SECS-zero",
+          "C01-DISK_JWT_TTL_SECS-max",
+          "C01-DISK_JWT_TTL_SECS-overflow",
+          "C01-DISK_JWT_TTL_SECS-invalid",
+          "C01-DISK_JWT_TTL_SECS-negative",
+          "C01-DISK_JWT_TTL_SECS-empty"
+        ],
+        "DISK_OAUTH_CLIENT_ID": [
+          "C01-defaults",
+          "C01-DISK_OAUTH_CLIENT_ID-override",
+          "C01-DISK_OAUTH_CLIENT_ID-empty",
+          "C01-oauth-actual-mode",
+          "C01-oauth-oidc-alias",
+          "C01-oauth-missing-DISK_OAUTH_ISSUER",
+          "C01-oauth-missing-DISK_OAUTH_CLIENT_ID",
+          "C01-oauth-missing-DISK_OAUTH_CLIENT_SECRET",
+          "C01-oauth-missing-DISK_OAUTH_REDIRECT_URI"
+        ],
+        "DISK_OAUTH_CLIENT_SECRET": [
+          "C01-defaults",
+          "C01-DISK_OAUTH_CLIENT_SECRET-override",
+          "C01-DISK_OAUTH_CLIENT_SECRET-empty",
+          "C01-oauth-actual-mode",
+          "C01-oauth-oidc-alias",
+          "C01-oauth-missing-DISK_OAUTH_ISSUER",
+          "C01-oauth-missing-DISK_OAUTH_CLIENT_ID",
+          "C01-oauth-missing-DISK_OAUTH_CLIENT_SECRET",
+          "C01-oauth-missing-DISK_OAUTH_REDIRECT_URI"
+        ],
+        "DISK_OAUTH_ISSUER": [
+          "C01-defaults",
+          "C01-DISK_OAUTH_ISSUER-override",
+          "C01-DISK_OAUTH_ISSUER-empty",
+          "C01-jwt-issuer-fallback",
+          "C01-jwt-explicit-precedence",
+          "C01-oauth-actual-mode",
+          "C01-oauth-oidc-alias",
+          "C01-oauth-missing-DISK_OAUTH_ISSUER",
+          "C01-oauth-missing-DISK_OAUTH_CLIENT_ID",
+          "C01-oauth-missing-DISK_OAUTH_CLIENT_SECRET",
+          "C01-oauth-missing-DISK_OAUTH_REDIRECT_URI"
+        ],
+        "DISK_OAUTH_MODE": [
+          "C01-defaults",
+          "C01-oauth-actual-mode",
+          "C01-oauth-oidc-alias",
+          "C01-oauth-missing-DISK_OAUTH_ISSUER",
+          "C01-oauth-missing-DISK_OAUTH_CLIENT_ID",
+          "C01-oauth-missing-DISK_OAUTH_CLIENT_SECRET",
+          "C01-oauth-missing-DISK_OAUTH_REDIRECT_URI",
+          "C01-oauth-auth-disabled",
+          "C01-oauth-invalid",
+          "C01-oauth-stub-url-missing",
+          "C01-oauth-stub-DISK_OAUTH_PUBLIC_BASE_URL",
+          "C01-oauth-stub-DISK_OAUTH_REDIRECT_URI",
+          "C01-oauth-dev-DISK_OAUTH_PUBLIC_BASE_URL",
+          "C01-oauth-dev-DISK_OAUTH_REDIRECT_URI",
+          "C01-oauth-disabled-disabled",
+          "C01-oauth-disabled-empty"
+        ],
+        "DISK_OAUTH_PUBLIC_BASE_URL": [
+          "C01-defaults",
+          "C01-DISK_OAUTH_PUBLIC_BASE_URL-override",
+          "C01-DISK_OAUTH_PUBLIC_BASE_URL-empty",
+          "C01-oauth-stub-DISK_OAUTH_PUBLIC_BASE_URL",
+          "C01-oauth-dev-DISK_OAUTH_PUBLIC_BASE_URL"
+        ],
+        "DISK_OAUTH_REDIRECT_URI": [
+          "C01-defaults",
+          "C01-DISK_OAUTH_REDIRECT_URI-override",
+          "C01-DISK_OAUTH_REDIRECT_URI-empty",
+          "C01-oauth-actual-mode",
+          "C01-oauth-oidc-alias",
+          "C01-oauth-missing-DISK_OAUTH_ISSUER",
+          "C01-oauth-missing-DISK_OAUTH_CLIENT_ID",
+          "C01-oauth-missing-DISK_OAUTH_CLIENT_SECRET",
+          "C01-oauth-missing-DISK_OAUTH_REDIRECT_URI",
+          "C01-oauth-stub-DISK_OAUTH_REDIRECT_URI",
+          "C01-oauth-dev-DISK_OAUTH_REDIRECT_URI"
+        ],
+        "DISK_REGISTER_NODE_MODE": [
+          "C01-defaults",
+          "C01-register-open",
+          "C01-register-enrolled",
+          "C01-register-disabled",
+          "C01-register-admin",
+          "C01-register-invalid"
+        ],
+        "DISK_SHARE_ROOTS": [
+          "C01-defaults",
+          "C01-share-roots",
+          "C01-share-empty",
+          "C01-share-invalid-0",
+          "C01-share-invalid-1",
+          "C01-share-invalid-2",
+          "C01-share-duplicate-current-behavior"
+        ],
+        "DISK_STRIPE_WEBHOOK_SECRET": [
+          "C01-defaults",
+          "C01-DISK_STRIPE_WEBHOOK_SECRET-override",
+          "C01-DISK_STRIPE_WEBHOOK_SECRET-empty"
+        ],
+        "DISK_SYNC_ROOT": [
+          "C01-defaults",
+          "C01-DISK_SYNC_ROOT-missing",
+          "C01-DISK_SYNC_ROOT-empty",
+          "C01-DISK_SYNC_ROOT-override"
+        ],
+        "DISK_TENANT_DB_DIR": [
+          "C01-defaults",
+          "C01-DISK_TENANT_DB_DIR-override",
+          "C01-DISK_TENANT_DB_DIR-empty"
+        ],
+        "DISK_TLS_CA_PATH": [
+          "C01-defaults",
+          "C01-DISK_TLS_CA_PATH-missing",
+          "C01-DISK_TLS_CA_PATH-empty",
+          "C01-DISK_TLS_CA_PATH-override"
+        ],
+        "DISK_TLS_CERT_PATH": [
+          "C01-defaults",
+          "C01-DISK_TLS_CERT_PATH-missing",
+          "C01-DISK_TLS_CERT_PATH-empty",
+          "C01-DISK_TLS_CERT_PATH-override"
+        ],
+        "DISK_TLS_KEY_PATH": [
+          "C01-defaults",
+          "C01-DISK_TLS_KEY_PATH-missing",
+          "C01-DISK_TLS_KEY_PATH-empty",
+          "C01-DISK_TLS_KEY_PATH-override"
+        ],
+        "DISK_USE_STUB_CA": [
+          "C01-defaults",
+          "C01-legacy-1",
+          "C01-legacy-0",
+          "C01-legacy-true",
+          "C01-legacy-empty",
+          "C01-legacy-offline-precedence"
+        ],
+        "OPS_BOT_URL": [
+          "C01-defaults",
+          "C01-OPS_BOT_URL-override",
+          "C01-OPS_BOT_URL-empty"
+        ]
+      },
+      "qualification": "Case definitions are not execution. Error cases cover only the named error/precedence path, not every setup env key. Default cases compare returned fields; no network/resource conformance claimed."
+    },
+    {
+      "group": "C03",
+      "reader": "code_unit:crates/disk-storage/src/s3/config.rs",
+      "reader_path": "crates/disk-storage/src/s3/config.rs",
+      "reader_sha256": "56078c324a81d2b6df0d9cd3afaba28c1d0ac53b50ac513c71560e0d2c338e90",
+      "fixture": "crates/disk-storage/tests/fixtures/config-environment.json",
+      "fixture_sha256": "bd80a71894a14f19658418b826615ff4ddc17f5a8f996ea25d10f4aa919fbab9",
+      "test": "crates/disk-storage/tests/config_environment_canary.rs",
+      "defined_cases": 24,
+      "per_key_targeted_fixture_ids": {
+        "DISK_B2_APP_KEY": [
+          "C03-b2-defaults",
+          "C03-b2-missing-DISK_B2_APP_KEY",
+          "C03-b2-empty-DISK_B2_APP_KEY"
+        ],
+        "DISK_B2_BUCKET": [
+          "C03-b2-defaults",
+          "C03-b2-missing-DISK_B2_BUCKET",
+          "C03-b2-empty-DISK_B2_BUCKET"
+        ],
+        "DISK_B2_ENDPOINT": [
+          "C03-b2-defaults",
+          "C03-b2-ENDPOINT-override",
+          "C03-b2-ENDPOINT-empty-current-behavior"
+        ],
+        "DISK_B2_KEY_ID": [
+          "C03-b2-defaults",
+          "C03-b2-missing-DISK_B2_KEY_ID",
+          "C03-b2-empty-DISK_B2_KEY_ID"
+        ],
+        "DISK_B2_REGION": [
+          "C03-b2-defaults",
+          "C03-b2-REGION-override",
+          "C03-b2-REGION-empty-current-behavior"
+        ],
+        "DISK_R2_ACCESS_KEY_ID": [
+          "C03-r2-defaults",
+          "C03-r2-missing-DISK_R2_ACCESS_KEY_ID",
+          "C03-r2-empty-DISK_R2_ACCESS_KEY_ID"
+        ],
+        "DISK_R2_ACCOUNT_ID": [
+          "C03-r2-defaults",
+          "C03-r2-missing-DISK_R2_ACCOUNT_ID",
+          "C03-r2-empty-DISK_R2_ACCOUNT_ID"
+        ],
+        "DISK_R2_BUCKET": [
+          "C03-r2-defaults",
+          "C03-r2-missing-DISK_R2_BUCKET",
+          "C03-r2-empty-DISK_R2_BUCKET"
+        ],
+        "DISK_R2_ENDPOINT": [
+          "C03-r2-defaults",
+          "C03-r2-ENDPOINT-override",
+          "C03-r2-ENDPOINT-empty-current-behavior"
+        ],
+        "DISK_R2_REGION": [
+          "C03-r2-defaults",
+          "C03-r2-REGION-override",
+          "C03-r2-REGION-empty-current-behavior"
+        ],
+        "DISK_R2_SECRET_ACCESS_KEY": [
+          "C03-r2-defaults",
+          "C03-r2-missing-DISK_R2_SECRET_ACCESS_KEY",
+          "C03-r2-empty-DISK_R2_SECRET_ACCESS_KEY"
+        ]
+      },
+      "qualification": "Case definitions are not execution. Error cases cover only the named error/precedence path, not every setup env key. Default cases compare returned fields; no network/resource conformance claimed."
+    },
+    {
+      "group": "C04-telemetry",
+      "reader": "code_unit:crates/disk-server/src/telemetry/config.rs",
+      "reader_path": "crates/disk-server/src/telemetry/config.rs",
+      "reader_sha256": "b3cd08d50e20e4a6b0606ff763be3b1d25110dacdda50bb4b9a853a6fdefe3a4",
+      "fixture": "crates/disk-server/tests/fixtures/telemetry-environment.json",
+      "fixture_sha256": "2ebbcee792c73836efd5a2f089d9c4f42def6b324b6e09a9869307c5436b2e2d",
+      "test": "crates/disk-server/src/telemetry/config_env_canary.rs",
+      "defined_cases": 7,
+      "per_key_targeted_fixture_ids": {
+        "DISK_POSTHOG_API_HOST": [
+          "C04-telemetry-defaults",
+          "C04-telemetry-host-0",
+          "C04-telemetry-host-1",
+          "C04-telemetry-host-2"
+        ],
+        "DISK_POSTHOG_PROJECT_KEY": [
+          "C04-telemetry-defaults",
+          "C04-telemetry-key-0",
+          "C04-telemetry-key-1",
+          "C04-telemetry-key-2"
+        ]
+      },
+      "qualification": "Case definitions are not execution. Error cases cover only the named error/precedence path, not every setup env key. Default cases compare returned fields; no network/resource conformance claimed."
+    },
+    {
+      "group": "C04-billing",
+      "reader": "code_unit:crates/disk-server/src/billing/mode.rs",
+      "reader_path": "crates/disk-server/src/billing/mode.rs",
+      "reader_sha256": "eb9bdd3df9f56a7ec32e900c79a05d8cc8e1073ed59828aa364aa7d846161d46",
+      "fixture": "crates/disk-server/tests/fixtures/billing-environment.json",
+      "fixture_sha256": "aa0d1fee2e1c775a192e2285b46de48ef8e542e825438f8f9f78337c934e7bde",
+      "test": "crates/disk-server/src/billing/mode_env_canary.rs",
+      "defined_cases": 7,
+      "per_key_targeted_fixture_ids": {
+        "DISK_BILLING_DEFAULT_TIER": [
+          "C04-billing-default",
+          "C04-billing-free",
+          "C04-billing-pro",
+          "C04-billing-team",
+          "C04-billing-PRO",
+          "C04-billing-empty",
+          "C04-billing-bad"
+        ]
+      },
+      "qualification": "Case definitions are not execution. Error cases cover only the named error/precedence path, not every setup env key. Default cases compare returned fields; no network/resource conformance claimed."
+    }
+  ],
+  "pending_groups": [
+    "C02",
+    "C05",
+    "C06",
+    "C07",
+    "C08",
+    "C09",
+    "C10",
+    "C11",
+    "C12",
+    "C13",
+    "C14"
+  ],
+  "test_control_reader": {
+    "path": "test-support/env_probe.rs",
+    "key": "DISK_CONFIG_PROBE_CASE",
+    "purpose": "Synthetic child expected-field envelope only; never product config. Parent env_clear installs exact fixture and forbids fixture override of this key.",
+    "negative_controls": [
+      "verifier_rejects_zero_selected_child_tests",
+      "verifier_rejects_wrong_field_expectation"
+    ],
+    "runtime_status": "NOT_MEASURED",
+    "compilation_owners": {
+      "disk-server-libtest": "crate::config_env_probe, declared once in crates/disk-server/src/lib.rs under cfg(test,Linux)",
+      "disk-server-config-integration": "independent integration executable env_probe module",
+      "disk-storage-config-integration": "independent integration executable env_probe module"
+    }
+  }
+}

@@ -12,7 +12,7 @@ permissions:
 jobs:
   fuzz-deep:
     name: Deep fuzz (${{ matrix.target }}, 10m)
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: [self-hosted, Linux, X64, ci-general]
     strategy:
       fail-fast: false
       matrix:
