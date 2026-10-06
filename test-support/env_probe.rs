@@ -87,6 +87,7 @@ pub fn run(child_name: &str, fixtures: &str) {
                         || matches!(
                             key.as_str(),
                             "OPS_BOT_URL"
+                                | "OPS_BOT_KEY"
                                 | "HOSTNAME"
                                 | "COMPUTERNAME"
                                 | "AUTH_ARCANA_CA_TOKEN"
