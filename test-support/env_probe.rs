@@ -82,7 +82,16 @@ pub fn run(child_name: &str, fixtures: &str) {
             .stderr(Stdio::piped());
         for (key, value) in case["env"].as_object().expect("fixture env") {
             assert!(
-                key != CASE_ENV && (key.starts_with("DISK_") || key == "OPS_BOT_URL"),
+                key != CASE_ENV
+                    && (key.starts_with("DISK_")
+                        || matches!(
+                            key.as_str(),
+                            "OPS_BOT_URL"
+                                | "HOSTNAME"
+                                | "COMPUTERNAME"
+                                | "AUTH_ARCANA_CA_TOKEN"
+                                | "AUTH_ARCANA_CA_URL"
+                        )),
                 "non-config environment key"
             );
             command.env(key, value.as_str().expect("synthetic string"));

@@ -2448,3 +2448,32 @@ mod cli_config_env_canary;
 #[cfg(all(test, target_os = "linux"))]
 #[path = "../../../test-support/env_probe.rs"]
 mod config_env_probe;
+
+#[cfg(all(test, target_os = "linux"))]
+mod identity_env_canary {
+    use super::default_hostname;
+    use crate::config_env_probe;
+    use serde_json::json;
+
+    #[test]
+    fn c12_hostname_child() {
+        if let Some(expected) = config_env_probe::expected() {
+            config_env_probe::check(json!({"hostname": default_hostname()}), expected);
+        }
+    }
+
+    #[test]
+    fn c12_hostname_fresh_environment_matrix() {
+        config_env_probe::run(
+            "identity_env_canary::c12_hostname_child",
+            r#"[
+            {"id":"C12-hostname-absent","env":{},"expected":{"hostname":"disk-node"}},
+            {"id":"C12-hostname-primary","env":{"HOSTNAME":"synthetic-primary"},"expected":{"hostname":"synthetic-primary"}},
+            {"id":"C12-hostname-secondary","env":{"COMPUTERNAME":"synthetic-secondary"},"expected":{"hostname":"synthetic-secondary"}},
+            {"id":"C12-hostname-precedence","env":{"HOSTNAME":"synthetic-primary","COMPUTERNAME":"synthetic-secondary"},"expected":{"hostname":"synthetic-primary"}},
+            {"id":"C12-hostname-empty-primary","env":{"HOSTNAME":"","COMPUTERNAME":"synthetic-secondary"},"expected":{"hostname":""}},
+            {"id":"C12-hostname-whitespace","env":{"HOSTNAME":" synthetic "},"expected":{"hostname":" synthetic "}}
+        ]"#,
+        );
+    }
+}
