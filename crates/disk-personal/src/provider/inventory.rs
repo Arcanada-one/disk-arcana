@@ -7,6 +7,10 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous};
 use sqlx::{ConnectOptions, Connection, Row, SqliteConnection};
 use std::time::Duration;
 
+#[cfg(test)]
+#[path = "inventory_tests.rs"]
+mod tests;
+
 pub(crate) struct Record {
     pub request: Request,
     pub committed: Option<LocalCommit>,
@@ -89,7 +93,9 @@ pub(crate) async fn verify_binding(
             .bind(&binding.realm_id).fetch_one(&mut *db).await?;
         let orphaned: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM capture_binding c LEFT JOIN attempts a ON a.operation_id = c.operation_id WHERE a.operation_id IS NULL")
             .fetch_one(&mut *db).await?;
-        if broken != 0 || orphaned != 0 {
+        let conflicting: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM (SELECT 1 FROM capture_binding GROUP BY realm_id, capture_id, cancellation_generation HAVING COUNT(DISTINCT descriptor_identity) != 1)")
+            .fetch_one(&mut *db).await?;
+        if broken != 0 || orphaned != 0 || conflicting != 0 {
             return Err(Error::Schema);
         }
     }
@@ -295,6 +301,17 @@ pub(crate) async fn reserve(
         return Err(Error::Capacity);
     }
     let mut tx = db.begin().await?;
+    if let Some((d, _)) = capture {
+        // Parts have distinct operation IDs, but one capture generation has one
+        // complete immutable descriptor. Check inside the reservation transaction
+        // before either row is inserted; a conflict must leave no new attempt.
+        let conflicting: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM capture_binding WHERE realm_id = ? AND capture_id = ? AND cancellation_generation = ? AND descriptor_identity != ?")
+            .bind(d.realm()).bind(d.capture()).bind(d.generation()).bind(d.descriptor_identity())
+            .fetch_one(&mut *tx).await?;
+        if conflicting != 0 {
+            return Err(Error::Conflict);
+        }
+    }
     sqlx::query("INSERT INTO attempts (operation_id, attempt_id, object_id, revision_id, request_json, expected_len, state) VALUES (?, ?, ?, ?, ?, ?, 'PREPARED')")
         .bind(&request.operation_id).bind(&request.attempt_id).bind(&request.object_id).bind(&request.revision_id)
         .bind(serde_json::to_string(request)?).bind(i64::try_from(request.expected_len).map_err(|_| Error::InvalidInput)?)
