@@ -81,7 +81,9 @@ for workflow in "${workflow_files[@]}"; do
       fi
     elif [[ "$reference" =~ @[0-9a-fA-F]{40}$ ]]; then
       if [[ "$verify_remote" -eq 1 ]]; then
-        repo="${reference%@*}"
+        # A composite action lives in a sub-path (owner/repo/.github/actions/x@sha); the commits API wants owner/repo only,
+        # otherwise every such reference answers 404 and is misreported as an annotated-tag object.
+        repo="$(cut -d/ -f1-2 <<<"${reference%@*}")"
         sha="${reference##*@}"
         set +e
         resolve_commit "$repo" "$sha"
