@@ -2,6 +2,8 @@
 import contextlib
 import importlib.util
 import io
+import os
+import tempfile
 from pathlib import Path
 import subprocess
 import sys
@@ -86,6 +88,43 @@ class Boundary(unittest.TestCase):
         code, write = self.run_gate(answer(), expect='abc')
         self.assertEqual(code, 2)
         write.assert_not_called()
+
+    def test_actual_workflow_shell_propagates_gate_exit_and_guards_bundle(self):
+        workflow = (ROOT / '.github/workflows/dependabot-auto-merge.yml').read_text()
+        shell = workflow.split('        run: |', 1)[1].replace(
+            '${{ github.event.repository.default_branch }}', 'main')
+        for exit_code, changed_file in ((0, 'Cargo.lock'), (5, 'Cargo.lock'),
+                (1, 'Cargo.lock'), (0, 'dev-tools/gated-merge.py')):
+            with self.subTest(exit_code=exit_code, changed_file=changed_file), \
+                 tempfile.TemporaryDirectory() as directory:
+                d = Path(directory)
+                # Absolute interpreter avoids PATH interception recursion.
+                fake_gh = d / 'gh'
+                fake_gh.write_text('#!' + sys.executable + '\n' +
+                    'import json,sys\n' +
+                    'endpoint=next(a for a in sys.argv[1:] if a.startswith("repos/"))\n' +
+                    'if "/commits/" in endpoint: print("1")\n' +
+                    'elif "/files" in endpoint: print(' + repr(changed_file) + ')\n' +
+                    'else: print(json.dumps({"user":{"login":"dependabot[bot]"},'
+                    '"title":"Bump example from 1.2.3 to 1.2.4",'
+                    '"base":{"ref":"main"},"draft":False}))\n')
+                fake_python = d / 'python3'
+                fake_python.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$RUNNER_TEMP/called"\nexit ' + str(exit_code) + '\n')
+                fake_gh.chmod(0o755)
+                fake_python.chmod(0o755)
+                env = dict(os.environ, PATH=str(d) + os.pathsep + os.environ['PATH'],
+                    REPO='example/project', HEAD_SHA=HEAD, RUNNER_TEMP=str(d),
+                    GITHUB_RUN_ID='1', GH_TOKEN='')
+                result = subprocess.run(['/bin/bash', '-c', shell], env=env,
+                    capture_output=True, text=True, timeout=5)
+                if changed_file != 'Cargo.lock':
+                    self.assertEqual(result.returncode, 0)
+                    self.assertFalse((d / 'called').exists())
+                else:
+                    self.assertEqual(result.returncode, exit_code, result.stderr)
+                    args = (d / 'called').read_text().splitlines()
+                    self.assertEqual(args[args.index('--expect-sha') + 1], HEAD)
+                    self.assertNotIn('--dry-run', args)
 
     def test_workflow_uses_trusted_gate_and_propagates_refusal(self):
         workflow = (ROOT / '.github/workflows/dependabot-auto-merge.yml').read_text()
