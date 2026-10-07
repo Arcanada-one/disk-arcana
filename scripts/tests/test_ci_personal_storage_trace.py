@@ -59,6 +59,16 @@ class TraceControls(unittest.TestCase):
             with self.subTest(call=call), self.assertRaises(ValueError):
                 trace.inspect_trace("123 " + call + "\n" + EXIT, ROOT)
 
+    def test_escaping_relative_path_cannot_supply_positive_evidence(self):
+        raw = '123 openat(3</owned/fixture>, "../../etc/hosts", O_RDONLY) = 4</etc/hosts>\n' + EXIT
+        with self.assertRaises(ValueError):
+            result = trace.inspect_trace(raw, ROOT)
+            trace.judge("read", result, b"{}\n", True)
+        green = '123 openat(3</owned/fixture>, "objects/part", O_RDONLY) = 4</owned/fixture/objects/part>\n' + EXIT
+        result = trace.inspect_trace(green, ROOT)
+        self.assertEqual(result["successful_storage_call_count"], 1)
+        trace.judge("read", result, b"{}\n", True)
+
     def test_sibling_prefix_is_not_the_root(self):
         raw = '123 openat(AT_FDCWD, "/owned/fixture-sibling", O_RDONLY) = 3\n' + EXIT
         self.assertEqual(trace.inspect_trace(raw, ROOT)["storage_call_count"], 0)

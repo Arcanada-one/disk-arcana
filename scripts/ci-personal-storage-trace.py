@@ -72,6 +72,8 @@ def syscall_arguments(text):
 def storage_arguments(name, arguments, root):
     """Attribute only ABI pathname inputs and -yy descriptor annotations."""
     def owned(path):
+        if ".." in path.split("/"):
+            raise ValueError("parent traversal needs separate path attribution")
         return path == root or path.startswith(root + "/")
 
     def descriptor(index):
@@ -83,6 +85,10 @@ def storage_arguments(name, arguments, root):
         if not match:
             raise ValueError("unattributable pathname argument")
         path = match[1]
+        # Lexical normalization could hide symlink traversal. Refuse parent
+        # components instead of claiming a resolved syscall target.
+        if ".." in path.split("/"):
+            raise ValueError("parent traversal needs separate path attribution")
         if path.startswith("/"):
             return owned(path)
         # cwd is outside the root and changes are refused. An absolute pathname
