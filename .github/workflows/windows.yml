@@ -31,7 +31,16 @@ jobs:
           $llvm = 'C:\Program Files\LLVM\bin'
           $dll = Join-Path $llvm 'dlltool.exe'
           if (-not (Test-Path -LiteralPath $dll)) {
-            throw "dlltool.exe missing under $llvm (install LLVM on the runner)"
+            # Hosted LLVM names this tool llvm-dlltool.exe. Provide the name
+            # rustc expects in this job's temporary directory, not Program Files.
+            $llvmDll = Join-Path $llvm 'llvm-dlltool.exe'
+            if (-not (Test-Path -LiteralPath $llvmDll)) {
+              throw "Neither dlltool.exe nor llvm-dlltool.exe exists under $llvm"
+            }
+            $llvm = Join-Path $env:RUNNER_TEMP 'disk-dlltool'
+            New-Item -ItemType Directory -Force -Path $llvm | Out-Null
+            $dll = Join-Path $llvm 'dlltool.exe'
+            Copy-Item -LiteralPath $llvmDll -Destination $dll
           }
           $env:Path = "$llvm;$env:Path"
           Add-Content -Path $env:GITHUB_PATH -Value $llvm
