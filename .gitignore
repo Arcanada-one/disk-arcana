@@ -35,3 +35,6 @@ cobertura.xml
 # crates/disk-gui (see SECURITY.md). Created in the working directory on every
 # run; never an input to the build.
 .intentionally-empty-file.o
+
+# Release build outputs (scripts/build-macos-release.sh, release-deploy.yml) — published as GitHub release assets
+/dist/
