@@ -207,18 +207,31 @@ jobs:
         run: |
           source scripts/ci-ensure-cc.sh
           cargo clippy --all-targets --all-features -- -D warnings
-      - name: Install cargo-audit + cargo-deny
-        # Non-Docker install form. The previous EmbarkStudios/cargo-deny-action@v2
-        # and rustsec/audit-check@v2 both ran (or the deny action built) inside a
-        # Docker container; after infra-0308 rehomed CI to a non-root user the
-        # self-hosted runner has no docker.sock access, so the Docker action
-        # failed at "Build container for action" before any lint step ran. The
-        # cargo-installed binaries run natively and honour deny.toml / the ignore
-        # list below.
+      - name: Security tool cache compatibility
+        id: security-tool-key
+        env:
+          CI_SECURITY_TOOLS_ROOT: ${{ github.workspace }}/.ci-security-tools
         run: |
-          source scripts/ci-ensure-cc.sh
-          cargo install cargo-audit --locked
-          cargo install cargo-deny --locked
+          set -euo pipefail
+          # Rust and libc/distro identity prevent incompatible native binary reuse.
+          compatibility=$( { rustc -Vv; cat /etc/os-release; ldd --version; } | sha256sum | cut -d ' ' -f1)
+          echo "compatibility=$compatibility" >> "$GITHUB_OUTPUT"
+      - name: Restore pinned security tool binaries
+        id: security-tools-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
+        with:
+          path: .ci-security-tools/bin
+          key: security-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.security-tool-key.outputs.compatibility }}-audit-0.22.2-deny-0.20.2
+      - name: Ensure pinned cargo-audit + cargo-deny
+        env:
+          CI_SECURITY_TOOLS_ROOT: ${{ github.workspace }}/.ci-security-tools
+        run: bash scripts/ci-security-tools.sh
+      - name: Save verified security tool binaries
+        if: steps.security-tools-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
+        with:
+          path: .ci-security-tools/bin
+          key: ${{ steps.security-tools-cache.outputs.cache-primary-key }}
       - name: cargo audit
         # No --ignore flags by design (DISK-0066). Suppressions live in
         # .cargo/audit.toml, which cargo-audit reads automatically from the
