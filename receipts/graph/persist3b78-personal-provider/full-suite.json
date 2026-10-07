@@ -1,0 +1,23 @@
+{
+  "schema": "GitHubFullSuiteEvidence/v1",
+  "scope": "global_fallback_full_suite",
+  "repository": "Arcanada-one/disk-arcana",
+  "deployable": "crates/disk-personal",
+  "command": [
+    "python3",
+    "../../scripts/full-test-group.py",
+    "disk-personal"
+  ],
+  "source_commit": "3b78db552b2e57fd5a325100cc98b4dc22d27a33",
+  "checkout_commit": "3b78db552b2e57fd5a325100cc98b4dc22d27a33",
+  "run_id": 37370510839,
+  "job_id": 111966187442,
+  "run_attempt": 1,
+  "workflow": ".github/workflows/ci.yml",
+  "job_key": "personal-provider",
+  "step": "Verify the synthetic foundation and production refusal",
+  "log": {
+    "path": "receipts/graph/persist3b78-personal-provider/job.txt",
+    "sha256": "sha256:e28481ea3954444ff2dc2dbd962b615fb3178a93245c201532c64e8ca2eac826"
+  }
+}

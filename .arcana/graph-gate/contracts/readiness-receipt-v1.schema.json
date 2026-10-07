@@ -1,0 +1,60 @@
+{
+ "schema": "ReadinessReceiptSchema/v1",
+ "id": "readiness-receipt-v1",
+ "portion_id": "A2-289",
+ "epic": "AUP-E29",
+ "decision_ref": "DEC-AUP-0008",
+ "document_schema_name": "ReadinessReceipt/v1",
+ "validator": "tools/graph/readiness_check.py",
+ "status": "NORMATIVE_DRAFT — written 2026-09-24 against the 303 ReadinessReceipt/v1 documents that already existed (see `corpus`), not against a design. Binding for every receipt a gate ADMITS from this commit on (the pull-request body and `receipts/**`); receipts written before it are asserted, never re-verified (I14).",
+ "purpose": "Until this file there was no ReadinessReceipt/v1 schema and no validator. `ReadinessReceipt/v1` was a label: measured across the program repository and the ARAS run receipts, 303 documents carried it and exactly ONE field — `schema` — was common to all of them. The consequence A2-278 hit at the A2-P4 node: a receipt with its `contractDigest` cut out was refused by nobody, because nothing read the receipt at all. This schema states the thin core every receipt owes, and the one CONDITIONAL rule that makes the A2-P4 negative control measurable — a receipt that claims it verified a contract binding must say WHICH contract.",
+ "not_covered": [
+  "The receipt is not certified by validation. `readiness_check.py` reads the document; it does not re-run the measurement the document reports. A conformant receipt can still be false — this is the same boundary Muneral's evidence route states for itself (`task-evidence.service.ts`: the route records a CLAIM about an artefact, it does not certify it).",
+  "The BINDING between a receipt's `contractDigest` and the work item's contract is checked here only against a digest the caller supplies (`--expect-contract-digest`). Fetching the work item from Muneral is not done: the validator is stdlib-only and travels inside the CI bundle, where it has no credential and no network. The gate that HAS the work item passes the digest in; the gate that does not records `not_measured`, never a pass.",
+  "Free verdict prose. 177 of the 303 measured documents carry a top-level `verdict`, and its values range from `PASS` to a three-sentence paragraph. No rule here constrains it: a rule the existing corpus fails by design would be a rule nobody could run."
+ ],
+ "corpus": {
+  "measured_at_utc": "2026-09-24T00:00:00Z",
+  "measured_by": "runs/A2-289/survey.py over Arcanada-one/arcanada-universal-program @aeaf4cbb and runs/A2-278/live/",
+  "documents": 303,
+  "fields_present_in_all": ["schema"],
+  "timestamp_field_used": {"captured_at_utc": 218, "produced_at_utc": 33, "at": 22, "measured_at_utc": 8, "measured_at": 5, "<none>": 17},
+  "carries_a_contract_binding_claim": 5,
+  "note": "Written down because it is the reason the required set is thin. A schema that demanded the union of what receipts happen to carry would refuse most of the program's own evidence."
+ },
+ "fields": {
+  "required": ["schema"],
+  "timestamp_any_of": ["captured_at_utc", "produced_at_utc", "measured_at_utc", "measured_at", "generated_at_utc", "issued_at_utc", "at"],
+  "producer_any_of": ["producer", "produced_by", "tool", "host", "program_commit", "portion_id", "card"],
+  "contract_digest_any_of": ["contractDigest", "contract_digest"],
+  "work_item_any_of": ["work_item", "task_id", "muneral_task_id"],
+  "contract_binding_markers": ["digest_preimage", "verified_against_live_endpoint", "source"],
+  "optional": ["verdict", "claims", "checks", "results", "not_measured", "notes", "artefacts", "decision_refs", "reverse_if"],
+  "claims": {
+   "item_required": ["verdict"],
+   "verdict_trivalued": {
+    "pass": ["verified", "pass", "passed", "ok", "conformant", "confirmed", "measured", "true"],
+    "fail": ["fail", "failed", "refuted", "violation", "false"],
+    "not_measured": ["not_measured", "not measured", "unmeasured", "inconclusive", "unknown", "paused_safe", "not_run", "not run", "skipped", "n/a"]
+   },
+   "reason_any_of": ["evidence", "reason", "note", "detail", "notes", "why"]
+  }
+ },
+ "rules": {
+  "READINESS_SCHEMA_MISMATCH": "`schema` is not the string `ReadinessReceipt/v1`. The validator is asked for this document kind; a document that calls itself something else is not it.",
+  "READINESS_WITHOUT_TIMESTAMP": "None of `fields.timestamp_any_of` is present. A receipt with no time is not evidence of a measurement — nothing says WHEN the world it describes was true. 17 of the 303 measured documents fail this, and they are named in `tools/ci/self-check-baseline.json` rather than forgiven by the rule.",
+  "READINESS_TIMESTAMP_INVALID": "A timestamp field is present but is not an ISO-8601 UTC instant (`YYYY-MM-DDThh:mm[:ss[.fff]]Z`). A time that cannot be parsed orders nothing.",
+  "READINESS_WITHOUT_PRODUCER": "None of `fields.producer_any_of` is present. Supreme Directive law 5: every entity is identifiable and traceable to a responsible human. A receipt that names nobody satisfies it for no one.",
+  "READINESS_CONTRACT_BINDING_WITHOUT_DIGEST": "The receipt ASSERTS a contract binding — a `contract` object carrying `digest_preimage` or `verified_against_live_endpoint` — and carries no `contractDigest`/`contract_digest`. THIS IS THE A2-P4 NEGATIVE CONTROL. The A2-278 receipt with its digest cut out still claims `verified_against_live_endpoint: true`: it says it checked a contract and refuses to say which one, and that self-contradiction is decidable from the bytes alone, with no network and no Muneral. A receipt whose `contract` object carries neither marker (a file digest, a policy path) makes no binding claim and is not touched.",
+  "READINESS_CONTRACT_DIGEST_FORM": "A contract digest is present but is not `sha256:<64 lowercase hex>`. An unparseable digest cannot be compared with the work item's, so it binds nothing.",
+  "READINESS_CONTRACT_DIGEST_MISMATCH": "`--expect-contract-digest` was supplied (by the gate that read the work item) and the receipt's digest differs. The receipt reports a run under a DIFFERENT contract than the work item names.",
+  "READINESS_CLAIM_WITHOUT_VERDICT": "A `claims[]` entry carries no `verdict`. A claim without a verdict is a sentence, not evidence.",
+  "READINESS_VERDICT_NOT_TRIVALUED": "A `claims[]` verdict is two-valued — a JSON boolean, or `yes`/`no` — where the rule is tri-valued (DEC-AUP-0008 I4). `not_measured` is a third verdict and a two-valued field cannot express it, so a `false` there is indistinguishable from «we did not look». A domain token the tables do not list (`MIXED`, `FETCHED_VERIFIED`) is NOT a violation: it is unmapped, not two-valued, and the validator says so as a note.",
+  "READINESS_NOT_MEASURED_WITHOUT_REASON": "A `claims[]` verdict that maps to `not_measured` carries none of `fields.claims.reason_any_of`. «Not measured» without a reason is indistinguishable from a measurement that was skipped and forgotten.",
+  "UNREADABLE": "The document is not JSON, or is not a JSON object. The validator never guesses: it reads the document or it refuses."
+ },
+ "verdicts": {
+  "conformant": "0 violations.",
+  "violation": "≥ 1 violation code. Deterministic: the same bytes always produce the same codes."
+ }
+}

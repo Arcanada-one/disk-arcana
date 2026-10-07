@@ -1,0 +1,72 @@
+{
+  "schema": "CanaryPlan/v2",
+  "id": "persist-cli-export-corrected-source-envelope",
+  "owner": "PERSIST term_7182995b-234d-4791-b2ce-b0aa685b0963",
+  "environment": "owned-local-offline-synthetic-ELF-not-product-artifact",
+  "read_only": false,
+  "subject": {
+    "schema": "GitCanarySubject/v1",
+    "commit": "78f911a3388d080892c2fb4e698eff965cdb4bbf",
+    "tree": "95b7da9e2072bb91a63af4bd001d0c2884bb2004",
+    "evidence": {
+      "path": "source.json",
+      "sha256": "ccc9fc8ccdb4b2c0677884512d714f0dca1be3f79feb52bd692166851b2b407e",
+      "source_field": "commit"
+    }
+  },
+  "probes": [
+    {
+      "id": "export-source-and-file-boundaries",
+      "kind": "process",
+      "argv": [
+        "/usr/bin/python3.12",
+        "-B",
+        "scripts/tests/test_ci_export_linux_server.py"
+      ],
+      "cwd": ".",
+      "env_keys": [
+        "PATH",
+        "HOME",
+        "TMPDIR"
+      ],
+      "timeout_seconds": 120,
+      "capture_limit_bytes": 1048576,
+      "mutating": true,
+      "entities": [
+        "code_unit:scripts/ci-export-linux-server.py"
+      ],
+      "executable_sha256": "e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f",
+      "execution_files": [
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/ci-export-linux-server.py",
+          "sha256": "64766403c71714162ddd1260a135d0a64f2b3e2651c2411c752329024cc042bb"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/tests/test_ci_export_linux_server.py",
+          "sha256": "104554e017fb0b67026546e3ea85b290ba1aecab7cbce0c52eebc545b230207a"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/full-test.env.example",
+          "sha256": "fdfe6999bdf77ea6823e987c7a07c7580c1e453edcb51e83c5e98c0a1ed60bcb"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/.github/workflows/ci.yml",
+          "sha256": "695f7d4c9c0f06c87b681cb071aff9ad8f7dd5a02e878ccc26c29900b524e852"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/.arcana/verify.json",
+          "sha256": "942b095400295d61f1ad8226b6bbed71290983e5328936f4d392ab526b6f1504"
+        }
+      ],
+      "expect": {
+        "exit_codes": [
+          0
+        ],
+        "stderr_contains": [
+          "Ran 23 tests",
+          "OK"
+        ]
+      }
+    }
+  ]
+}
