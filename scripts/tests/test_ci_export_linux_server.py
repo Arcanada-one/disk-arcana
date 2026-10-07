@@ -1,5 +1,6 @@
 """Synthetic ELF boundary fixtures; no real c39 binary or product proof."""
 import hashlib
+import copy
 import importlib.util
 import json
 import os
@@ -12,6 +13,82 @@ from unittest.mock import patch
 spec = importlib.util.spec_from_file_location('exporter', Path(__file__).parents[1] / 'ci-export-linux-server.py')
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
+
+
+class FixtureWorkerExports(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.target = self.root / 'target'
+        source = self.root / 'crates/disk-personal/src/bin/disk-capture-fixture-worker.rs'
+        source.parent.mkdir(parents=True)
+        source.write_text('// synthetic export boundary input, not a compiled worker\n')
+        manifest = self.root / 'crates/disk-personal/Cargo.toml'
+        manifest.write_text('# synthetic cargo boundary input\n')
+        binary = self.target / 'debug' / module.FIXTURE_WORKER
+        binary.parent.mkdir(parents=True)
+        header = bytearray(64)
+        header[:6] = b'\x7fELF\x02\x01'
+        header[16:18] = (2).to_bytes(2, 'little')
+        header[18:20] = (62).to_bytes(2, 'little')
+        binary.write_bytes(header)
+        binary.chmod(0o700)
+        self.binary = binary
+        self.row = {'reason': 'compiler-artifact', 'target': {
+            'name': module.FIXTURE_WORKER, 'kind': ['bin'],
+            'src_path': str(source), 'required-features': ['synthetic-fixtures']},
+            'features': ['default', 'synthetic-fixtures'], 'profile': {'test': False},
+            'manifest_path': str(manifest), 'executable': str(binary)}
+        self.log = self.root / 'cargo.jsonl'
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def export(self, rows=None, success=True):
+        rows = [self.row] if rows is None else rows
+        self.log.write_text('\n'.join(json.dumps(x) for x in [*rows, {'reason': 'build-finished', 'success': success}]))
+        with patch.dict(os.environ, {'GITHUB_WORKSPACE': str(self.root)}):
+            return module.export_fixture(self.log, self.target, self.root, {'fixture_only': True})
+
+    def test_exact_fixture_binary_and_manifest_digest(self):
+        output = self.export()
+        manifest = json.loads((output / 'BUILD.json').read_text())
+        self.assertEqual(manifest['binary_sha256'], hashlib.sha256(self.binary.read_bytes()).hexdigest())
+        self.assertEqual(manifest['binary'], module.FIXTURE_WORKER)
+        self.assertEqual(manifest['scope'], 'synthetic_fixture_only')
+        self.assertFalse(manifest['runtime_authorized'])
+        self.assertTrue(manifest['fixture_only'])
+
+    def test_failed_missing_duplicate_and_libtest_only_refuse(self):
+        for rows, success in [([self.row], False), ([], True), ([self.row, self.row], True),
+                              ([{**self.row, 'profile': {'test': True}}], True)]:
+            with self.subTest(rows=rows, success=success), self.assertRaises(ValueError):
+                self.export(rows, success)
+
+    def test_wrong_features_source_kind_and_output_refuse(self):
+        mutations = [('features', []), ('features', 'synthetic-fixtures'),
+                     ('executable', str(self.root / 'foreign-worker')),
+                     ('manifest_path', str(self.log))]
+        for key, value in mutations:
+            row = copy.deepcopy(self.row)
+            row[key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                self.export([row])
+        for key, value in [('kind', ['test']), ('required-features', []),
+                           ('src_path', str(self.log))]:
+            row = copy.deepcopy(self.row)
+            row['target'][key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                self.export([row])
+
+    def test_known_worker_cargo_link_preserved_extra_alias_refuses(self):
+        deps = self.binary.parent / 'deps'
+        deps.mkdir()
+        os.link(self.binary, deps / 'disk_capture_fixture_worker-fixture')
+        self.export()
+        os.link(self.binary, self.root / 'foreign-alias')
+        with self.assertRaisesRegex(ValueError, 'unowned_binary'):
+            self.export()
 
 
 class ExportBoundaries(unittest.TestCase):

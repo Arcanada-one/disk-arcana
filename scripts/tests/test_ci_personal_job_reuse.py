@@ -37,6 +37,18 @@ def inputs():
 
 
 class ReceiverControls(unittest.TestCase):
+    def test_missing_changed_or_unknown_trace_tool_refuses_prior_reuse(self):
+        current, manifest, evidence, proof = inputs()
+        current["tool_environment_binding"]["tools"]["strace"] = "current-trace-digest"
+        manifest["tool_environment_binding"] = copy.deepcopy(current["tool_environment_binding"])
+        reuse.validate_reuse(current, manifest, evidence, proof)
+        for tools in ({"rustc": "actual-fixture-hash"},
+                      {"rustc": "actual-fixture-hash", "strace": "different-digest"}):
+            changed = copy.deepcopy(manifest)
+            changed["tool_environment_binding"]["tools"] = tools
+            with self.assertRaises(ValueError):
+                reuse.validate_reuse(current, changed, evidence, proof)
+
     def test_complete_authenticated_fixture_hit(self):
         current, manifest, evidence, proof = inputs()
         reuse.validate_reuse(current, manifest, evidence, proof)

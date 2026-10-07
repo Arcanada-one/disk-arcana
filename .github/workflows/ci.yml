@@ -124,6 +124,12 @@ jobs:
           export PERSONAL_CARGO_BIN PERSONAL_RUSTC_BIN PATH
           export CARGO_TARGET_DIR="$RUNNER_TEMP/personal-provider-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           bash scripts/test-personal-provider.sh
+          # Current job-built synthetic worker only; no extra Cargo/FULL replay.
+          python3 -B scripts/ci-personal-storage-trace.py \
+            --repo "$PWD" --worker "$CARGO_TARGET_DIR/debug/disk-capture-fixture-worker" \
+            --output "$PERSONAL_REUSE_DIR/storage-trace" \
+            --expected-head '${{ github.event.pull_request.head.sha || github.sha }}' \
+            --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT"
           # Execute the declared group itself. Historical foundation CI is not
           # full-group evidence. Preserve the profile's 1800-second deadline.
           command -v timeout
@@ -384,6 +390,19 @@ jobs:
           path: |
             ${{ steps.cli_export.outputs.directory0 }}
             ${{ steps.cli_export.outputs.directory1 }}
+          if-no-files-found: error
+          retention-days: 1
+      - name: Prepare exact synthetic capture fixture worker
+        id: fixture_export
+        env:
+          EXPECTED_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BUILD_TARGET: x86_64-unknown-linux-gnu
+        run: python3 -B scripts/ci-export-linux-server.py --fixture "$CI_ISOLATED_RUST_ROOT/cargo-test.jsonl"
+      - name: Upload exact synthetic capture fixture worker
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: disk-capture-fixture-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.fixture_export.outputs.directory }}
           if-no-files-found: error
           retention-days: 1
       - name: Scanner load harness (1K + 10K, DISK-0012 G3)
