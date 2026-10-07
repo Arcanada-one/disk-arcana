@@ -1,0 +1,50 @@
+# ============================================================================================
+# AUP-GRAPH-006 `gate1`, DARK LAUNCH (proposal from the Arcanada Universal Program, DEC-AUP-0008).
+#
+# «Нет receipt — нет мержа»: a pull request is admitted only when a conformant
+# ChangeAdmissionReceipt/v1 is bound to exactly its change range, the graph it was computed against
+# is fresh, and every affected entity carries a tri-valued verdict — `not_measured` is a third
+# verdict, never a pass. Documentation-only changes report `not_measured` and stay green.
+#
+# NON-REQUIRED ON PURPOSE. This file is a proposal: branch protection is NOT touched, the job is in
+# no other workflow's `needs:`, and a red verdict here blocks nothing. Promotion to a required status
+# check is the repository owner's decision, and its precondition is a per-repository AUP-GRAPH-007
+# calibration (does the gate's impact set actually reach this repository's code?).
+#
+# It lives in its own file rather than inside ci.yml so that the proposal changes no existing
+# workflow: the repositories that gate on their CI file's shape (pinned-action contracts, formatting,
+# job graphs) see it untouched.
+#
+# `program_ref` MUST equal the `program_ref` in .github/graph-admission/BUNDLE.json. The gate tools
+# travel as a digest-pinned VENDORED bundle because the program repository is private: a caller's
+# GITHUB_TOKEN cannot check it out, and this proposal creates no shared credential. The job refuses a
+# bundle whose sha256 does not match the manifest, a `program_ref` that differs from the bundle's,
+# and a pull request that edits the bundle itself (a refresh is its own pull request).
+# DEC-AUP-0007 keeps CI post-hoc: the authoritative run is the local `admit_change.py gate` of the
+# agent that made the change.
+# ============================================================================================
+name: graph-admission
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  graph-admission:
+    # A fork's pull request gets no verdict rather than a misleading one.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Called LOCALLY from the byte-for-byte vendored copy of the program repository's own reusable
+    # workflow (its sha256 is recorded in .github/graph-admission/BUNDLE.json). The cross-repository
+    # reference to the PRIVATE program repository does not start a run — GitHub reports only a
+    # "workflow file issue", with no job and no retrievable annotation. A hole, not a solved problem.
+    uses: ./.github/workflows/graph-admission.yml
+    with:
+      program_ref: "b893af8f7782766187f6484d93cdd10559629927"
+      # AUP-GRAPH-006:gate2b. The fingerprint of the Ed25519 key that signs the vendored bundle's
+      # BUNDLE.json. It lives HERE, in this repository's own workflow file, deliberately OUTSIDE
+      # .github/graph-admission/: a fingerprint kept inside the bundle would be replaced by the very
+      # change that replaces the key, and would prove only that the bundle agrees with itself.
+      signing_key_fingerprint: "SHA256:9QFqysn44UjA8rXyfHjItP3b2Oadhnbf1bDNqXrsCig"
