@@ -1,0 +1,406 @@
+[
+  {
+    "id": "C03-b2-defaults",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [],
+    "env": {
+      "DISK_B2_BUCKET": "fixture-bucket",
+      "DISK_B2_KEY_ID": "fixture-id",
+      "DISK_B2_APP_KEY": "fixture-key"
+    },
+    "expected": {
+      "backend": "b2",
+      "endpoint_url": "https://s3.us-west-004.backblazeb2.com",
+      "region": "us-west-004",
+      "bucket": "fixture-bucket",
+      "access_key_id": "fixture-id",
+      "secret_access_key": "fixture-key",
+      "force_path_style": true
+    }
+  },
+  {
+    "id": "C03-b2-ENDPOINT-override",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_B2_ENDPOINT"
+    ],
+    "env": {
+      "DISK_B2_BUCKET": "fixture-bucket",
+      "DISK_B2_KEY_ID": "fixture-id",
+      "DISK_B2_APP_KEY": "fixture-key",
+      "DISK_B2_ENDPOINT": "http://127.0.0.1:9/synthetic"
+    },
+    "expected": {
+      "backend": "b2",
+      "endpoint_url": "http://127.0.0.1:9/synthetic"
+    }
+  },
+  {
+    "id": "C03-b2-ENDPOINT-empty-current-behavior",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_B2_ENDPOINT"
+    ],
+    "env": {
+      "DISK_B2_BUCKET": "fixture-bucket",
+      "DISK_B2_KEY_ID": "fixture-id",
+      "DISK_B2_APP_KEY": "fixture-key",
+      "DISK_B2_ENDPOINT": ""
+    },
+    "expected": {
+      "backend": "b2",
+      "endpoint_url": ""
+    }
+  },
+  {
+    "id": "C03-b2-REGION-override",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_B2_REGION"
+    ],
+    "env": {
+      "DISK_B2_BUCKET": "fixture-bucket",
+      "DISK_B2_KEY_ID": "fixture-id",
+      "DISK_B2_APP_KEY": "fixture-key",
+      "DISK_B2_REGION": "fixture-region"
+    },
+    "expected": {
+      "backend": "b2",
+      "region": "fixture-region"
+    }
+  },
+  {
+    "id": "C03-b2-REGION-empty-current-behavior",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_B2_REGION"
+    ],
+    "env": {
+      "DISK_B2_BUCKET": "fixture-bucket",
+      "DISK_B2_KEY_ID": "fixture-id",
+      "DISK_B2_APP_KEY": "fixture-key",
+      "DISK_B2_REGION": ""
+    },
+    "expected": {
+      "backend": "b2",
+      "region": ""
+    }
+  },
+  {
+    "id": "C03-b2-missing-DISK_B2_BUCKET",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_B2_BUCKET"
+    ],
+    "env": {
+      "DISK_B2_KEY_ID": "fixture-id",
+      "DISK_B2_APP_KEY": "fixture-key"
+    },
+    "expected": {
+      "backend": "b2",
+      "error": "metadata store: missing env DISK_B2_BUCKET"
+    }
+  },
+  {
+    "id": "C03-b2-empty-DISK_B2_BUCKET",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_B2_BUCKET"
+    ],
+    "env": {
+      "DISK_B2_BUCKET": "",
+      "DISK_B2_KEY_ID": "fixture-id",
+      "DISK_B2_APP_KEY": "fixture-key"
+    },
+    "expected": {
+      "backend": "b2",
+      "bucket": ""
+    }
+  },
+  {
+    "id": "C03-b2-missing-DISK_B2_KEY_ID",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_B2_KEY_ID"
+    ],
+    "env": {
+      "DISK_B2_BUCKET": "fixture-bucket",
+      "DISK_B2_APP_KEY": "fixture-key"
+    },
+    "expected": {
+      "backend": "b2",
+      "error": "metadata store: missing env DISK_B2_KEY_ID"
+    }
+  },
+  {
+    "id": "C03-b2-empty-DISK_B2_KEY_ID",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_B2_KEY_ID"
+    ],
+    "env": {
+      "DISK_B2_BUCKET": "fixture-bucket",
+      "DISK_B2_KEY_ID": "",
+      "DISK_B2_APP_KEY": "fixture-key"
+    },
+    "expected": {
+      "backend": "b2",
+      "access_key_id": ""
+    }
+  },
+  {
+    "id": "C03-b2-missing-DISK_B2_APP_KEY",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_B2_APP_KEY"
+    ],
+    "env": {
+      "DISK_B2_BUCKET": "fixture-bucket",
+      "DISK_B2_KEY_ID": "fixture-id"
+    },
+    "expected": {
+      "backend": "b2",
+      "error": "metadata store: missing env DISK_B2_APP_KEY"
+    }
+  },
+  {
+    "id": "C03-b2-empty-DISK_B2_APP_KEY",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_B2_APP_KEY"
+    ],
+    "env": {
+      "DISK_B2_BUCKET": "fixture-bucket",
+      "DISK_B2_KEY_ID": "fixture-id",
+      "DISK_B2_APP_KEY": ""
+    },
+    "expected": {
+      "backend": "b2",
+      "secret_access_key": ""
+    }
+  },
+  {
+    "id": "C03-r2-defaults",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [],
+    "env": {
+      "DISK_R2_ACCOUNT_ID": "fixture-account",
+      "DISK_R2_BUCKET": "fixture-bucket",
+      "DISK_R2_ACCESS_KEY_ID": "fixture-id",
+      "DISK_R2_SECRET_ACCESS_KEY": "fixture-key"
+    },
+    "expected": {
+      "backend": "r2",
+      "endpoint_url": "https://fixture-account.r2.cloudflarestorage.com",
+      "region": "auto",
+      "bucket": "fixture-bucket",
+      "access_key_id": "fixture-id",
+      "secret_access_key": "fixture-key",
+      "force_path_style": false
+    }
+  },
+  {
+    "id": "C03-r2-ENDPOINT-override",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_R2_ENDPOINT"
+    ],
+    "env": {
+      "DISK_R2_ACCOUNT_ID": "fixture-account",
+      "DISK_R2_BUCKET": "fixture-bucket",
+      "DISK_R2_ACCESS_KEY_ID": "fixture-id",
+      "DISK_R2_SECRET_ACCESS_KEY": "fixture-key",
+      "DISK_R2_ENDPOINT": "http://127.0.0.1:9/synthetic"
+    },
+    "expected": {
+      "backend": "r2",
+      "endpoint_url": "http://127.0.0.1:9/synthetic"
+    }
+  },
+  {
+    "id": "C03-r2-ENDPOINT-empty-current-behavior",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_R2_ENDPOINT"
+    ],
+    "env": {
+      "DISK_R2_ACCOUNT_ID": "fixture-account",
+      "DISK_R2_BUCKET": "fixture-bucket",
+      "DISK_R2_ACCESS_KEY_ID": "fixture-id",
+      "DISK_R2_SECRET_ACCESS_KEY": "fixture-key",
+      "DISK_R2_ENDPOINT": ""
+    },
+    "expected": {
+      "backend": "r2",
+      "endpoint_url": ""
+    }
+  },
+  {
+    "id": "C03-r2-REGION-override",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_R2_REGION"
+    ],
+    "env": {
+      "DISK_R2_ACCOUNT_ID": "fixture-account",
+      "DISK_R2_BUCKET": "fixture-bucket",
+      "DISK_R2_ACCESS_KEY_ID": "fixture-id",
+      "DISK_R2_SECRET_ACCESS_KEY": "fixture-key",
+      "DISK_R2_REGION": "fixture-region"
+    },
+    "expected": {
+      "backend": "r2",
+      "region": "fixture-region"
+    }
+  },
+  {
+    "id": "C03-r2-REGION-empty-current-behavior",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_R2_REGION"
+    ],
+    "env": {
+      "DISK_R2_ACCOUNT_ID": "fixture-account",
+      "DISK_R2_BUCKET": "fixture-bucket",
+      "DISK_R2_ACCESS_KEY_ID": "fixture-id",
+      "DISK_R2_SECRET_ACCESS_KEY": "fixture-key",
+      "DISK_R2_REGION": ""
+    },
+    "expected": {
+      "backend": "r2",
+      "region": ""
+    }
+  },
+  {
+    "id": "C03-r2-missing-DISK_R2_ACCOUNT_ID",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_R2_ACCOUNT_ID"
+    ],
+    "env": {
+      "DISK_R2_BUCKET": "fixture-bucket",
+      "DISK_R2_ACCESS_KEY_ID": "fixture-id",
+      "DISK_R2_SECRET_ACCESS_KEY": "fixture-key"
+    },
+    "expected": {
+      "backend": "r2",
+      "error": "metadata store: missing env DISK_R2_ACCOUNT_ID"
+    }
+  },
+  {
+    "id": "C03-r2-empty-DISK_R2_ACCOUNT_ID",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_R2_ACCOUNT_ID"
+    ],
+    "env": {
+      "DISK_R2_ACCOUNT_ID": "",
+      "DISK_R2_BUCKET": "fixture-bucket",
+      "DISK_R2_ACCESS_KEY_ID": "fixture-id",
+      "DISK_R2_SECRET_ACCESS_KEY": "fixture-key"
+    },
+    "expected": {
+      "backend": "r2",
+      "endpoint_url": "https://.r2.cloudflarestorage.com"
+    }
+  },
+  {
+    "id": "C03-r2-missing-DISK_R2_BUCKET",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_R2_BUCKET"
+    ],
+    "env": {
+      "DISK_R2_ACCOUNT_ID": "fixture-account",
+      "DISK_R2_ACCESS_KEY_ID": "fixture-id",
+      "DISK_R2_SECRET_ACCESS_KEY": "fixture-key"
+    },
+    "expected": {
+      "backend": "r2",
+      "error": "metadata store: missing env DISK_R2_BUCKET"
+    }
+  },
+  {
+    "id": "C03-r2-empty-DISK_R2_BUCKET",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_R2_BUCKET"
+    ],
+    "env": {
+      "DISK_R2_ACCOUNT_ID": "fixture-account",
+      "DISK_R2_BUCKET": "",
+      "DISK_R2_ACCESS_KEY_ID": "fixture-id",
+      "DISK_R2_SECRET_ACCESS_KEY": "fixture-key"
+    },
+    "expected": {
+      "backend": "r2",
+      "bucket": ""
+    }
+  },
+  {
+    "id": "C03-r2-missing-DISK_R2_ACCESS_KEY_ID",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_R2_ACCESS_KEY_ID"
+    ],
+    "env": {
+      "DISK_R2_ACCOUNT_ID": "fixture-account",
+      "DISK_R2_BUCKET": "fixture-bucket",
+      "DISK_R2_SECRET_ACCESS_KEY": "fixture-key"
+    },
+    "expected": {
+      "backend": "r2",
+      "error": "metadata store: missing env DISK_R2_ACCESS_KEY_ID"
+    }
+  },
+  {
+    "id": "C03-r2-empty-DISK_R2_ACCESS_KEY_ID",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_R2_ACCESS_KEY_ID"
+    ],
+    "env": {
+      "DISK_R2_ACCOUNT_ID": "fixture-account",
+      "DISK_R2_BUCKET": "fixture-bucket",
+      "DISK_R2_ACCESS_KEY_ID": "",
+      "DISK_R2_SECRET_ACCESS_KEY": "fixture-key"
+    },
+    "expected": {
+      "backend": "r2",
+      "access_key_id": ""
+    }
+  },
+  {
+    "id": "C03-r2-missing-DISK_R2_SECRET_ACCESS_KEY",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_R2_SECRET_ACCESS_KEY"
+    ],
+    "env": {
+      "DISK_R2_ACCOUNT_ID": "fixture-account",
+      "DISK_R2_BUCKET": "fixture-bucket",
+      "DISK_R2_ACCESS_KEY_ID": "fixture-id"
+    },
+    "expected": {
+      "backend": "r2",
+      "error": "metadata store: missing env DISK_R2_SECRET_ACCESS_KEY"
+    }
+  },
+  {
+    "id": "C03-r2-empty-DISK_R2_SECRET_ACCESS_KEY",
+    "reader": "crates/disk-storage/src/s3/config.rs",
+    "keys": [
+      "DISK_R2_SECRET_ACCESS_KEY"
+    ],
+    "env": {
+      "DISK_R2_ACCOUNT_ID": "fixture-account",
+      "DISK_R2_BUCKET": "fixture-bucket",
+      "DISK_R2_ACCESS_KEY_ID": "fixture-id",
+      "DISK_R2_SECRET_ACCESS_KEY": ""
+    },
+    "expected": {
+      "backend": "r2",
+      "secret_access_key": ""
+    }
+  }
+]

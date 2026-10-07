@@ -1,0 +1,8 @@
+{
+  "schema": "MeasuredGitSource/v1",
+  "commit": "29e76c502e742012c3e09566b8272fdeec0697c0",
+  "tree": "dd97eec1e8c944d37899d7ea3ae7d9a330aa8da1",
+  "dirty": false,
+  "producer": "PERSIST exact owned checkout inspection before canonical process producer",
+  "captured_at_utc": "2026-10-04T02:02:56.381012+00:00"
+}

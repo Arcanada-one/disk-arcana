@@ -1,0 +1,8 @@
+{
+  "schema": "MeasuredGitSource/v1",
+  "commit": "62d4914fbef03e717a42f42944e01e609d52dbf5",
+  "tree": "6564900d23bedce76e699df662711df304d13294",
+  "dirty": false,
+  "producer": "PERSIST actual successor checkout after qualified CI artifact",
+  "captured_at_utc": "2026-10-04T23:46:32.710454+00:00"
+}

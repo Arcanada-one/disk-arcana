@@ -303,21 +303,6 @@ impl SyncServiceImpl {
             .collect()
     }
 
-    /// Run ACL role check using a pre-extracted `CertIdentity`.
-    ///
-    /// Call pattern:
-    /// ```ignore
-    /// let cert_id = CertIdentity::from_request(&request);
-    /// self.check_acl_by_cert(cert_id.as_ref(), share, allowed, hint).await?;
-    /// // then consume request
-    /// ```
-    ///
-    /// Returns `Ok(())` when:
-    /// - No enforcer configured (legacy mode), or
-    /// - `cert_id` is `None` (one-way TLS, falls through to token auth), or
-    /// - Enforcer resolves a role in `allowed_roles`.
-    ///
-    /// Returns `Err(PermissionDenied)` on mismatch and emits an audit row.
     /// DISK-0079: resolve the caller's enforced role, when one is knowable.
     ///
     /// `check_acl_by_cert` resolves the role and then throws it away, so the
@@ -340,6 +325,25 @@ impl SyncServiceImpl {
         enforcer.resolve(&fp, share).await.ok()
     }
 
+    /// Run ACL role check using a pre-extracted `CertIdentity`.
+    ///
+    /// Extract the identity before consuming the request and pass `cert_id.as_ref()`
+    /// to this method. Without a certificate extension, extraction returns `None`:
+    ///
+    /// ```
+    /// use disk_server::CertIdentity;
+    /// let request = tonic::Request::new("body");
+    /// let cert_id = CertIdentity::from_request(&request);
+    /// assert!(cert_id.is_none());
+    /// assert_eq!(request.into_inner(), "body");
+    /// ```
+    ///
+    /// Returns `Ok(())` when:
+    /// - No enforcer configured (legacy mode), or
+    /// - `cert_id` is `None` (one-way TLS, falls through to token auth), or
+    /// - Enforcer resolves a role in `allowed_roles`.
+    ///
+    /// Returns `Err(PermissionDenied)` on mismatch and emits an audit row.
     async fn check_acl_by_cert(
         &self,
         cert_id: Option<&CertIdentity>,

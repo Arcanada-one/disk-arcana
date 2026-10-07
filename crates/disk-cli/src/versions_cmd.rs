@@ -239,3 +239,16 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod env_canary {
+    #[test]
+    fn config_probe_child() {
+        crate::cli_config_env_canary::check_reader(super::api_base, super::bearer_token);
+    }
+
+    #[test]
+    fn c11_versions_cmd_fresh_environment_matrix() {
+        crate::cli_config_env_canary::run_reader("versions_cmd");
+    }
+}

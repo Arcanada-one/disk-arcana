@@ -1,0 +1,269 @@
+{
+  "schema": "ConfigCanaryFixtureMap/v1",
+  "group": "C11",
+  "source_base": "35158fa667b769e3c1789eccca8ceff55faa1cd6",
+  "fixture": "crates/disk-cli/tests/fixtures/cli-config-environment.json",
+  "fixture_sha256": "1ddc9f15adc3dfac75939a06a523afc221adb5636aeb38802197fd443c763f25",
+  "definitions_per_reader": 15,
+  "total_reader_case_definitions": 105,
+  "readers": [
+    {
+      "entity": "code_unit:crates/disk-cli/src/agents_cmd.rs",
+      "source_sha256": "60096613c68dd921d458f138b198ec2c0b43e32f47cb87f9734d98924472c93b",
+      "runtime_prefix_sha256": "165e2a0e4f22f431d4fed7b39b36635a3a28d78445b22c84fe28f81d0354e82f",
+      "keys": [
+        "DISK_API_BASE",
+        "DISK_ACCESS_TOKEN"
+      ],
+      "actual_functions": [
+        "api_base",
+        "bearer_token"
+      ],
+      "matrix_test": "agents_cmd::env_canary::c11_agents_cmd_fresh_environment_matrix",
+      "child_test": "agents_cmd::env_canary::config_probe_child",
+      "case_ids": [
+        "C11-agents_cmd-absent-defaults",
+        "C11-agents_cmd-env-values",
+        "C11-agents_cmd-env-trailing-slashes",
+        "C11-agents_cmd-env-empty-base",
+        "C11-agents_cmd-env-slash-only-base",
+        "C11-agents_cmd-env-whitespace-preserved",
+        "C11-agents_cmd-explicit-precedence",
+        "C11-agents_cmd-empty-explicit-base",
+        "C11-agents_cmd-explicit-base-without-env",
+        "C11-agents_cmd-explicit-slash-only-base",
+        "C11-agents_cmd-env-empty-token",
+        "C11-agents_cmd-empty-explicit-token",
+        "C11-agents_cmd-explicit-token-without-env",
+        "C11-agents_cmd-explicit-token-over-empty-env",
+        "C11-agents_cmd-explicit-token-whitespace"
+      ],
+      "runtime_verdict": "NOT_MEASURED"
+    },
+    {
+      "entity": "code_unit:crates/disk-cli/src/org_cmd.rs",
+      "source_sha256": "04e7f84ad8b1988457bd463aed1d2f4928ec134ab1d52eec3824ec0f9bc0deb4",
+      "runtime_prefix_sha256": "1cb0070a9f5b51943389c497f88298915819cfb332629d7b7155ba1fd21d57b2",
+      "keys": [
+        "DISK_API_BASE",
+        "DISK_ACCESS_TOKEN"
+      ],
+      "actual_functions": [
+        "api_base",
+        "bearer_token"
+      ],
+      "matrix_test": "org_cmd::env_canary::c11_org_cmd_fresh_environment_matrix",
+      "child_test": "org_cmd::env_canary::config_probe_child",
+      "case_ids": [
+        "C11-org_cmd-absent-defaults",
+        "C11-org_cmd-env-values",
+        "C11-org_cmd-env-trailing-slashes",
+        "C11-org_cmd-env-empty-base",
+        "C11-org_cmd-env-slash-only-base",
+        "C11-org_cmd-env-whitespace-preserved",
+        "C11-org_cmd-explicit-precedence",
+        "C11-org_cmd-empty-explicit-base",
+        "C11-org_cmd-explicit-base-without-env",
+        "C11-org_cmd-explicit-slash-only-base",
+        "C11-org_cmd-env-empty-token",
+        "C11-org_cmd-empty-explicit-token",
+        "C11-org_cmd-explicit-token-without-env",
+        "C11-org_cmd-explicit-token-over-empty-env",
+        "C11-org_cmd-explicit-token-whitespace"
+      ],
+      "runtime_verdict": "NOT_MEASURED"
+    },
+    {
+      "entity": "code_unit:crates/disk-cli/src/selective_sync_cmd.rs",
+      "source_sha256": "4c038030c39209b4fc600389d9edafcfd927e56384cfc52eb6518b9f2c92dc9e",
+      "runtime_prefix_sha256": "05df040dba6282280a5c4efcdb331d93d3d9605c903f40152141a71ec13b98ee",
+      "keys": [
+        "DISK_API_BASE",
+        "DISK_ACCESS_TOKEN"
+      ],
+      "actual_functions": [
+        "api_base",
+        "bearer_token"
+      ],
+      "matrix_test": "selective_sync_cmd::env_canary::c11_selective_sync_cmd_fresh_environment_matrix",
+      "child_test": "selective_sync_cmd::env_canary::config_probe_child",
+      "case_ids": [
+        "C11-selective_sync_cmd-absent-defaults",
+        "C11-selective_sync_cmd-env-values",
+        "C11-selective_sync_cmd-env-trailing-slashes",
+        "C11-selective_sync_cmd-env-empty-base",
+        "C11-selective_sync_cmd-env-slash-only-base",
+        "C11-selective_sync_cmd-env-whitespace-preserved",
+        "C11-selective_sync_cmd-explicit-precedence",
+        "C11-selective_sync_cmd-empty-explicit-base",
+        "C11-selective_sync_cmd-explicit-base-without-env",
+        "C11-selective_sync_cmd-explicit-slash-only-base",
+        "C11-selective_sync_cmd-env-empty-token",
+        "C11-selective_sync_cmd-empty-explicit-token",
+        "C11-selective_sync_cmd-explicit-token-without-env",
+        "C11-selective_sync_cmd-explicit-token-over-empty-env",
+        "C11-selective_sync_cmd-explicit-token-whitespace"
+      ],
+      "runtime_verdict": "NOT_MEASURED"
+    },
+    {
+      "entity": "code_unit:crates/disk-cli/src/sharing_cmd.rs",
+      "source_sha256": "e7f900e293d4f1b298d0956e1ae718ac5bb7e43e07e3aea156b7f6a24b78890e",
+      "runtime_prefix_sha256": "47856c1fe38498cedf91a3d1dbd66512575d1565b6f461e8bf9832d1e66c420b",
+      "keys": [
+        "DISK_API_BASE",
+        "DISK_ACCESS_TOKEN"
+      ],
+      "actual_functions": [
+        "api_base",
+        "bearer_token"
+      ],
+      "matrix_test": "sharing_cmd::env_canary::c11_sharing_cmd_fresh_environment_matrix",
+      "child_test": "sharing_cmd::env_canary::config_probe_child",
+      "case_ids": [
+        "C11-sharing_cmd-absent-defaults",
+        "C11-sharing_cmd-env-values",
+        "C11-sharing_cmd-env-trailing-slashes",
+        "C11-sharing_cmd-env-empty-base",
+        "C11-sharing_cmd-env-slash-only-base",
+        "C11-sharing_cmd-env-whitespace-preserved",
+        "C11-sharing_cmd-explicit-precedence",
+        "C11-sharing_cmd-empty-explicit-base",
+        "C11-sharing_cmd-explicit-base-without-env",
+        "C11-sharing_cmd-explicit-slash-only-base",
+        "C11-sharing_cmd-env-empty-token",
+        "C11-sharing_cmd-empty-explicit-token",
+        "C11-sharing_cmd-explicit-token-without-env",
+        "C11-sharing_cmd-explicit-token-over-empty-env",
+        "C11-sharing_cmd-explicit-token-whitespace"
+      ],
+      "runtime_verdict": "NOT_MEASURED"
+    },
+    {
+      "entity": "code_unit:crates/disk-cli/src/snapshots_cmd.rs",
+      "source_sha256": "89d0ea150206487aacaaff5dc844ca1db4a32ac2c1475e8b8b5bb10c15e4548a",
+      "runtime_prefix_sha256": "b2a334b49bf13cb197b042ec0b06cd0e2843d5b59cde1439da0de7e921c99350",
+      "keys": [
+        "DISK_API_BASE",
+        "DISK_ACCESS_TOKEN"
+      ],
+      "actual_functions": [
+        "api_base",
+        "bearer_token"
+      ],
+      "matrix_test": "snapshots_cmd::env_canary::c11_snapshots_cmd_fresh_environment_matrix",
+      "child_test": "snapshots_cmd::env_canary::config_probe_child",
+      "case_ids": [
+        "C11-snapshots_cmd-absent-defaults",
+        "C11-snapshots_cmd-env-values",
+        "C11-snapshots_cmd-env-trailing-slashes",
+        "C11-snapshots_cmd-env-empty-base",
+        "C11-snapshots_cmd-env-slash-only-base",
+        "C11-snapshots_cmd-env-whitespace-preserved",
+        "C11-snapshots_cmd-explicit-precedence",
+        "C11-snapshots_cmd-empty-explicit-base",
+        "C11-snapshots_cmd-explicit-base-without-env",
+        "C11-snapshots_cmd-explicit-slash-only-base",
+        "C11-snapshots_cmd-env-empty-token",
+        "C11-snapshots_cmd-empty-explicit-token",
+        "C11-snapshots_cmd-explicit-token-without-env",
+        "C11-snapshots_cmd-explicit-token-over-empty-env",
+        "C11-snapshots_cmd-explicit-token-whitespace"
+      ],
+      "runtime_verdict": "NOT_MEASURED"
+    },
+    {
+      "entity": "code_unit:crates/disk-cli/src/trash_cmd.rs",
+      "source_sha256": "857fc98d8d73c9a63d05547880f720b75c9fd909f68028a4c7dc6f22e8699020",
+      "runtime_prefix_sha256": "0aa7a0ea060dde04a7fe8bc19713d58065bcd570ec9055acd7290abb9019126d",
+      "keys": [
+        "DISK_API_BASE",
+        "DISK_ACCESS_TOKEN"
+      ],
+      "actual_functions": [
+        "api_base",
+        "bearer_token"
+      ],
+      "matrix_test": "trash_cmd::env_canary::c11_trash_cmd_fresh_environment_matrix",
+      "child_test": "trash_cmd::env_canary::config_probe_child",
+      "case_ids": [
+        "C11-trash_cmd-absent-defaults",
+        "C11-trash_cmd-env-values",
+        "C11-trash_cmd-env-trailing-slashes",
+        "C11-trash_cmd-env-empty-base",
+        "C11-trash_cmd-env-slash-only-base",
+        "C11-trash_cmd-env-whitespace-preserved",
+        "C11-trash_cmd-explicit-precedence",
+        "C11-trash_cmd-empty-explicit-base",
+        "C11-trash_cmd-explicit-base-without-env",
+        "C11-trash_cmd-explicit-slash-only-base",
+        "C11-trash_cmd-env-empty-token",
+        "C11-trash_cmd-empty-explicit-token",
+        "C11-trash_cmd-explicit-token-without-env",
+        "C11-trash_cmd-explicit-token-over-empty-env",
+        "C11-trash_cmd-explicit-token-whitespace"
+      ],
+      "runtime_verdict": "NOT_MEASURED"
+    },
+    {
+      "entity": "code_unit:crates/disk-cli/src/versions_cmd.rs",
+      "source_sha256": "9fcd20a5893400f59490b958aedf56520bf087270871bc8f846d4bde8f2a65ba",
+      "runtime_prefix_sha256": "79e41a13d7d7e6c3b639606b30d42ba516732485448585bc805448b48280634d",
+      "keys": [
+        "DISK_API_BASE",
+        "DISK_ACCESS_TOKEN"
+      ],
+      "actual_functions": [
+        "api_base",
+        "bearer_token"
+      ],
+      "matrix_test": "versions_cmd::env_canary::c11_versions_cmd_fresh_environment_matrix",
+      "child_test": "versions_cmd::env_canary::config_probe_child",
+      "case_ids": [
+        "C11-versions_cmd-absent-defaults",
+        "C11-versions_cmd-env-values",
+        "C11-versions_cmd-env-trailing-slashes",
+        "C11-versions_cmd-env-empty-base",
+        "C11-versions_cmd-env-slash-only-base",
+        "C11-versions_cmd-env-whitespace-preserved",
+        "C11-versions_cmd-explicit-precedence",
+        "C11-versions_cmd-empty-explicit-base",
+        "C11-versions_cmd-explicit-base-without-env",
+        "C11-versions_cmd-explicit-slash-only-base",
+        "C11-versions_cmd-env-empty-token",
+        "C11-versions_cmd-empty-explicit-token",
+        "C11-versions_cmd-explicit-token-without-env",
+        "C11-versions_cmd-explicit-token-over-empty-env",
+        "C11-versions_cmd-explicit-token-whitespace"
+      ],
+      "runtime_verdict": "NOT_MEASURED"
+    }
+  ],
+  "test_driver": "crates/disk-cli/src/cli_config_env_canary.rs",
+  "shared_helper": {
+    "source": "test-support/env_probe.rs",
+    "declared_once": "crates/disk-cli/src/main.rs::config_env_probe",
+    "source_sha256": "a17884d79524272b892f1620b1667ba86be05900d69b025c410355b012b98f23",
+    "control_key": "DISK_CONFIG_PROBE_CASE",
+    "control_fields": [
+      "api_override",
+      "token_override"
+    ],
+    "runtime_verdict": "NOT_MEASURED"
+  },
+  "negative_control": "cli_config_env_canary::c11_wrong_token_expectation_is_rejected",
+  "scope": "Actual private pure configuration readers; no HTTP client, request, service, credential use or personal runtime admission.",
+  "pending_groups": [
+    "C02",
+    "C05",
+    "C06",
+    "C07",
+    "C08",
+    "C09",
+    "C10",
+    "C12",
+    "C13",
+    "C14"
+  ],
+  "execution_status": "NOT_MEASURED"
+}

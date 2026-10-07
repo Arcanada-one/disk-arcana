@@ -296,3 +296,16 @@ mod tests {
         assert_eq!(urlencoding("notes/a.md"), "notes%2Fa.md");
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod env_canary {
+    #[test]
+    fn config_probe_child() {
+        crate::cli_config_env_canary::check_reader(super::api_base, super::bearer_token);
+    }
+
+    #[test]
+    fn c11_agents_cmd_fresh_environment_matrix() {
+        crate::cli_config_env_canary::run_reader("agents_cmd");
+    }
+}

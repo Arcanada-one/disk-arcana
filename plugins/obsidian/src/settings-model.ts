@@ -25,6 +25,10 @@ export const DEFAULT_SETTINGS: DiskArcanaSettings = {
   notifications: true
 };
 
+export function isConflictAction(value: unknown): value is ConflictAction {
+  return CONFLICT_ACTIONS.some((action) => action === value);
+}
+
 export function sanitizeSettings(input: Partial<DiskArcanaSettings>): DiskArcanaSettings {
   let daemonUrl = DEFAULT_SETTINGS.daemonUrl;
   try {
@@ -36,8 +40,8 @@ export function sanitizeSettings(input: Partial<DiskArcanaSettings>): DiskArcana
   const pollIntervalSeconds = Number.isFinite(interval)
     ? Math.min(300, Math.max(2, Math.round(interval)))
     : DEFAULT_SETTINGS.pollIntervalSeconds;
-  const defaultConflictAction = CONFLICT_ACTIONS.includes(input.defaultConflictAction as ConflictAction)
-    ? (input.defaultConflictAction as ConflictAction)
+  const defaultConflictAction = isConflictAction(input.defaultConflictAction)
+    ? input.defaultConflictAction
     : DEFAULT_SETTINGS.defaultConflictAction;
   const conflictStrategy = input.conflictStrategy === "auto-fork" ? "auto-fork" : "manual";
   return {
