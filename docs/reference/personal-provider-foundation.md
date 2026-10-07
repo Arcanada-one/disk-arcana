@@ -24,6 +24,9 @@ integrity failure can persist a poison marker. It is not zero filesystem IO.
 
 The writer lock is local serialization only. Its guard is armed before the first
 DB-open await and released only after SQLx acknowledges successful shutdown.
+Normal teardown explicitly unlocks the shared open-file description: a concurrent
+fork may retain a copy until exec, even with CLOEXEC. Closing only the parent's
+descriptor is therefore insufficient to make an acknowledged writer available.
 Abandonment, panic, initialization/open/close cancellation or uncertain shutdown
 retains its descriptor until process exit. Further opens/operations in that
 process fail closed. Each disposable worker accepts one command/one root, so it

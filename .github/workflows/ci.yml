@@ -30,25 +30,91 @@ env:
 # ci-isolate-rust.py) and keep private runners excluded. Cold isolated toolchain
 # downloads still apply.
 jobs:
-  personal-provider:
-    name: Personal provider foundation (Rust 1.97.1)
+  sqlite-abi-full:
+    name: SQLite ABI declared FULL (Rust 1.97.1)
     runs-on: [arcana-dbs-ci]
-    timeout-minutes: 20
+    # Ten minutes for ordinary setup; the declared inner suite remains 1800s.
+    timeout-minutes: 40
     env:
       CARGO_BUILD_JOBS: 2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Isolate Rust state for this job
         run: python3 scripts/ci-isolate-rust.py prepare
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
           toolchain: "1.97.1"
-          components: rustfmt, clippy
       - name: Verify isolated Rust resolution
         run: python3 scripts/ci-isolate-rust.py verify 1.97.1
+      - name: Verify the declared SQLite ABI FULL group
+        run: |
+          set -euo pipefail
+          source scripts/ci-ensure-cc.sh
+          SQLITE_CARGO_BIN="$(rustup which --toolchain 1.97.1 cargo)"
+          SQLITE_RUSTC_BIN="$(rustup which --toolchain 1.97.1 rustc)"
+          PATH="$(dirname "$SQLITE_CARGO_BIN"):$PATH"
+          export SQLITE_CARGO_BIN SQLITE_RUSTC_BIN PATH
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/sqlite-abi-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          evidence_dir="$(mktemp -d "$RUNNER_TEMP/sqlite-full.XXXXXX")"
+          git rev-parse HEAD
+          "$SQLITE_CARGO_BIN" --version
+          "$SQLITE_RUSTC_BIN" --version
+          python3 -B scripts/ci-sqlite-full-evidence.py inventory --input "$evidence_dir/input.json"
+          set +e
+          (
+            cd crates/disk-personal/sqlite-abi
+            timeout --signal=TERM --kill-after=10s 1800s python3 ../../../scripts/full-test-group.py disk-personal-sqlite
+          ) > "$evidence_dir/full.log" 2>&1
+          sqlite_full_exit=$?
+          set -e
+          cat "$evidence_dir/full.log"
+          printf 'SQLITE_FULL_PROCESS_EXIT=%s\n' "$sqlite_full_exit"
+          if [[ "$sqlite_full_exit" -ne 0 ]]; then
+            exit "$sqlite_full_exit"
+          fi
+          python3 -B scripts/ci-sqlite-full-evidence.py verify --input "$evidence_dir/input.json" --log "$evidence_dir/full.log" --out "$evidence_dir/result.json"
+          printf 'SQLITE_FULL_INVENTORY_EXIT=0\n'
+
+  personal-provider:
+    name: Personal provider foundation (Rust 1.97.1)
+    runs-on: [arcana-dbs-ci]
+    # Existing foundation budget (20m) plus the unchanged full-group limit (30m)
+    # and five minutes for setup/reporting. No inner test timeout is weakened.
+    timeout-minutes: 55
+    env:
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Select exact prior personal job or cold execution
+        id: selector
+        run: python3 -B scripts/ci-personal-job-reuse.py select
+      - name: Observe current personal confinement capability
+        id: guard
+        if: always()
+        run: python3 -B scripts/ci-personal-job-reuse.py guard
+      - name: Isolate Rust state for this job
+        id: isolate
+        if: steps.selector.outputs.mode == 'execute'
+        run: python3 scripts/ci-isolate-rust.py prepare
+      - id: toolchain
+        if: steps.selector.outputs.mode == 'execute'
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: "1.97.1"
+          components: rustfmt, clippy
+      - name: Verify isolated Rust resolution
+        id: resolution
+        if: steps.selector.outputs.mode == 'execute'
+        run: python3 scripts/ci-isolate-rust.py verify 1.97.1
       - name: Verify the synthetic foundation and production refusal
+        id: execute
+        if: steps.selector.outputs.mode == 'execute'
         run: |
           set -euo pipefail
           source scripts/ci-ensure-cc.sh
@@ -58,6 +124,42 @@ jobs:
           export PERSONAL_CARGO_BIN PERSONAL_RUSTC_BIN PATH
           export CARGO_TARGET_DIR="$RUNNER_TEMP/personal-provider-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           bash scripts/test-personal-provider.sh
+          # Execute the declared group itself. Historical foundation CI is not
+          # full-group evidence. Preserve the profile's 1800-second deadline.
+          command -v timeout
+          python3 --version
+          git rev-parse HEAD
+          sha256sum scripts/full-test-group.py .arcana/verify.json Cargo.lock
+          set +e
+          (
+            cd crates/disk-personal
+            timeout --signal=TERM --kill-after=10s 1800s python3 ../../scripts/full-test-group.py disk-personal
+          ) > "$PERSONAL_REUSE_DIR/full.log" 2>&1
+          personal_full_exit=$?
+          printf '%s\n' "$personal_full_exit" > "$PERSONAL_REUSE_DIR/suite-exit.txt"
+          set -e
+          cat "$PERSONAL_REUSE_DIR/full.log"
+          printf 'PERSONAL_FULL_PROCESS_EXIT=%s\n' "$personal_full_exit"
+          exit "$personal_full_exit"
+
+      - name: Verify exact receiving record without rerunning prior tests
+        id: reuse
+        if: steps.selector.outputs.mode == 'reuse'
+        run: python3 -B scripts/ci-personal-job-reuse.py verify
+      - name: Require actual execution or verified receiving status
+        id: receiving_verdict
+        if: always()
+        env:
+          PERSONAL_REUSE_STEPS_JSON: ${{ toJSON(steps) }}
+        run: python3 -B scripts/ci-personal-job-reuse.py record
+      - name: Retain personal receiving decision and execution manifest
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: personal-job-reuse-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.PERSONAL_REUSE_DIR }}/
+          if-no-files-found: error
+          retention-days: 14
 
   lint:
     name: Lint (fmt + clippy + audit + deny)
@@ -72,7 +174,10 @@ jobs:
       - name: Verify isolated Rust resolution
         run: python3 scripts/ci-isolate-rust.py verify stable
       - name: Rust isolation helper fixtures
-        run: python3 scripts/tests/test_ci_isolate_rust.py
+        run: |
+          python3 scripts/tests/test_ci_isolate_rust.py
+          python3 -B scripts/tests/test_ci_export_linux_server.py
+          python3 scripts/tests/test_full_test_groups.py
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6  # v2.9.2
       - name: Ensure protoc is available
         # Self-hosted runner pool is heterogeneous — some machines lack a
@@ -228,6 +333,8 @@ jobs:
     runs-on: [arcana-dbs-ci]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Isolate Rust state for this job
         run: python3 scripts/ci-isolate-rust.py prepare
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4  # stable 2026-07-30
@@ -261,7 +368,24 @@ jobs:
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov --locked --quiet
       - name: cargo test
-        run: cargo test --workspace --all-features
+        run: |
+          set -euo pipefail
+          cargo test --workspace --all-features --message-format=json | tee "$CI_ISOLATED_RUST_ROOT/cargo-test.jsonl"
+      - name: Prepare exact CLI driver and daemon export
+        id: cli_export
+        env:
+          EXPECTED_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BUILD_TARGET: x86_64-unknown-linux-gnu
+        run: python3 scripts/ci-export-linux-server.py --cli "$CI_ISOLATED_RUST_ROOT/cargo-test.jsonl"
+      - name: Upload exact CLI driver and daemon
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: disk-cli-executables-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ steps.cli_export.outputs.directory0 }}
+            ${{ steps.cli_export.outputs.directory1 }}
+          if-no-files-found: error
+          retention-days: 1
       - name: Scanner load harness (1K + 10K, DISK-0012 G3)
         run: bash scripts/load-test-harness.sh all
       - name: Coverage gate (≥80 % lines, DISK-0032)
@@ -349,6 +473,8 @@ jobs:
     runs-on: [arcana-dbs-ci]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Isolate Rust state for this job
         run: python3 scripts/ci-isolate-rust.py prepare
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4  # stable 2026-07-30
@@ -409,3 +535,16 @@ jobs:
           else
             cargo build --release --target ${{ matrix.target }} --workspace
           fi
+      - name: Prepare exact Linux server export
+        id: server_export
+        env:
+          EXPECTED_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BUILD_TARGET: ${{ matrix.target }}
+        run: python3 scripts/ci-export-linux-server.py
+      - name: Upload exact Linux server build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1, existing Windows pin
+        with:
+          name: disk-arcana-server-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.server_export.outputs.directory }}
+          if-no-files-found: error
+          retention-days: 1

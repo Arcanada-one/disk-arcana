@@ -68,3 +68,8 @@ pub use watcher::{
     translate_notify_event, FsEvent, FsEventDebouncer, FsWatcher, WatcherError,
     DEFAULT_DEBOUNCE_WINDOW,
 };
+
+// One helper instance in this library's Linux test executable only.
+#[cfg(all(test, target_os = "linux"))]
+#[path = "../../../test-support/env_probe.rs"]
+mod config_env_probe;

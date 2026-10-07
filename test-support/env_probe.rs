@@ -1,9 +1,45 @@
 //! Fresh-process configuration probes. This module is included only by tests.
 use serde_json::Value;
+use std::io::Write;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 const CASE_ENV: &str = "DISK_CONFIG_PROBE_CASE";
+
+fn emit_case_ok(id: &str) {
+    // println! is captured by libtest for passing tests. Write only the
+    // synthetic fixture ID directly so ordinary CI retains each observation.
+    writeln!(std::io::stdout().lock(), "CONFIG_PROBE_CASE_OK {id}")
+        .expect("retain synthetic configuration case marker");
+}
+
+#[test]
+fn marker_visibility_child() {
+    if std::env::var(CASE_ENV).as_deref() == Ok("marker-visibility-control") {
+        emit_case_ok("C00-marker-visibility-control");
+    }
+}
+
+#[test]
+fn case_marker_survives_default_libtest_capture() {
+    let module = module_path!().split_once("::").map(|(_, path)| path);
+    let child = match module {
+        Some(path) => format!("{path}::marker_visibility_child"),
+        None => "marker_visibility_child".to_string(),
+    };
+    let output = Command::new(std::env::current_exe().expect("test executable"))
+        .args(["--exact", &child])
+        .env_clear()
+        .env(CASE_ENV, "marker-visibility-control")
+        .output()
+        .expect("run owned marker visibility control");
+    assert!(output.status.success(), "marker child failed");
+    let stdout = String::from_utf8(output.stdout).expect("synthetic marker UTF-8");
+    assert!(stdout.contains("test result: ok. 1 passed; 0 failed;"));
+    assert!(stdout
+        .lines()
+        .any(|line| { line.trim_end() == "CONFIG_PROBE_CASE_OK C00-marker-visibility-control" }));
+}
 
 struct OwnedChild(Option<Child>);
 impl Drop for OwnedChild {
@@ -46,7 +82,17 @@ pub fn run(child_name: &str, fixtures: &str) {
             .stderr(Stdio::piped());
         for (key, value) in case["env"].as_object().expect("fixture env") {
             assert!(
-                key != CASE_ENV && (key.starts_with("DISK_") || key == "OPS_BOT_URL"),
+                key != CASE_ENV
+                    && (key.starts_with("DISK_")
+                        || matches!(
+                            key.as_str(),
+                            "OPS_BOT_URL"
+                                | "OPS_BOT_KEY"
+                                | "HOSTNAME"
+                                | "COMPUTERNAME"
+                                | "AUTH_ARCANA_CA_TOKEN"
+                                | "AUTH_ARCANA_CA_URL"
+                        )),
                 "non-config environment key"
             );
             command.env(key, value.as_str().expect("synthetic string"));
@@ -86,6 +132,6 @@ pub fn run(child_name: &str, fixtures: &str) {
             stdout.contains("test result: ok. 1 passed; 0 failed;"),
             "probe {id} did not run exactly one test"
         );
-        println!("CONFIG_PROBE_CASE_OK {id}");
+        emit_case_ok(id);
     }
 }

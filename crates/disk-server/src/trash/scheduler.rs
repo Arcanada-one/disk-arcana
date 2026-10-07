@@ -7,13 +7,17 @@ use disk_core::billing::PlanTier;
 
 use crate::accounts::routes::AuthHttpState;
 
+fn prune_interval_secs() -> u64 {
+    std::env::var("DISK_TRASH_PRUNE_INTERVAL_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(3600)
+}
+
 /// Run periodic trash retention prune until the process exits.
 pub fn spawn_periodic_prune(state: Arc<AuthHttpState>) {
     tokio::spawn(async move {
-        let interval_secs = std::env::var("DISK_TRASH_PRUNE_INTERVAL_SECS")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(3600);
+        let interval_secs = prune_interval_secs();
         let mut ticker = tokio::time::interval(Duration::from_secs(interval_secs));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
@@ -117,6 +121,39 @@ mod tests {
                 .await
                 .unwrap(),
             1
+        );
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod env_canary {
+    use super::prune_interval_secs;
+    use crate::config_env_probe;
+    use serde_json::json;
+
+    #[test]
+    fn c15_prune_interval_child() {
+        if let Some(expected) = config_env_probe::expected() {
+            // Reader only: never construct the ticker or touch tenant databases.
+            config_env_probe::check(json!({"interval_secs":prune_interval_secs()}), expected);
+        }
+    }
+
+    #[test]
+    fn c15_prune_fresh_environment_matrix() {
+        config_env_probe::run(
+            "trash::scheduler::env_canary::c15_prune_interval_child",
+            r#"[
+            {"id":"C15-prune-absent","env":{},"expected":{"interval_secs":3600}},
+            {"id":"C15-prune-explicit","env":{"DISK_TRASH_PRUNE_INTERVAL_SECS":"120"},"expected":{"interval_secs":120}},
+            {"id":"C15-prune-zero-retained","env":{"DISK_TRASH_PRUNE_INTERVAL_SECS":"0"},"expected":{"interval_secs":0}},
+            {"id":"C15-prune-empty","env":{"DISK_TRASH_PRUNE_INTERVAL_SECS":""},"expected":{"interval_secs":3600}},
+            {"id":"C15-prune-invalid","env":{"DISK_TRASH_PRUNE_INTERVAL_SECS":"invalid"},"expected":{"interval_secs":3600}},
+            {"id":"C15-prune-negative","env":{"DISK_TRASH_PRUNE_INTERVAL_SECS":"-1"},"expected":{"interval_secs":3600}},
+            {"id":"C15-prune-whitespace","env":{"DISK_TRASH_PRUNE_INTERVAL_SECS":" 120 "},"expected":{"interval_secs":3600}},
+            {"id":"C15-prune-max","env":{"DISK_TRASH_PRUNE_INTERVAL_SECS":"18446744073709551615"},"expected":{"interval_secs":18446744073709551615}},
+            {"id":"C15-prune-overflow","env":{"DISK_TRASH_PRUNE_INTERVAL_SECS":"18446744073709551616"},"expected":{"interval_secs":3600}}
+        ]"#,
         );
     }
 }

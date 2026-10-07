@@ -257,3 +257,46 @@ mod tests {
         // Wiremock verifies the mock was satisfied (1 POST received) on drop.
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod env_canary {
+    use super::*;
+    use crate::config_env_probe;
+    use serde_json::json;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn c17_ops_bot_selection_child() {
+        if let Some(expected) = config_env_probe::expected() {
+            // Own ephemeral loopback listener; never enqueue an audit event.
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let url = format!("http://{}/fixture-only", listener.local_addr().unwrap());
+            let forwarder = spawn(Client::new(), Some(url));
+            let enabled = forwarder.tx.is_some();
+            let dropped = forwarder.dropped_count();
+            drop(forwarder);
+            tokio::task::yield_now().await;
+            assert!(
+                matches!(listener.accept(), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+                "constructor unexpectedly contacted fixture"
+            );
+            config_env_probe::check(
+                json!({"enabled":enabled,"dropped_events":dropped}),
+                expected,
+            );
+        }
+    }
+
+    #[test]
+    fn c17_ops_bot_fresh_environment_matrix() {
+        config_env_probe::run(
+            "audit::ops_bot::env_canary::c17_ops_bot_selection_child",
+            r#"[
+            {"id":"C17-ops-key-absent","env":{},"expected":{"enabled":false,"dropped_events":0}},
+            {"id":"C17-ops-key-empty","env":{"OPS_BOT_KEY":""},"expected":{"enabled":false,"dropped_events":0}},
+            {"id":"C17-ops-key-present","env":{"OPS_BOT_KEY":"synthetic-key"},"expected":{"enabled":true,"dropped_events":0}},
+            {"id":"C17-ops-key-whitespace-retained","env":{"OPS_BOT_KEY":" "},"expected":{"enabled":true,"dropped_events":0}}
+        ]"#,
+        );
+    }
+}
