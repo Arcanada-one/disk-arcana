@@ -31,6 +31,8 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  checks: read
+  actions: read
 
 jobs:
   auto-merge:
@@ -56,6 +58,13 @@ jobs:
     # callers need self-hosted, since the org's PAID hosted minutes are spent.
     runs-on: ubuntu-latest
     steps:
+      - name: Check out trusted default-branch gate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Verify canonical gate bundle
+        run: sha256sum --check dev-tools/merge-gate-SHA256SUMS
       - name: Evaluate and merge
         env:
           GH_TOKEN: ${{ github.token }}
@@ -119,34 +128,23 @@ jobs:
 
             # --- governance gate ---------------------------------------------
             files=$(gh api --paginate "repos/${REPO}/pulls/${pr}/files?per_page=100" --jq '.[].filename')
-            if grep -qE '^(\.github/workflows/|\.github/CODEOWNERS|\.github/settings\.yml|\.github/branch-protection|\.github/.*governance|\.github/.*\.pub|dev-tools/.*governance)' <<<"$files" \
+            if grep -qE '^(\.github/workflows/|\.github/CODEOWNERS|\.github/settings\.yml|\.github/branch-protection|\.github/.*governance|\.github/.*\.pub|dev-tools/.*governance|dev-tools/gated-merge\.py$|dev-tools/ci/job-start-verdict\.py$|dev-tools/merge-gate-policy\.json$|dev-tools/merge-gate-SHA256SUMS$)' <<<"$files" \
                || grep -qE '(credential-broker/|execution-boundary/|supervisor/src/spawn\.rs|tools/src/bash\.rs)' <<<"$files"; then
               echo "skip: touches a governance path — needs a human decision"
               echo "::endgroup::"; continue
             fi
 
-            # --- CI gate ------------------------------------------------------
-            runs=$(gh api --paginate "repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" \
-                    --jq "[.check_runs[] | select(.name != \"${{ github.workflow }}\") | {n:.name,s:.status,c:.conclusion}]")
-            total=$(jq 'length' <<<"$runs")
-            pending=$(jq '[.[]|select(.s!="completed")]|length' <<<"$runs")
-            bad=$(jq '[.[]|select(.c!="success" and .c!="neutral" and .c!="skipped")]|length' <<<"$runs")
-
-            if [ "$total" -eq 0 ]; then echo "skip: no CI ran — absence of checks is not a pass"; echo "::endgroup::"; continue; fi
-            if [ "$pending" -gt 0 ]; then echo "skip: $pending check(s) still running"; echo "::endgroup::"; continue; fi
-            if [ "$bad" -gt 0 ]; then
-              echo "skip: CI not green"; jq -r '.[]|select(.c!="success" and .c!="neutral" and .c!="skipped")|"   \(.c) \(.n)"' <<<"$runs"
-              echo "::endgroup::"; continue
-            fi
-
-            # --- merge, then read the result back -----------------------------
-            echo "merging #${pr}: ${title}"
-            gh pr merge "$pr" --repo "$REPO" --squash --delete-branch || true
-            sleep 5
-            if [ "$(gh api "repos/${REPO}/pulls/${pr}" --jq '.merged')" = "true" ]; then
-              echo "merged #${pr}"
+            # The canonical gate re-reads current PR/checks and binds the
+            # actual merge API request to this exact event head. Every refusal
+            # remains nonzero; no direct merge or auto-merge fallback exists.
+            receipt="$RUNNER_TEMP/merge-gate-${pr}-${GITHUB_RUN_ID}.json"
+            if python3 dev-tools/gated-merge.py --repo "$REPO" --pr "$pr" \
+                 --method squash --expect-sha "$HEAD_SHA" --receipt "$receipt"; then
+              echo "merged #${pr}: canonical gate exit 0"
             else
-              echo "::warning::merge of #${pr} did not land"
+              gate_exit=$?
+              echo "::error::canonical merge gate refused #${pr} (exit ${gate_exit})"
+              exit "$gate_exit"
             fi
             echo "::endgroup::"
           done

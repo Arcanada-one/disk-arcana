@@ -1,0 +1,9 @@
+{
+  "_default": {
+    "apps": [
+      "github-actions"
+    ],
+    "required": [],
+    "enforce": false
+  }
+}

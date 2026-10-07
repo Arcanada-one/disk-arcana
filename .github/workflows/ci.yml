@@ -30,6 +30,19 @@ env:
 # ci-isolate-rust.py) and keep private runners excluded. Cold isolated toolchain
 # downloads still apply.
 jobs:
+  canonical-merge-boundary:
+    name: Canonical merge boundary refusal controls
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Verify bundle and refusal controls
+        run: |
+          sha256sum --check dev-tools/merge-gate-SHA256SUMS
+          python3 -B -m unittest discover -s dev-tools/tests -v
+
   sqlite-abi-full:
     name: SQLite ABI declared FULL (Rust 1.97.1)
     runs-on: [arcana-dbs-ci]
