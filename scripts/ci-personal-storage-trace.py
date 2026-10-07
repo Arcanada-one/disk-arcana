@@ -218,7 +218,7 @@ def measure(args):
                "run_attempt": args.attempt, "probes": [], "verdict": "NOT_MEASURED",
                "runtime_authorized": False, "scope": "exclusive synthetic root only"}
     target = Path(tempfile.mkdtemp(prefix="personal-storage-trace-", dir=output))
-    root = target / "fixture"
+    root = target / "disk-personal-fixture-trace"
     try:
         previous = None
         for name, mode in [("denied-fresh", "denied"), ("seed", "seed"),

@@ -6,6 +6,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
 spec = importlib.util.spec_from_file_location(
     "personal_trace", Path(__file__).parents[1] / "ci-personal-storage-trace.py")
@@ -93,6 +95,33 @@ class TraceControls(unittest.TestCase):
                 trace.judge(mode, result, b"{}\n", True)
         with self.assertRaises(ValueError):
             trace.inspect_trace(raw.replace(']>', ']'), ROOT)
+
+    def test_measure_uses_the_existing_synthetic_root_contract(self):
+        # Exercise the real measure caller. Capture stops before any executable
+        # runs; Rust's exact guard is checked separately under Rust 1.97.1.
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory) / "source"
+            output = Path(directory) / "evidence"
+            seen = []
+            def stop(command, prefix, timeout):
+                root = Path(command[-4])
+                seen.append(root)
+                self.assertTrue(root.is_absolute())
+                self.assertTrue(root.name.startswith("disk-personal-fixture-"))
+                self.assertLessEqual(len(root.name), 100)
+                self.assertTrue(root.parent.is_relative_to(output))
+                raise ValueError("controlled capture stop before execution")
+            args = SimpleNamespace(repo=repo, output=output, worker="/owned/worker",
+                                   expected_head="a" * 40, run_id="1", attempt="1", timeout=10)
+            with patch.object(trace, "source", return_value={"head": args.expected_head}), \
+                 patch.object(trace, "executable", return_value={"path": "/owned/tool", "sha256": "b" * 64}), \
+                 patch.object(trace.shutil, "which", return_value="/owned/strace"), \
+                 patch.object(trace, "capture", side_effect=stop):
+                with self.assertRaisesRegex(ValueError, "controlled capture stop"):
+                    trace.measure(args)
+            self.assertEqual(len(seen), 1)
+            self.assertFalse(seen[0].parent.exists())
+            self.assertTrue((output / "result.json").exists())
 
     def test_sibling_prefix_is_not_the_root(self):
         raw = '123 openat(AT_FDCWD, "/owned/fixture-sibling", O_RDONLY) = 3\n' + EXIT
