@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.2.0",
     "builtin-modules": "^4.0.0",
     "esbuild": "^0.28.2",
     "obsidian": "^1.8.0",
