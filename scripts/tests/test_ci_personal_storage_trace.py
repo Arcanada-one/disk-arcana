@@ -81,6 +81,19 @@ class TraceControls(unittest.TestCase):
                 result = trace.inspect_trace(raw, ROOT)
                 self.assertEqual(result["storage_call_count"], expected)
 
+    def test_socket_peer_arrow_is_inside_fd_annotation(self):
+        # Exact shape from failed personal CI job112662439618. A socket close
+        # is not fixture storage; the peer arrow must not end the annotation.
+        raw = '123 close(8<UNIX-STREAM:[185433470->185433471]>) = 0\n' + EXIT
+        result = trace.inspect_trace(raw, ROOT)
+        self.assertEqual(result["storage_call_count"], 0)
+        trace.judge("denied-fresh", result, b"STARTUP_UNAVAILABLE\n", False)
+        for mode in ("seed", "read"):
+            with self.assertRaises(ValueError):
+                trace.judge(mode, result, b"{}\n", True)
+        with self.assertRaises(ValueError):
+            trace.inspect_trace(raw.replace(']>', ']'), ROOT)
+
     def test_sibling_prefix_is_not_the_root(self):
         raw = '123 openat(AT_FDCWD, "/owned/fixture-sibling", O_RDONLY) = 3\n' + EXIT
         self.assertEqual(trace.inspect_trace(raw, ROOT)["storage_call_count"], 0)

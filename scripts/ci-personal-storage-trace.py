@@ -54,7 +54,8 @@ def syscall_arguments(text):
         elif char == '"':
             quoted = True
         elif stack and stack[-1] == ">":
-            if char == ">":
+            # -yy socket peer annotations contain "->" inside <...>.
+            if char == ">" and (index == 0 or text[index - 1] != "-"):
                 stack.pop()
         elif char in pairs:
             stack.append(pairs[char])
