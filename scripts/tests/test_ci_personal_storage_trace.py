@@ -24,6 +24,41 @@ class TraceControls(unittest.TestCase):
                '123 fsync(4</owned/fixture/inventory.sqlite>) = 0\n' + EXIT)
         self.assertEqual(trace.inspect_trace(raw, ROOT)["storage_call_count"], 3)
 
+    def test_payload_root_text_is_not_storage_or_positive_evidence(self):
+        for syscall in ('write(1<pipe:[12345]>', 'write(2<pipe:[12345]>',
+                        'read(3</etc/foreign>'):
+            with self.subTest(syscall=syscall):
+                raw = f'123 {syscall}, "/owned/fixture", 14) = 14\n' + EXIT
+                result = trace.inspect_trace(raw, ROOT)
+                self.assertEqual(result["storage_call_count"], 0)
+                for mode in ("seed", "read"):
+                    with self.assertRaises(ValueError):
+                        trace.judge(mode, result, b"/owned/fixture\n", True)
+
+    def test_only_pathname_inputs_and_relevant_descriptors_count(self):
+        cases = [
+            ('write(4</owned/fixture/object>, "a, ] )", 6) = 6', 1),
+            ('openat(3</owned/fixture>, "/etc/foreign", O_RDONLY) = 4', 0),
+            ('stat("/etc/foreign", {text="/owned/fixture"}) = 0', 0),
+            ('symlink("/owned/fixture", "/etc/link") = 0', 0),
+            ('renameat(3</etc>, "old", 4</owned/fixture>, "new") = 0', 1),
+            ('write(1<pipe:[12345]>, "fake, \\"/owned/fixture\\"", 20) = 20', 0),
+        ]
+        for call, expected in cases:
+            with self.subTest(call=call):
+                result = trace.inspect_trace("123 " + call + "\n" + EXIT, ROOT)
+                self.assertEqual(result["storage_call_count"], expected)
+                if expected:
+                    trace.judge("seed", result, b"{}\n", True)
+
+    def test_unsupported_attribution_and_malformed_arguments_refuse(self):
+        for call in ('unknown_call("/owned/fixture") = 0',
+                     'write(3</owned/fixture>, "unterminated, 2) = 2',
+                     'openat(AT_FDCWD) = 0',
+                     'execveat(3</owned/fixture>, "worker", [], 0, 0) = 0'):
+            with self.subTest(call=call), self.assertRaises(ValueError):
+                trace.inspect_trace("123 " + call + "\n" + EXIT, ROOT)
+
     def test_sibling_prefix_is_not_the_root(self):
         raw = '123 openat(AT_FDCWD, "/owned/fixture-sibling", O_RDONLY) = 3\n' + EXIT
         self.assertEqual(trace.inspect_trace(raw, ROOT)["storage_call_count"], 0)

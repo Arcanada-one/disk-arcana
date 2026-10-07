@@ -38,6 +38,88 @@ def source(repo, expected):
     return {"head": expected, "tree": git("rev-parse", "HEAD^{tree}")}
 
 
+def syscall_arguments(text):
+    """Split arguments without interpreting quoted payloads as paths."""
+    arguments, start, stack, quoted, escaped = [], 0, [], False, False
+    pairs = {"[": "]", "{": "}", "(": ")", "<": ">"}
+    for index, char in enumerate(text):
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"':
+            quoted = True
+        elif stack and stack[-1] == ">":
+            if char == ">":
+                stack.pop()
+        elif char in pairs:
+            stack.append(pairs[char])
+        elif char in "]})":
+            if not stack or stack.pop() != char:
+                raise ValueError("unbalanced syscall arguments")
+        elif char == "," and not stack:
+            arguments.append(text[start:index].strip())
+            start = index + 1
+    if quoted or stack:
+        raise ValueError("truncated syscall arguments")
+    arguments.append(text[start:].strip())
+    return arguments
+
+
+def storage_arguments(name, arguments, root):
+    """Attribute only ABI pathname inputs and -yy descriptor annotations."""
+    def owned(path):
+        return path == root or path.startswith(root + "/")
+
+    def descriptor(index):
+        match = re.fullmatch(r"(?:[0-9]+|AT_FDCWD)<([^<>]+)>", arguments[index])
+        return bool(match and owned(match[1]))
+
+    def pathname(index, directory=None):
+        match = re.fullmatch(r'"([^"\\]*)"', arguments[index])
+        if not match:
+            raise ValueError("unattributable pathname argument")
+        path = match[1]
+        if path.startswith("/"):
+            return owned(path)
+        # cwd is outside the root and changes are refused. An absolute pathname
+        # ignores dirfd, while a relative pathname uses its annotated directory.
+        return directory is not None and descriptor(directory)
+
+    fd_calls = {"read", "write", "close", "fsync", "fdatasync", "getdents64", "fstat"}
+    direct = {"open", "creat", "stat", "lstat", "stat64", "lstat64", "access",
+              "unlink", "mkdir", "rmdir", "readlink", "chmod", "chown", "lchown",
+              "truncate", "utime", "utimes", "execve", "statfs", "statfs64",
+              "getxattr", "lgetxattr", "setxattr", "lsetxattr", "listxattr",
+              "llistxattr", "removexattr", "lremovexattr", "inotify_add_watch"}
+    at_calls = {"openat", "openat2", "newfstatat", "fstatat64", "statx", "faccessat",
+                "faccessat2", "unlinkat", "mkdirat", "readlinkat", "fchmodat",
+                "fchmodat2", "fchownat", "utimensat", "futimesat", "mknodat"}
+    try:
+        if name in fd_calls:
+            return descriptor(0)
+        if name in direct:
+            return pathname(1 if name == "inotify_add_watch" else 0)
+        if name in at_calls:
+            return pathname(1, 0)
+        if name in {"rename", "link"}:
+            return pathname(0) | pathname(1)
+        if name in {"renameat", "renameat2", "linkat"}:
+            return pathname(1, 0) | pathname(3, 2)
+        if name == "symlink":
+            return pathname(1)  # Link contents are not an accessed pathname.
+        if name == "symlinkat":
+            return pathname(2, 1)
+        if name == "getcwd":
+            return False  # Output buffer; cwd changes are refused separately.
+    except IndexError:
+        raise ValueError("missing syscall arguments") from None
+    raise ValueError("unsupported syscall attribution: " + name)
+
+
 def inspect_trace(raw, root):
     """-yy annotates descriptor-relative operations with actual fd paths.
 
@@ -66,22 +148,12 @@ def inspect_trace(raw, root):
             continue
         if re.match(r"\d+\s+--- SIG", line):
             continue
-        match = re.match(r"\d+\s+([a-z0-9_]+)\(.*\)\s+=\s+.+$", line)
+        match = re.match(r"\d+\s+([a-z0-9_]+)\((.*)\)\s+=\s+.+$", line)
         if not match or match[1] in ("chdir", "fchdir", "chroot", "pivot_root"):
             raise ValueError("unknown trace record or changed path resolution")
         calls += 1
-        if match[1] == "execve":
-            # The owned root is an argv value, not the executable pathname.
-            filename = re.match(r'\d+\s+execve\("([^"\\]+)"', line)
-            if not filename:
-                raise ValueError("unattributable executable pathname")
-            if filename[1] == root or filename[1].startswith(root + "/"):
-                accesses.append(line)
-            continue
-        if match[1] == "execveat":
-            raise ValueError("descriptor-relative exec needs separate attribution")
-        # Exact root, descendants and fd annotations; sibling prefixes do not match.
-        if re.search(re.escape(root) + r'(?=[/">])', line):
+        arguments = syscall_arguments(match[2])
+        if storage_arguments(match[1], arguments, root):
             accesses.append(line)
     if pending or not calls or not exits:
         raise ValueError("trace lacks actual calls or successful process termination")
