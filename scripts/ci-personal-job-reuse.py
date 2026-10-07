@@ -178,7 +178,7 @@ def snapshot(repo):
     inventory, raw = closure(repo, head)
     environment = environment_binding()
     tools, errors = {}, []
-    for name in ("python3", "cargo", "rustc", "rustup", "cc", "c++", "ar", "ld"):
+    for name in ("python3", "cargo", "rustc", "rustup", "cc", "c++", "ar", "ld", "strace"):
         try:
             tools[name] = tool_identity(name)
         except (ValueError, OSError, subprocess.SubprocessError) as exc:

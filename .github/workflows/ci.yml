@@ -124,6 +124,12 @@ jobs:
           export PERSONAL_CARGO_BIN PERSONAL_RUSTC_BIN PATH
           export CARGO_TARGET_DIR="$RUNNER_TEMP/personal-provider-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           bash scripts/test-personal-provider.sh
+          # Current job-built synthetic worker only; no extra Cargo/FULL replay.
+          python3 -B scripts/ci-personal-storage-trace.py \
+            --repo "$PWD" --worker "$CARGO_TARGET_DIR/debug/disk-capture-fixture-worker" \
+            --output "$PERSONAL_REUSE_DIR/storage-trace" \
+            --expected-head '${{ github.event.pull_request.head.sha || github.sha }}' \
+            --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT"
           # Execute the declared group itself. Historical foundation CI is not
           # full-group evidence. Preserve the profile's 1800-second deadline.
           command -v timeout
