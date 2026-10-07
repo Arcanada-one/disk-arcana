@@ -1587,12 +1587,15 @@ async fn run_enroll(args: EnrollArgs) -> Result<()> {
     Ok(())
 }
 
-async fn run_admin_pending_token(args: PendingTokenArgs) -> Result<()> {
-    let admin_token = args
-        .admin_token
+fn resolve_pending_admin_token(args: &PendingTokenArgs) -> Result<String> {
+    args.admin_token
         .clone()
         .or_else(|| std::env::var("DISK_ADMIN_TOKEN").ok())
-        .ok_or_else(|| anyhow!("--admin-token or DISK_ADMIN_TOKEN required"))?;
+        .ok_or_else(|| anyhow!("--admin-token or DISK_ADMIN_TOKEN required"))
+}
+
+async fn run_admin_pending_token(args: PendingTokenArgs) -> Result<()> {
+    let admin_token = resolve_pending_admin_token(&args)?;
 
     let ca_pem = match &args.ca_cert {
         Some(path) => {
@@ -2477,3 +2480,7 @@ mod identity_env_canary {
         );
     }
 }
+
+// C18 observes only the real pending-token reader, never the enrollment RPC.
+#[cfg(all(test, target_os = "linux"))]
+mod pending_token_env_canary;
