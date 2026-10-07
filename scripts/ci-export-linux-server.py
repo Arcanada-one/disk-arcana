@@ -11,6 +11,7 @@ import sys
 import tempfile
 
 MACHINES = {'x86_64-unknown-linux-gnu': 62, 'aarch64-unknown-linux-gnu': 183}
+FIXTURE_WORKER = 'disk-capture-fixture-worker'
 
 
 def known_cargo_links(binary, info):
@@ -19,7 +20,7 @@ def known_cargo_links(binary, info):
     # Cargo links release/<name> to release/deps/<crate>-<hash>. Account for
     # every link; an extra alias elsewhere must still refuse the export.
     deps = binary.parent / 'deps'
-    if binary.name not in ('disk-arcana-server', 'disk') or binary.parent.name not in ('release', 'debug'):
+    if binary.name not in ('disk-arcana-server', 'disk', FIXTURE_WORKER) or binary.parent.name not in ('release', 'debug'):
         return False
     if deps != deps.resolve(strict=True):
         return False
@@ -35,7 +36,7 @@ def known_cargo_links(binary, info):
 
 
 def export_binary(binary, private_root, target, provenance, name="disk-arcana-server"):
-    if name not in ("disk-arcana-server", "disk", "it_local_e2e_writeback"):
+    if name not in ("disk-arcana-server", "disk", "it_local_e2e_writeback", FIXTURE_WORKER):
         raise ValueError("invalid_export_name")
     if target not in MACHINES:
         raise ValueError('unsupported_target')
@@ -137,6 +138,42 @@ def export_cli(log, target_root, root, provenance):
         raise
 
 
+def export_fixture(log, target_root, root, provenance):
+    """Separate synthetic worker artifact; existing CLI pair stays unchanged."""
+    workspace = Path(os.environ['GITHUB_WORKSPACE']).resolve(strict=True)
+    selected, finished = [], []
+    for line in Path(log).read_text().splitlines():
+        if not line.startswith('{'):
+            continue
+        row = json.loads(line)
+        if row.get('reason') == 'build-finished':
+            finished.append(row.get('success'))
+        target = row.get('target', {})
+        if row.get('reason') != 'compiler-artifact' or target.get('name') != FIXTURE_WORKER:
+            continue
+        if row.get('profile', {}).get('test') is True:
+            continue  # libtest harness is not the fixture executable.
+        if (row.get('profile', {}).get('test') is not False or target.get('kind') != ['bin']
+                or not isinstance(row.get('features'), list)
+                or 'synthetic-fixtures' not in row['features']
+                or target.get('required-features') != ['synthetic-fixtures']):
+            raise ValueError('wrong_fixture_cargo_target')
+        if (Path(target['src_path']).resolve(strict=True) != workspace / 'crates/disk-personal/src/bin/disk-capture-fixture-worker.rs'
+                or Path(row['manifest_path']).resolve(strict=True) != workspace / 'crates/disk-personal/Cargo.toml'):
+            raise ValueError('foreign_fixture_source')
+        binary = Path(row['executable'])
+        if binary != target_root / 'debug' / FIXTURE_WORKER or selected:
+            raise ValueError('ambiguous_or_foreign_fixture_output')
+        selected.append((binary, row))
+    if finished != [True] or len(selected) != 1:
+        raise ValueError('missing_successful_fixture_output')
+    binary, row = selected[0]
+    binding = dict(provenance, cargo_artifact=row,
+                   cargo_argv=['cargo', 'test', '--workspace', '--all-features', '--message-format=json'],
+                   scope='synthetic_fixture_only', runtime_authorized=False)
+    return export_binary(binary, root, 'x86_64-unknown-linux-gnu', binding, FIXTURE_WORKER)
+
+
 def main(argv=()):
     if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('RUNNER_OS') != 'Linux':
         raise ValueError('native_linux_ci_required')
@@ -158,12 +195,17 @@ def main(argv=()):
                   'repository': os.environ['GITHUB_REPOSITORY'], 'run_id': os.environ['GITHUB_RUN_ID'],
                   'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'job_key': os.environ['GITHUB_JOB'],
                   'runner_name': os.environ['RUNNER_NAME']}
-    if len(argv) == 2 and argv[0] == '--cli':
+    if len(argv) == 2 and argv[0] in ('--cli', '--fixture'):
         provenance.update(rustc_verbose=subprocess.check_output(['rustc', '-vV'], text=True),
                           cargo_version=subprocess.check_output(['cargo', '-V'], text=True),
                           cargo_lock_sha256=hashlib.sha256((workspace / 'Cargo.lock').read_bytes()).hexdigest(),
                           cargo_messages_sha256=hashlib.sha256(Path(argv[1]).read_bytes()).hexdigest())
-        outputs = export_cli(argv[1], target_root, root, provenance)
+        if argv[0] == '--cli':
+            outputs = export_cli(argv[1], target_root, root, provenance)
+        else:
+            if target != 'x86_64-unknown-linux-gnu':
+                raise ValueError('unsupported_fixture_target')
+            outputs = [export_fixture(argv[1], target_root, root, provenance)]
     elif not argv:
         outputs = [export_binary(target_root / target / 'release/disk-arcana-server', root, target, provenance)]
     else:

@@ -392,6 +392,19 @@ jobs:
             ${{ steps.cli_export.outputs.directory1 }}
           if-no-files-found: error
           retention-days: 1
+      - name: Prepare exact synthetic capture fixture worker
+        id: fixture_export
+        env:
+          EXPECTED_BUILD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BUILD_TARGET: x86_64-unknown-linux-gnu
+        run: python3 -B scripts/ci-export-linux-server.py --fixture "$CI_ISOLATED_RUST_ROOT/cargo-test.jsonl"
+      - name: Upload exact synthetic capture fixture worker
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: disk-capture-fixture-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.fixture_export.outputs.directory }}
+          if-no-files-found: error
+          retention-days: 1
       - name: Scanner load harness (1K + 10K, DISK-0012 G3)
         run: bash scripts/load-test-harness.sh all
       - name: Coverage gate (≥80 % lines, DISK-0032)
