@@ -69,6 +69,18 @@ class TraceControls(unittest.TestCase):
         self.assertEqual(result["successful_storage_call_count"], 1)
         trace.judge("read", result, b"{}\n", True)
 
+    def test_relative_path_is_joined_to_the_annotated_directory(self):
+        for directory, path, expected in (
+            ("/owned", "fixture/objects/part", 1),
+            ("/owned/fixture", "./objects//part", 1),
+            ("/etc", "fixture/objects/part", 0),
+            ("/owned/fixture-sibling", "objects/part", 0),
+        ):
+            with self.subTest(directory=directory, path=path):
+                raw = f'123 openat(3<{directory}>, "{path}", O_RDONLY) = 4\n' + EXIT
+                result = trace.inspect_trace(raw, ROOT)
+                self.assertEqual(result["storage_call_count"], expected)
+
     def test_sibling_prefix_is_not_the_root(self):
         raw = '123 openat(AT_FDCWD, "/owned/fixture-sibling", O_RDONLY) = 3\n' + EXIT
         self.assertEqual(trace.inspect_trace(raw, ROOT)["storage_call_count"], 0)

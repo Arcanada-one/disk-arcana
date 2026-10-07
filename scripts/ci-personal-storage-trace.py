@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import posixpath
 import re
 import shutil
 import signal
@@ -74,7 +75,9 @@ def storage_arguments(name, arguments, root):
     def owned(path):
         if ".." in path.split("/"):
             raise ValueError("parent traversal needs separate path attribution")
-        return path == root or path.startswith(root + "/")
+        path = posixpath.normpath(path)
+        normalized_root = posixpath.normpath(root)
+        return path == normalized_root or path.startswith(normalized_root + "/")
 
     def descriptor(index):
         match = re.fullmatch(r"(?:[0-9]+|AT_FDCWD)<([^<>]+)>", arguments[index])
@@ -93,7 +96,12 @@ def storage_arguments(name, arguments, root):
             return owned(path)
         # cwd is outside the root and changes are refused. An absolute pathname
         # ignores dirfd, while a relative pathname uses its annotated directory.
-        return directory is not None and descriptor(directory)
+        if directory is None:
+            return False
+        base = re.fullmatch(r"(?:[0-9]+|AT_FDCWD)<(/[^<>]+)>", arguments[directory])
+        if not base:
+            return False
+        return owned(posixpath.join(base[1], path))
 
     fd_calls = {"read", "write", "close", "fsync", "fdatasync", "getdents64", "fstat"}
     direct = {"open", "creat", "stat", "lstat", "stat64", "lstat64", "access",
