@@ -28,8 +28,8 @@ fn roots(pairs: &[(&str, &str)]) -> HashMap<String, PathBuf> {
 #[test]
 fn secondary_share_only_leaves_sync_root_unwatched() {
     let declared = roots(&[(
-        "hermes-artefacts",
-        "/var/lib/disk-arcana/shares/hermes-artefacts",
+        "media-artefacts",
+        "/var/lib/disk-arcana/shares/media-artefacts",
     )]);
     assert!(
         sync_root_is_unwatched(&declared, Path::new("/home/dev/arcanada/datarim")),
@@ -43,8 +43,8 @@ fn declaring_sync_root_share_closes_the_gap() {
     let declared = roots(&[
         ("datarim-kb", "/home/dev/arcanada/datarim"),
         (
-            "hermes-artefacts",
-            "/var/lib/disk-arcana/shares/hermes-artefacts",
+            "media-artefacts",
+            "/var/lib/disk-arcana/shares/media-artefacts",
         ),
     ]);
     assert!(

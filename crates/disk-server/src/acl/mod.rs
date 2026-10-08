@@ -236,11 +236,11 @@ mod tests {
     #[tokio::test]
     async fn loaded_state_returns_role_for_known_entry() {
         let mut table = EnforcementTable::new(7);
-        table.insert(fp(0x01), "hermes-artefacts", EnforcedRole::Publisher);
+        table.insert(fp(0x01), "media-artefacts", EnforcedRole::Publisher);
         let enforcer = AclEnforcer::new_loaded(table);
 
         let role = enforcer
-            .resolve(&fp(0x01), "hermes-artefacts")
+            .resolve(&fp(0x01), "media-artefacts")
             .await
             .expect("entry present");
         assert_eq!(role, EnforcedRole::Publisher);

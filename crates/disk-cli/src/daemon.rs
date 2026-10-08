@@ -845,7 +845,7 @@ async fn wait_for_terminate_signal(tx: tokio::sync::oneshot::Sender<()>) {
 ///
 /// Share tasks for the same node_id run concurrently and share one api_key file.
 /// A sibling may persist the key after this task's one-shot startup auth failed;
-/// re-attempt each sync iteration (DISK-0067 hermes-only `server_unreachable`).
+/// re-attempt each sync iteration (DISK-0067: one secondary share stuck on `server_unreachable`).
 async fn ensure_client_session(
     client: &mut disk_client::connection::DiskClient,
     api_key_path: &std::path::Path,

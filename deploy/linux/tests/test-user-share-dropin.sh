@@ -3,7 +3,7 @@
 # that leaves DISK_SYNC_ROOT without a share_index watcher.
 #
 # This is the pre-flight twin of the server's startup warning: the outage on
-# arcana-agents happened because a drop-in declared `hermes-artefacts` alone,
+# arcana-agents happened because a drop-in declared one secondary share alone,
 # so `datarim-kb` was served out of DISK_SYNC_ROOT but never watched — nothing
 # indexed, clients pulling nothing, both ends reporting success. Catching that
 # before the host is touched is cheaper than noticing it in a log afterwards.
@@ -46,7 +46,7 @@ grep -q 'contract OK' "$work/out.log" ||
 # 2. The exact outage configuration must be rejected.
 cat >"$work/secondary-only.conf" <<'EOF'
 [Service]
-Environment=DISK_SHARE_ROOTS=hermes-artefacts:/var/lib/disk-arcana/shares/hermes-artefacts
+Environment=DISK_SHARE_ROOTS=media-artefacts:/var/lib/disk-arcana/shares/media-artefacts
 EOF
 if run_installer "$work/secondary-only.conf"; then
   fail "installer accepted the configuration that unserved datarim-kb"

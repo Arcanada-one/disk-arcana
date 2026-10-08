@@ -14,4 +14,3 @@ nodes:
   #   shares:
   #     kb-push-share: send_only
   #     sync-to-dev-share: send_only
-  #     hermes-artefacts: receive_only
