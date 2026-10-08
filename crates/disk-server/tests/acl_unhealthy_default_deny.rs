@@ -22,7 +22,7 @@ async fn cold_boot_denies_every_resolution_regardless_of_share() {
     // Unavailable(NeverLoaded). The point is that no input from the client
     // can flip the outcome — there is no carve-out path before the first
     // successful ACL load.
-    for share in ["hermes-artefacts", "wiki", "anything-else"] {
+    for share in ["media-artefacts", "wiki", "anything-else"] {
         for fp in [&CERT_A, &CERT_B] {
             let err = enforcer.resolve(fp, share).await.unwrap_err();
             assert_eq!(
@@ -71,7 +71,7 @@ async fn loaded_state_distinguishes_share_unknown_from_unhealthy() {
 
     // Missing share on a known cert: ShareUnknown, not Unavailable.
     let err = enforcer
-        .resolve(&CERT_A, "hermes-artefacts")
+        .resolve(&CERT_A, "media-artefacts")
         .await
         .unwrap_err();
     assert!(

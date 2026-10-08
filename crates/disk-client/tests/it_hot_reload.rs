@@ -57,8 +57,8 @@ client_cert = "/etc/disk-arcana/client.crt"
 client_key  = "/etc/disk-arcana/client.key"
 
 [[share]]
-name = "hermes-artefacts"
-path = "/var/disk-arcana/hermes"
+name = "media-artefacts"
+path = "/var/disk-arcana/media"
 intended_direction = "bidirectional"
 "#;
 
@@ -75,8 +75,8 @@ client_cert = "C:\\ProgramData\\disk-arcana\\client.crt"
 client_key  = "C:\\ProgramData\\disk-arcana\\client.key"
 
 [[share]]
-name = "hermes-artefacts"
-path = "C:\\var\\disk-arcana\\hermes"
+name = "media-artefacts"
+path = "C:\\var\\disk-arcana\\media"
 intended_direction = "bidirectional"
 "#;
 
@@ -141,14 +141,14 @@ async fn hot_reload_picks_up_added_share_within_10s() {
 
     let updated = wait_for(
         &watcher.snapshot,
-        |c| c.shares.len() == 1 && c.shares[0].name == "hermes-artefacts",
+        |c| c.shares.len() == 1 && c.shares[0].name == "media-artefacts",
         Duration::from_secs(10),
     )
     .await
     .expect("config should reload within 10 s");
 
     assert_eq!(updated.shares.len(), 1);
-    assert_eq!(updated.shares[0].name, "hermes-artefacts");
+    assert_eq!(updated.shares[0].name, "media-artefacts");
     assert_eq!(watcher.status.get(), None);
 
     watcher.abort();
@@ -204,7 +204,7 @@ async fn hot_reload_keeps_previous_on_validation_error() {
     )
     .await
     .expect("recovery write should propagate");
-    assert_eq!(recovered.shares[0].name, "hermes-artefacts");
+    assert_eq!(recovered.shares[0].name, "media-artefacts");
     assert_eq!(
         watcher.status.get(),
         None,
@@ -244,7 +244,7 @@ async fn explicit_reload_signal_triggers_apply() {
     )
     .await
     .expect("explicit signal must drive reload");
-    assert_eq!(updated.shares[0].name, "hermes-artefacts");
+    assert_eq!(updated.shares[0].name, "media-artefacts");
 
     watcher.abort();
 }

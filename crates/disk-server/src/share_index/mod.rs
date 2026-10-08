@@ -1,6 +1,6 @@
 //! Local filesystem index for `DISK_SHARE_ROOTS` (POST-R13 follow-up).
 //!
-//! Hermes and other secondary share roots receive writes outside the gRPC
+//! Secondary share roots receive writes outside the gRPC
 //! `delta_upload` path. A `notify` watcher keeps the server MetaDb aligned
 //! with on-disk state so `exchange_state` can fan out local changes to mesh
 //! clients without a manual `disk import-state` re-run.
@@ -1362,7 +1362,7 @@ mod tests {
             paths: vec![root.join("a.txt")],
             attrs: notify::event::EventAttributes::default(),
         };
-        let out = translate_notify_event(&ev, "hermes-artefacts", &root);
+        let out = translate_notify_event(&ev, "media-artefacts", &root);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].kind, IndexEventKind::Upsert);
     }
@@ -1376,7 +1376,7 @@ mod tests {
             paths: vec![PathBuf::from("/other/a.txt")],
             attrs: notify::event::EventAttributes::default(),
         };
-        let out = translate_notify_event(&ev, "hermes-artefacts", &root);
+        let out = translate_notify_event(&ev, "media-artefacts", &root);
         assert!(out.is_empty());
     }
 
@@ -1391,11 +1391,11 @@ mod tests {
             paths: vec![root.join("old.txt")],
             attrs: notify::event::EventAttributes::default(),
         };
-        let out = translate_notify_event(&ev, "hermes-artefacts", &root);
+        let out = translate_notify_event(&ev, "media-artefacts", &root);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].kind, IndexEventKind::Tombstone);
         assert_eq!(out[0].abs_path, root.join("old.txt"));
-        assert_eq!(out[0].vault_id, "hermes-artefacts");
+        assert_eq!(out[0].vault_id, "media-artefacts");
     }
 
     #[test]
@@ -1407,7 +1407,7 @@ mod tests {
             paths: vec![root.join("new.txt")],
             attrs: notify::event::EventAttributes::default(),
         };
-        let out = translate_notify_event(&ev, "hermes-artefacts", &root);
+        let out = translate_notify_event(&ev, "media-artefacts", &root);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].kind, IndexEventKind::Upsert);
         assert_eq!(out[0].abs_path, root.join("new.txt"));
@@ -1422,7 +1422,7 @@ mod tests {
             paths: vec![root.join("old.txt"), root.join("new.txt")],
             attrs: notify::event::EventAttributes::default(),
         };
-        let out = translate_notify_event(&ev, "hermes-artefacts", &root);
+        let out = translate_notify_event(&ev, "media-artefacts", &root);
         assert_eq!(out.len(), 2);
         // From path → Tombstone.
         assert_eq!(out[0].kind, IndexEventKind::Tombstone);
