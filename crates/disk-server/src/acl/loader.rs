@@ -251,7 +251,7 @@ where
     verifier.verify(&bytes)?;
 
     let parsed: AclYamlFile =
-        serde_yaml_ng::from_slice(&bytes).map_err(|e| AclLoadError::Parse(e.to_string()))?;
+        serde_saphyr::from_slice(&bytes).map_err(|e| AclLoadError::Parse(e.to_string()))?;
 
     if parsed.version <= stored_version && stored_version > 0 {
         return Err(AclLoadError::VersionRegress {
