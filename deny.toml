@@ -72,6 +72,9 @@ yanked = "deny"
 #                                              (sqlx-mysql is never enabled); suppressing it
 #                                              here made cargo-deny emit `advisory-not-detected`.
 #   RUSTSEC-2025-0134      (rustls-pemfile)  → removed from the tree by the tonic 0.13 upgrade.
+#   RUSTSEC-2024-0449      (unsafe-libyaml)  → serde_yaml_ng replaced by serde-saphyr
+#                                              (safe YAML 1.2). No patched unsafe-libyaml
+#                                              release exists; the crate stays unmaintained.
 # Add an entry only when no upgrade, replacement or feature-gate exists, and
 # always with a dated rationale plus a tracking backlog item.
 ignore = []
