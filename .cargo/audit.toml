@@ -63,3 +63,10 @@ ignore = [
 #
 #   RUSTSEC-2025-0134 (rustls-pemfile, unmaintained)
 #     Removed from the dependency tree entirely by the tonic 0.13 upgrade.
+#
+#   RUSTSEC-2024-0449 (unsafe-libyaml, unmaintained)
+#     Assigned 2026-10-12. cargo-audit reports it as an allowed warning, but
+#     cargo-deny fails it (`unmaintained = "all"` by default) and there is no
+#     patched release. Closed by replacing the direct `serde_yaml_ng` 0.10
+#     dependency with `serde-saphyr` (deserialize only), which parses YAML in
+#     safe Rust. Re-adding serde_yaml_ng would bring unsafe-libyaml back.
