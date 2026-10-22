@@ -543,14 +543,14 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────────
   # 1d. Build + sign macOS client binaries on tag (DISK-0010 install.sh assets).
   #     Requires GitHub Secrets (see docs/runbooks/DISK-RB-013-macos-cli-release-signing.md).
-  #     Uses GitHub-hosted macos-14 (same pattern as build-windows-client).
+  #     Uses GitHub-hosted macos-15 (not macos-latest; same pattern as build-windows-client).
   # ──────────────────────────────────────────────────────────────────────────
   build-macos-client:
     name: Build macOS client (signed disk)
     if: >-
       startsWith(github.ref, 'refs/tags/') &&
       (github.event_name != 'workflow_dispatch' || github.event.inputs.target != 'stage-probe')
-    runs-on: macos-14
+    runs-on: macos-15
     permissions:
       contents: write
     strategy:
