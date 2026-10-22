@@ -154,7 +154,7 @@ jobs:
         run: python3 -B scripts/ci-personal-job-reuse.py record
       - name: Retain personal receiving decision and execution manifest
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: personal-job-reuse-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.PERSONAL_REUSE_DIR }}/
@@ -252,7 +252,7 @@ jobs:
         run: bash scripts/validate-owasp-evidence.sh
       - name: load-test-harness.sh syntax (DISK-0012 G3)
         run: sh -n scripts/load-test-harness.sh
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         with:
           node-version: "24.22.1"
           cache: npm
@@ -378,7 +378,7 @@ jobs:
           BUILD_TARGET: x86_64-unknown-linux-gnu
         run: python3 scripts/ci-export-linux-server.py --cli "$CI_ISOLATED_RUST_ROOT/cargo-test.jsonl"
       - name: Upload exact CLI driver and daemon
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: disk-cli-executables-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -395,7 +395,7 @@ jobs:
             exit 0
           fi
           cargo llvm-cov --workspace --all-features --fail-under-lines 80
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         with:
           node-version: "24.22.1"
       - name: Obsidian plugin integration (DISK-0008)
@@ -542,7 +542,7 @@ jobs:
           BUILD_TARGET: ${{ matrix.target }}
         run: python3 scripts/ci-export-linux-server.py
       - name: Upload exact Linux server build
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1, existing Windows pin
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.1, existing Windows pin
         with:
           name: disk-arcana-server-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ steps.server_export.outputs.directory }}
