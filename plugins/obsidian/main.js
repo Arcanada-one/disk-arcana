@@ -1,32 +1,11 @@
-"use strict";
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
-};
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-  }
-  return to;
-};
-var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
-
 // src/main.ts
-var main_exports = {};
-__export(main_exports, {
-  default: () => DiskArcanaPlugin
-});
-module.exports = __toCommonJS(main_exports);
 var import_obsidian3 = require("obsidian");
 
 // src/conflict-modal.ts
 var import_obsidian = require("obsidian");
+/** @preserve
+ * @type {import("./src/contracts").ConflictAction[]}
+ */
 var ACTIONS = [
   "keep-local",
   "keep-remote",
@@ -35,11 +14,21 @@ var ACTIONS = [
   "merge"
 ];
 var ConflictModal = class extends import_obsidian.Modal {
+  /** @preserve
+  * @param {ConstructorParameters<typeof import("obsidian").Modal>[0]} app
+  * @param {DaemonClient} client
+  * @param {import("./src/contracts").ConflictAction} defaultAction
+  */
   constructor(app, client, defaultAction) {
     super(app);
     this.client = client;
     this.defaultAction = defaultAction;
   }
+  client;
+  defaultAction;
+  /** @preserve
+  * @returns {Promise<void>}
+  */
   async onOpen() {
     this.setTitle("Disk Arcana conflicts");
     this.contentEl.empty();
@@ -54,6 +43,10 @@ var ConflictModal = class extends import_obsidian.Modal {
       this.contentEl.createEl("p", { text: `Conflicts unavailable: ${message(error)}` });
     }
   }
+  /** @preserve
+  * @param {import("./src/contracts").ConflictItem} conflict
+  * @returns {void}
+  */
   renderConflict(conflict) {
     const row = this.contentEl.createDiv({ cls: "disk-arcana-conflict" });
     row.createEl("strong", { text: `${conflict.vault_id}: ${conflict.path}` });
@@ -73,6 +66,12 @@ var ConflictModal = class extends import_obsidian.Modal {
       button.addEventListener("click", () => void this.resolve(conflict, action, row));
     }
   }
+  /** @preserve
+  * @param {import("./src/contracts").ConflictItem} conflict
+  * @param {HTMLElement} localTarget
+  * @param {HTMLElement} remoteTarget
+  * @returns {Promise<void>}
+  */
   async showDiff(conflict, localTarget, remoteTarget) {
     try {
       const diff = await this.client.conflictDiff(conflict.vault_id, conflict.path);
@@ -85,6 +84,12 @@ ${diff.fork_content}`);
       remoteTarget.setText("REMOTE FORK\nunavailable");
     }
   }
+  /** @preserve
+  * @param {import("./src/contracts").ConflictItem} conflict
+  * @param {import("./src/contracts").ConflictAction} action
+  * @param {HTMLElement} row
+  * @returns {Promise<void>}
+  */
   async resolve(conflict, action, row) {
     try {
       await this.client.resolve(conflict.vault_id, conflict.path, action);
@@ -95,11 +100,19 @@ ${diff.fork_content}`);
     }
   }
 };
+/** @preserve
+ * @param {unknown} error
+ * @returns {string}
+ */
 function message(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
 // src/daemon-client.ts
+/** @preserve
+ * @param {string} raw
+ * @returns {string}
+ */
 function normalizeLoopbackUrl(raw) {
   const url = new URL(raw);
   const loopback = isLoopbackHostname(url.hostname);
@@ -111,29 +124,58 @@ function normalizeLoopbackUrl(raw) {
   }
   return url.origin;
 }
+/** @preserve
+ * @param {string} hostname
+ * @returns {boolean}
+ */
 function isLoopbackHostname(hostname) {
   if (hostname === "localhost" || hostname === "::1" || hostname === "[::1]") return true;
   const octets = hostname.split(".");
   return octets.length === 4 && octets[0] === "127" && octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255);
 }
 var DaemonClient = class {
+  /** @preserve
+  * @param {string} baseUrl
+  * @param {import("./src/daemon-client").RequestFn} request
+  */
   constructor(baseUrl, request) {
     this.request = request;
     this.baseUrl = normalizeLoopbackUrl(baseUrl);
   }
+  request;
+  /** @preserve
+  * @type {string}
+  */
   baseUrl;
+  /** @preserve
+  * @returns {Promise<import("./src/contracts").StatusResponse>}
+  */
   status() {
     return this.json("GET", "/status");
   }
+  /** @preserve
+  * @returns {Promise<import("./src/contracts").ConflictItem[]>}
+  */
   conflicts() {
     return this.json("GET", "/conflicts");
   }
+  /** @preserve
+  * @param {string} vaultId
+  * @param {string} path
+  * @returns {Promise<import("./src/contracts").ConflictDiff>}
+  */
   conflictDiff(vaultId, path) {
     return this.json(
       "GET",
       `/conflicts/${encodeURIComponent(vaultId)}/${encodeURIComponent(path)}/diff`
     );
   }
+  /** @preserve
+  * @param {string} vaultId
+  * @param {string} path
+  * @param {import("./src/contracts").ConflictAction} action
+  * @returns {Promise<void>}
+  */
   async resolve(vaultId, path, action) {
     await this.json(
       "POST",
@@ -141,12 +183,25 @@ var DaemonClient = class {
       { action }
     );
   }
+  /** @preserve
+  * @returns {Promise<void>}
+  */
   async sync() {
     await this.json("POST", "/sync");
   }
+  /** @preserve
+  * @returns {Promise<void>}
+  */
   async reloadConfig() {
     await this.json("POST", "/config/reload");
   }
+  /** @preserve
+  * @template T
+  * @param {"GET" | "POST"} method
+  * @param {string} path
+  * @param {unknown} [body]
+  * @returns {Promise<T>}
+  */
   async json(method, path, body) {
     const response = await this.request({
       url: `${this.baseUrl}${path}`,
@@ -166,6 +221,9 @@ var DaemonClient = class {
 var import_obsidian2 = require("obsidian");
 
 // src/settings-model.ts
+/** @preserve
+ * @type {readonly import("./src/contracts").ConflictAction[]}
+ */
 var CONFLICT_ACTIONS = [
   "keep-local",
   "keep-remote",
@@ -173,6 +231,9 @@ var CONFLICT_ACTIONS = [
   "fork-remote",
   "merge"
 ];
+/** @preserve
+ * @type {import("./src/settings-model").DiskArcanaSettings}
+ */
 var DEFAULT_SETTINGS = {
   daemonUrl: "http://127.0.0.1:9444",
   pollIntervalSeconds: 5,
@@ -180,6 +241,17 @@ var DEFAULT_SETTINGS = {
   conflictStrategy: "manual",
   notifications: true
 };
+/** @preserve
+ * @param {unknown} value
+ * @returns {value is import("./src/contracts").ConflictAction}
+ */
+function isConflictAction(value) {
+  return CONFLICT_ACTIONS.some((action) => action === value);
+}
+/** @preserve
+ * @param {Partial<import("./src/settings-model").DiskArcanaSettings>} input
+ * @returns {import("./src/settings-model").DiskArcanaSettings}
+ */
 function sanitizeSettings(input) {
   let daemonUrl = DEFAULT_SETTINGS.daemonUrl;
   try {
@@ -188,7 +260,7 @@ function sanitizeSettings(input) {
   }
   const interval = Number(input.pollIntervalSeconds);
   const pollIntervalSeconds = Number.isFinite(interval) ? Math.min(300, Math.max(2, Math.round(interval))) : DEFAULT_SETTINGS.pollIntervalSeconds;
-  const defaultConflictAction = CONFLICT_ACTIONS.includes(input.defaultConflictAction) ? input.defaultConflictAction : DEFAULT_SETTINGS.defaultConflictAction;
+  const defaultConflictAction = isConflictAction(input.defaultConflictAction) ? input.defaultConflictAction : DEFAULT_SETTINGS.defaultConflictAction;
   const conflictStrategy = input.conflictStrategy === "auto-fork" ? "auto-fork" : "manual";
   return {
     ...DEFAULT_SETTINGS,
@@ -202,10 +274,18 @@ function sanitizeSettings(input) {
 
 // src/settings.ts
 var DiskArcanaSettingTab = class extends import_obsidian2.PluginSettingTab {
+  /** @preserve
+  * @param {import("obsidian").App} app
+  * @param {DiskArcanaPlugin} plugin
+  */
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
   }
+  plugin;
+  /** @preserve
+  * @returns {void}
+  */
   display() {
     this.containerEl.empty();
     new import_obsidian2.Setting(this.containerEl).setName("Daemon URL").setDesc("Loopback-only Disk Arcana REST endpoint").addText(
@@ -234,6 +314,7 @@ var DiskArcanaSettingTab = class extends import_obsidian2.PluginSettingTab {
         "keep-remote": "Keep remote",
         merge: "Merge"
       }).setValue(this.plugin.settings.defaultConflictAction).onChange(async (value) => {
+        if (!isConflictAction(value)) return;
         this.plugin.settings.defaultConflictAction = value;
         await this.plugin.saveSettings();
       })
@@ -249,6 +330,11 @@ var DiskArcanaSettingTab = class extends import_obsidian2.PluginSettingTab {
 };
 
 // src/status.ts
+/** @preserve
+ * @param {import("./src/contracts").StatusResponse | null} status
+ * @param {import("./src/contracts").ConflictItem[]} conflicts
+ * @returns {import("./src/status").PluginState}
+ */
 function derivePluginState(status, conflicts) {
   if (status === null) return "offline";
   if (conflicts.length > 0) return "conflict";
@@ -259,6 +345,9 @@ function derivePluginState(status, conflicts) {
   }
   return "synced";
 }
+/** @preserve
+ * @type {Record<import("./src/status").PluginState, string>}
+ */
 var STATUS_LABEL = {
   offline: "Disk: offline \u2717",
   synced: "Disk: synced \u2713",
@@ -268,11 +357,23 @@ var STATUS_LABEL = {
 
 // src/sync-debounce.ts
 var SyncDebounce = class {
+  /** @preserve
+  * @param {number} delayMs
+  * @param {() => void} callback
+  */
   constructor(delayMs, callback) {
     this.delayMs = delayMs;
     this.callback = callback;
   }
+  delayMs;
+  callback;
+  /** @preserve
+  * @type {ReturnType<typeof setTimeout> | null}
+  */
   timer = null;
+  /** @preserve
+  * @returns {void}
+  */
   queue() {
     this.cancel();
     this.timer = setTimeout(() => {
@@ -280,6 +381,9 @@ var SyncDebounce = class {
       this.callback();
     }, this.delayMs);
   }
+  /** @preserve
+  * @returns {void}
+  */
   cancel() {
     if (this.timer !== null) clearTimeout(this.timer);
     this.timer = null;
@@ -288,10 +392,19 @@ var SyncDebounce = class {
 
 // src/main.ts
 var DiskArcanaPlugin = class extends import_obsidian3.Plugin {
+  /** @preserve
+  * @type {import("./src/settings").DiskArcanaSettings}
+  */
   settings = DEFAULT_SETTINGS;
+  /** @preserve
+  * @type {HTMLElement | null}
+  */
   statusEl = null;
   syncDebounce = new SyncDebounce(500, () => void this.sync());
   lastStatus = "";
+  /** @preserve
+  * @returns {Promise<void>}
+  */
   async onload() {
     this.settings = sanitizeSettings(await this.loadData() ?? {});
     this.statusEl = this.addStatusBarItem();
@@ -312,14 +425,23 @@ var DiskArcanaPlugin = class extends import_obsidian3.Plugin {
       window.setInterval(() => void this.refreshStatus(), this.settings.pollIntervalSeconds * 1e3)
     );
   }
+  /** @preserve
+  * @returns {void}
+  */
   onunload() {
     this.syncDebounce.cancel();
   }
+  /** @preserve
+  * @returns {Promise<void>}
+  */
   async saveSettings() {
     this.settings = sanitizeSettings(this.settings);
     await this.saveData(this.settings);
     await this.refreshStatus();
   }
+  /** @preserve
+  * @returns {Promise<void>}
+  */
   async reloadConfig() {
     try {
       await this.client().reloadConfig();
@@ -328,20 +450,35 @@ var DiskArcanaPlugin = class extends import_obsidian3.Plugin {
       new import_obsidian3.Notice(`Disk Arcana reload failed: ${message2(error)}`);
     }
   }
+  /** @preserve
+  * @returns {DaemonClient}
+  */
   client() {
     return new DaemonClient(this.settings.daemonUrl, import_obsidian3.requestUrl);
   }
+  /** @preserve
+  * @returns {void}
+  */
   openConflicts() {
     new ConflictModal(this.app, this.client(), this.settings.defaultConflictAction).open();
   }
+  /** @preserve
+  * @returns {void}
+  */
   queueSync() {
     this.syncDebounce.queue();
   }
+  /** @preserve
+  * @returns {Promise<void>}
+  */
   async sync() {
     await this.client().sync().catch((error) => {
       if (this.settings.notifications) new import_obsidian3.Notice(`Disk Arcana sync failed: ${message2(error)}`);
     });
   }
+  /** @preserve
+  * @returns {Promise<void>}
+  */
   async refreshStatus() {
     try {
       const client = this.client();
@@ -364,6 +501,14 @@ var DiskArcanaPlugin = class extends import_obsidian3.Plugin {
     }
   }
 };
+/** @preserve
+ * @param {unknown} error
+ * @returns {string}
+ */
 function message2(error) {
   return error instanceof Error ? error.message : String(error);
 }
+
+// plugin-entry.ts
+Object.defineProperty(module.exports, "__esModule", { value: true });
+Object.defineProperty(module.exports, "default", { enumerable: true, get: () => DiskArcanaPlugin });

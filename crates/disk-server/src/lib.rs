@@ -77,3 +77,8 @@ pub use tls::{
 };
 pub use trash::{list_trash, restore_trash};
 pub use versions::{list_versions, restore_version};
+
+// One helper instance per libtest; integration targets compile independently.
+#[cfg(all(test, target_os = "linux"))]
+#[path = "../../../test-support/env_probe.rs"]
+mod config_env_probe;

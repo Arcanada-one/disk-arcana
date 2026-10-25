@@ -320,3 +320,40 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod env_canary {
+    use super::*;
+    use crate::config_env_probe;
+    use serde_json::json;
+
+    #[test]
+    fn c14_ca_constructor_child() {
+        if let Some(expected) = config_env_probe::expected() {
+            // Construct the real client; never call issue_cert or send a request.
+            let actual = match HttpCaClient::from_env() {
+                Ok(client) => {
+                    json!({"outcome":"constructed", "url":client.url, "token":client.token})
+                }
+                Err(CaError::MissingToken) => json!({"outcome":"missing-token"}),
+                Err(_) => json!({"outcome":"other-error"}),
+            };
+            config_env_probe::check(actual, expected);
+        }
+    }
+
+    #[test]
+    fn c14_ca_fresh_environment_matrix() {
+        config_env_probe::run(
+            "enrollment::ca_client::env_canary::c14_ca_constructor_child",
+            r#"[
+            {"id":"C14-ca-absent","env":{},"expected":{"outcome":"missing-token"}},
+            {"id":"C14-ca-url-only","env":{"AUTH_ARCANA_CA_URL":"http://127.0.0.1:9/never-sent"},"expected":{"outcome":"missing-token"}},
+            {"id":"C14-ca-default-url","env":{"AUTH_ARCANA_CA_TOKEN":"synthetic-token"},"expected":{"outcome":"constructed","url":"https://auth.arcanada.one/v1/internal-ca/issue","token":"synthetic-token"}},
+            {"id":"C14-ca-custom-url","env":{"AUTH_ARCANA_CA_TOKEN":"synthetic-token","AUTH_ARCANA_CA_URL":"http://127.0.0.1:9/never-sent"},"expected":{"outcome":"constructed","url":"http://127.0.0.1:9/never-sent","token":"synthetic-token"}},
+            {"id":"C14-ca-empty-token","env":{"AUTH_ARCANA_CA_TOKEN":""},"expected":{"outcome":"constructed","token":""}},
+            {"id":"C14-ca-empty-url","env":{"AUTH_ARCANA_CA_TOKEN":"synthetic-token","AUTH_ARCANA_CA_URL":""},"expected":{"outcome":"constructed","url":""}}
+        ]"#,
+        );
+    }
+}

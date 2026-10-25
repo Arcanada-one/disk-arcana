@@ -205,3 +205,16 @@ pub async fn run_trash_empty(
     println!("{}", data["message"].as_str().unwrap_or("trash emptied"));
     Ok(())
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod env_canary {
+    #[test]
+    fn config_probe_child() {
+        crate::cli_config_env_canary::check_reader(super::api_base, super::bearer_token);
+    }
+
+    #[test]
+    fn c11_trash_cmd_fresh_environment_matrix() {
+        crate::cli_config_env_canary::run_reader("trash_cmd");
+    }
+}

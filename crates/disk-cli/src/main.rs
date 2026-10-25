@@ -1587,12 +1587,15 @@ async fn run_enroll(args: EnrollArgs) -> Result<()> {
     Ok(())
 }
 
-async fn run_admin_pending_token(args: PendingTokenArgs) -> Result<()> {
-    let admin_token = args
-        .admin_token
+fn resolve_pending_admin_token(args: &PendingTokenArgs) -> Result<String> {
+    args.admin_token
         .clone()
         .or_else(|| std::env::var("DISK_ADMIN_TOKEN").ok())
-        .ok_or_else(|| anyhow!("--admin-token or DISK_ADMIN_TOKEN required"))?;
+        .ok_or_else(|| anyhow!("--admin-token or DISK_ADMIN_TOKEN required"))
+}
+
+async fn run_admin_pending_token(args: PendingTokenArgs) -> Result<()> {
+    let admin_token = resolve_pending_admin_token(&args)?;
 
     let ca_pem = match &args.ca_cert {
         Some(path) => {
@@ -2441,3 +2444,43 @@ node_id_hint = "from-bf"
         }
     }
 }
+
+// One helper instance in this CLI test executable; no production module/export.
+#[cfg(all(test, target_os = "linux"))]
+mod cli_config_env_canary;
+#[cfg(all(test, target_os = "linux"))]
+#[path = "../../../test-support/env_probe.rs"]
+mod config_env_probe;
+
+#[cfg(all(test, target_os = "linux"))]
+mod identity_env_canary {
+    use super::default_hostname;
+    use crate::config_env_probe;
+    use serde_json::json;
+
+    #[test]
+    fn c12_hostname_child() {
+        if let Some(expected) = config_env_probe::expected() {
+            config_env_probe::check(json!({"hostname": default_hostname()}), expected);
+        }
+    }
+
+    #[test]
+    fn c12_hostname_fresh_environment_matrix() {
+        config_env_probe::run(
+            "identity_env_canary::c12_hostname_child",
+            r#"[
+            {"id":"C12-hostname-absent","env":{},"expected":{"hostname":"disk-node"}},
+            {"id":"C12-hostname-primary","env":{"HOSTNAME":"synthetic-primary"},"expected":{"hostname":"synthetic-primary"}},
+            {"id":"C12-hostname-secondary","env":{"COMPUTERNAME":"synthetic-secondary"},"expected":{"hostname":"synthetic-secondary"}},
+            {"id":"C12-hostname-precedence","env":{"HOSTNAME":"synthetic-primary","COMPUTERNAME":"synthetic-secondary"},"expected":{"hostname":"synthetic-primary"}},
+            {"id":"C12-hostname-empty-primary","env":{"HOSTNAME":"","COMPUTERNAME":"synthetic-secondary"},"expected":{"hostname":""}},
+            {"id":"C12-hostname-whitespace","env":{"HOSTNAME":" synthetic "},"expected":{"hostname":" synthetic "}}
+        ]"#,
+        );
+    }
+}
+
+// C18 observes only the real pending-token reader, never the enrollment RPC.
+#[cfg(all(test, target_os = "linux"))]
+mod pending_token_env_canary;

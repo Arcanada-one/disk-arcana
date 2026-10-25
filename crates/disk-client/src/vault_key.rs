@@ -270,3 +270,51 @@ mod tests {
         assert!(e2ee_keystore_label("../evil").is_err());
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod env_canary {
+    use super::*;
+    use crate::config_env_probe;
+    use serde_json::json;
+
+    #[test]
+    fn c13_vault_env_child() {
+        if let Some(expected) = config_env_probe::expected() {
+            // Only the env loader: no key store, keychain, file or network call.
+            let outcome = match load_vault_key_from_env() {
+                Ok(None) => "absent",
+                Ok(Some(_)) => "derived",
+                Err(E2eeError::SaltTooShort) => "salt-too-short",
+                Err(E2eeError::KeyDerivation(reason))
+                    if reason.starts_with("DISK_VAULT_SALT required") =>
+                {
+                    "missing-salt"
+                }
+                Err(E2eeError::KeyDerivation(reason))
+                    if reason.starts_with("invalid DISK_VAULT_SALT hex:") =>
+                {
+                    "invalid-hex"
+                }
+                Err(_) => "other-error",
+            };
+            config_env_probe::check(json!({"outcome": outcome}), expected);
+        }
+    }
+
+    #[test]
+    fn c13_vault_fresh_environment_matrix() {
+        config_env_probe::run(
+            "vault_key::env_canary::c13_vault_env_child",
+            r#"[
+            {"id":"C13-vault-absent","env":{},"expected":{"outcome":"absent"}},
+            {"id":"C13-vault-empty","env":{"DISK_VAULT_PASSPHRASE":""},"expected":{"outcome":"absent"}},
+            {"id":"C13-vault-salt-only","env":{"DISK_VAULT_SALT":"invalid"},"expected":{"outcome":"absent"}},
+            {"id":"C13-vault-missing-salt","env":{"DISK_VAULT_PASSPHRASE":"synthetic-passphrase"},"expected":{"outcome":"missing-salt"}},
+            {"id":"C13-vault-invalid-hex","env":{"DISK_VAULT_PASSPHRASE":"synthetic-passphrase","DISK_VAULT_SALT":"invalid"},"expected":{"outcome":"invalid-hex"}},
+            {"id":"C13-vault-short-salt","env":{"DISK_VAULT_PASSPHRASE":"synthetic-passphrase","DISK_VAULT_SALT":"01020304"},"expected":{"outcome":"salt-too-short"}},
+            {"id":"C13-vault-derived","env":{"DISK_VAULT_PASSPHRASE":"synthetic-passphrase","DISK_VAULT_SALT":"0102030405060708"},"expected":{"outcome":"derived"}},
+            {"id":"C13-vault-trim-salt","env":{"DISK_VAULT_PASSPHRASE":"synthetic-passphrase","DISK_VAULT_SALT":" 0102030405060708 "},"expected":{"outcome":"derived"}}
+        ]"#,
+        );
+    }
+}

@@ -13,8 +13,8 @@ client_key  = "/etc/disk-arcana/client.key"
 server_ca   = "/etc/disk-arcana/server-ca.crt"
 
 [[share]]
-name = "hermes-artefacts"
-path = "/home/hermes/.hermes/cache"
+name = "media-artefacts"
+path = "/srv/media/cache"
 intended_direction = "publisher"
 
 [share.filter]

@@ -222,20 +222,14 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let webhook_state = if cfg.billing_mode == disk_server::BillingMode::Stripe {
-        let require_sig = std::env::var("DISK_STRIPE_WEBHOOK_REQUIRE_SIG")
-            .ok()
-            .as_deref()
-            != Some("0");
+        let require_sig = stripe_webhook_requires_signature();
         if require_sig && cfg.stripe_webhook_secret.is_none() {
             anyhow::bail!(
                 "DISK_STRIPE_WEBHOOK_SECRET is required when DISK_BILLING_MODE=stripe \
                  and DISK_STRIPE_WEBHOOK_REQUIRE_SIG is not 0"
             );
         }
-        let tolerance = std::env::var("DISK_STRIPE_WEBHOOK_TOLERANCE_SECS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(disk_server::billing::webhook::DEFAULT_STRIPE_TOLERANCE_SECS);
+        let tolerance = stripe_webhook_tolerance_secs();
         Some(Arc::new(disk_server::WebhookState {
             mode: cfg.billing_mode,
             meta_db: meta_router.control(),
@@ -612,4 +606,60 @@ async fn make_shutdown_futures() -> anyhow::Result<(ShutdownFuture, ShutdownFutu
         let _ = tx.send(());
     });
     Ok((grpc_shutdown, health_shutdown))
+}
+
+fn stripe_webhook_requires_signature() -> bool {
+    std::env::var("DISK_STRIPE_WEBHOOK_REQUIRE_SIG")
+        .ok()
+        .as_deref()
+        != Some("0")
+}
+
+fn stripe_webhook_tolerance_secs() -> u64 {
+    std::env::var("DISK_STRIPE_WEBHOOK_TOLERANCE_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(disk_server::billing::webhook::DEFAULT_STRIPE_TOLERANCE_SECS)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "../../../test-support/env_probe.rs"]
+mod config_env_probe;
+
+#[cfg(all(test, target_os = "linux"))]
+mod stripe_env_canary {
+    use super::{stripe_webhook_requires_signature, stripe_webhook_tolerance_secs};
+    use crate::config_env_probe;
+    use serde_json::json;
+
+    #[test]
+    fn c16_stripe_options_child() {
+        if let Some(expected) = config_env_probe::expected() {
+            // Only option readers, no billing state/database/webhook invocation.
+            config_env_probe::check(
+                json!({"require_signature":stripe_webhook_requires_signature(),"tolerance_secs":stripe_webhook_tolerance_secs()}),
+                expected,
+            );
+        }
+    }
+
+    #[test]
+    fn c16_stripe_fresh_environment_matrix() {
+        config_env_probe::run(
+            "stripe_env_canary::c16_stripe_options_child",
+            r#"[
+            {"id":"C16-stripe-defaults","env":{},"expected":{"require_signature":true,"tolerance_secs":300}},
+            {"id":"C16-stripe-explicit-disable","env":{"DISK_STRIPE_WEBHOOK_REQUIRE_SIG":"0"},"expected":{"require_signature":false,"tolerance_secs":300}},
+            {"id":"C16-stripe-empty-sig","env":{"DISK_STRIPE_WEBHOOK_REQUIRE_SIG":""},"expected":{"require_signature":true}},
+            {"id":"C16-stripe-false-word","env":{"DISK_STRIPE_WEBHOOK_REQUIRE_SIG":"false"},"expected":{"require_signature":true}},
+            {"id":"C16-stripe-space-zero","env":{"DISK_STRIPE_WEBHOOK_REQUIRE_SIG":" 0 "},"expected":{"require_signature":true}},
+            {"id":"C16-stripe-explicit-tolerance","env":{"DISK_STRIPE_WEBHOOK_TOLERANCE_SECS":"42"},"expected":{"tolerance_secs":42}},
+            {"id":"C16-stripe-zero-tolerance","env":{"DISK_STRIPE_WEBHOOK_TOLERANCE_SECS":"0"},"expected":{"tolerance_secs":0}},
+            {"id":"C16-stripe-invalid-tolerance","env":{"DISK_STRIPE_WEBHOOK_TOLERANCE_SECS":"invalid"},"expected":{"tolerance_secs":300}},
+            {"id":"C16-stripe-negative-tolerance","env":{"DISK_STRIPE_WEBHOOK_TOLERANCE_SECS":"-1"},"expected":{"tolerance_secs":300}},
+            {"id":"C16-stripe-max-tolerance","env":{"DISK_STRIPE_WEBHOOK_TOLERANCE_SECS":"18446744073709551615"},"expected":{"tolerance_secs":18446744073709551615}},
+            {"id":"C16-stripe-overflow-tolerance","env":{"DISK_STRIPE_WEBHOOK_TOLERANCE_SECS":"18446744073709551616"},"expected":{"tolerance_secs":300}}
+        ]"#,
+        );
+    }
 }

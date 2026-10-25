@@ -1,0 +1,63 @@
+[
+  {
+    "id": "C04-billing-default",
+    "env": {},
+    "expected": {
+      "tier": "Free"
+    }
+  },
+  {
+    "id": "C04-billing-free",
+    "env": {
+      "DISK_BILLING_DEFAULT_TIER": "free"
+    },
+    "expected": {
+      "tier": "Free"
+    }
+  },
+  {
+    "id": "C04-billing-pro",
+    "env": {
+      "DISK_BILLING_DEFAULT_TIER": "pro"
+    },
+    "expected": {
+      "tier": "Pro"
+    }
+  },
+  {
+    "id": "C04-billing-team",
+    "env": {
+      "DISK_BILLING_DEFAULT_TIER": "team"
+    },
+    "expected": {
+      "tier": "Team"
+    }
+  },
+  {
+    "id": "C04-billing-PRO",
+    "env": {
+      "DISK_BILLING_DEFAULT_TIER": "PRO"
+    },
+    "expected": {
+      "tier": "Pro"
+    }
+  },
+  {
+    "id": "C04-billing-empty",
+    "env": {
+      "DISK_BILLING_DEFAULT_TIER": ""
+    },
+    "expected": {
+      "error_key": "DISK_BILLING_DEFAULT_TIER"
+    }
+  },
+  {
+    "id": "C04-billing-bad",
+    "env": {
+      "DISK_BILLING_DEFAULT_TIER": "bad"
+    },
+    "expected": {
+      "error_key": "DISK_BILLING_DEFAULT_TIER"
+    }
+  }
+]

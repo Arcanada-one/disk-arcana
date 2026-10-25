@@ -1,0 +1,26 @@
+{
+  "descriptor": {
+    "schemaVersion": "personal-capture/v1",
+    "realmId": "10000000-0000-4000-8000-000000000001",
+    "captureId": "00000007-0000-4000-8000-000000000001",
+    "conversationId": "00000008-0000-4000-8000-000000000001",
+    "messageId": "00000009-0000-4000-8000-000000000001",
+    "expectedConversationRevision": 0,
+    "operation": "append_message",
+    "idempotencyKey": "0000000a-0000-4000-8000-000000000001",
+    "requestFingerprint": "4120ada604ff9efc888303aefb88997922b584a493d57dd3c692d49d2fe2c981",
+    "cancellationGeneration": 0,
+    "parts": [
+      {
+        "partId": "0000000b-0000-4000-8000-000000000001",
+        "role": "note",
+        "objectId": "50000000-0000-4000-8000-000000000001",
+        "objectRevision": "60000000-0000-4000-8000-000000000001",
+        "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        "sizeBytes": 3,
+        "mediaType": "text/plain;charset=utf-8"
+      }
+    ]
+  },
+  "fingerprintInput": "[\"personal-capture/v1\",\"10000000-0000-4000-8000-000000000001\",\"append_message\",\"00000008-0000-4000-8000-000000000001\",0,[[\"note\",\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",3,\"text/plain;charset=utf-8\"]]]"
+}

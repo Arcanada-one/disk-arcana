@@ -31,3 +31,7 @@ impl TelemetryRuntimeConfig {
         }
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "config_env_canary.rs"]
+mod env_canary;

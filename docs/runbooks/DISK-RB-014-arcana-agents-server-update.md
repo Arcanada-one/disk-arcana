@@ -16,7 +16,7 @@ Measured on 2026-08-04, not inferred:
 |---|---|
 | `release-deploy.yml` → `deploy-stage` | Targets `arcana-devs` only through the system-service deployment broker. |
 | `release-deploy.yml` → `deploy-prod` | Targets `arcana-prod` through the same system-service deployment broker. |
-| `deploy-arcana-agents-share.yml` | Delivers only the **share drop-in** for this user-scope host; it does not update a binary or system unit. |
+| `deploy-arcana-agents-share.yml` | Delivers only the **share drop-in** for this user-scope host; it does not update a binary or system unit. **Retired 2026-09-30** to `.github/retired-workflows/` — the arcana-agents host and its runner are decommissioned (INFRA-0417); its restore conditions are in `.github/retired-workflows/README.md`. |
 
 And the host itself differs from both deploy targets:
 

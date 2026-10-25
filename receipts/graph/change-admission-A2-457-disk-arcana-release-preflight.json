@@ -1,0 +1,412 @@
+{
+ "admission": {
+  "rule": "admitted requires every verdict = verified; failed without exemption ⇒ refused; not_measured without exemption ⇒ paused_safe; exemptions (owner + expiry) are attached by the admitting agent, never by the verifier (DEC-AUP-0008, matrix P1/P4)",
+  "structural_exclusion_rule": "DEC-AUP-0034: an affected entity is NOT verdict-owing when all three hold — the verifier matrix declares neither a mandatory nor a selectable verifier for its node type (so the only verdict it could ever carry states a property of the MATRIX, not of this change), the change set does not contain it, and its bytes are identical at base and head. Each one is listed in structural_exclusions with the content hash at both revisions that proves the byte-identity, and impact_pair.receipt_problems re-derives that proof from Git rather than believing the receipt.",
+  "superseded_self_rule": "DEC-AUP-0035: the entity a receipt can never verify is the PREVIOUS VERSION OF ITSELF. When a receipt is re-issued at the same path for the same work item — the ordinary case after a rebase or a second commit on a card — the copy of it standing in the tree is superseded by construction: this run is the measurement that replaces it, so the only verdict it could carry is I14 `not_measured` about a document that no longer exists at that path once the run finishes. It is excluded with the work item and the output path that identify it, both re-derived from Git by impact_pair.receipt_problems, never asserted.",
+  "verdict": "admitted"
+ },
+ "captured_at_utc": "2026-10-01T01:21:17Z",
+ "change_set": {
+  "base": "ea5776bf35a83021a9697df654ab1125ae16ff26",
+  "files": [
+   {
+    "kind": "config",
+    "node_id": "code_unit:.github/workflows/deploy-probe.yml",
+    "node_ids": [
+     "code_unit:.github/workflows/deploy-probe.yml"
+    ],
+    "path": ".github/workflows/deploy-probe.yml",
+    "status": "M"
+   },
+   {
+    "kind": "config",
+    "node_id": "code_unit:.github/workflows/release-deploy.yml",
+    "node_ids": [
+     "code_unit:.github/workflows/release-deploy.yml"
+    ],
+    "path": ".github/workflows/release-deploy.yml",
+    "status": "M"
+   },
+   {
+    "kind": "other",
+    "path": "deploy/linux/tests/test-release-deploy-contract.sh",
+    "status": "M",
+    "uncovered": true
+   },
+   {
+    "kind": "receipt",
+    "node_id": "receipt:receipts/graph/change-admission-A2-457-disk-arcana-release-preflight.json",
+    "node_ids": [
+     "receipt:receipts/graph/change-admission-A2-457-disk-arcana-release-preflight.json"
+    ],
+    "path": "receipts/graph/change-admission-A2-457-disk-arcana-release-preflight.json",
+    "status": "A"
+   },
+   {
+    "kind": "other",
+    "new": true,
+    "path": "scripts/ci/runner-broker-preflight.sh",
+    "status": "A"
+   }
+  ],
+  "head": "cfe01028d911b29c27e18ee6f5aa0040d6f34697",
+  "mode": "diff"
+ },
+ "decision_ref": "DEC-AUP-0008",
+ "exemptions": [],
+ "graph": {
+  "builder_version": "1.0.1",
+  "built_at_utc": "2026-09-05T00:00:00Z",
+  "graph_digest": "sha256:d9e6d87d43868f9b5d95cec512041f91109f28016972b7f6d1855da76995e871",
+  "path": "/mnt/work/verifier-out/graph-ea5776bf35a8.json",
+  "source_commit": "ea5776bf35a83021a9697df654ab1125ae16ff26"
+ },
+ "head_graph": {
+  "builder_version": "1.0.1",
+  "built_at_utc": "2026-09-05T00:00:00Z",
+  "graph_digest": "sha256:1dddcbbd05d702aefd5da478a188e4e7e58e155f836d4ce88bd464ab18116e79",
+  "path": "/mnt/work/verifier-out/graph-head-cfe01028d911.json",
+  "source_commit": "cfe01028d911b29c27e18ee6f5aa0040d6f34697",
+  "staleness": {
+   "checked_at_utc": "2026-10-01T01:21:18Z",
+   "checked_nodes": 425,
+   "method": "manifest.dirty must be false; manifest.source_commit == change_set.head; working tree must be clean (a receipt in diff mode describes committed history only); content_hash of every whole-file node (code_unit, document, receipt; deployable_unit via its package.json) must equal the sha256 of the file bytes at head (git objects); contract/route/data_model hashes are extractor-owned (declaration text) and not recomputed",
+   "mismatched_nodes": [],
+   "verdict": "fresh"
+  }
+ },
+ "host": "public-ci-host",
+ "host_redacted": true,
+ "host_sha256": "3605050916334981bc826d50e4de981edbff1765dbd4ca4215af65895e87d7a0",
+ "impact_set": {
+  "deterministic_core": [
+   {
+    "boundary": "intra_unit",
+    "depth": 1,
+    "entity": "document:datarim/creative/creative-INFRA-0370-stage-runner-design.md",
+    "node_type": "document",
+    "path": [
+     {
+      "edge_type": "documents",
+      "from": "document:datarim/creative/creative-INFRA-0370-stage-runner-design.md",
+      "provenance": "deterministic",
+      "to": "code_unit:.github/workflows/release-deploy.yml",
+      "via": "explicit-path"
+     }
+    ],
+    "revisions": [
+     "base",
+     "head"
+    ],
+    "verifier_hint": "doc reference check (path/id still resolves)"
+   },
+   {
+    "boundary": "intra_unit",
+    "depth": 1,
+    "entity": "document:datarim/plans/INFRA-0370-stage-runner-plan.md",
+    "node_type": "document",
+    "path": [
+     {
+      "edge_type": "documents",
+      "from": "document:datarim/plans/INFRA-0370-stage-runner-plan.md",
+      "provenance": "deterministic",
+      "to": "code_unit:.github/workflows/release-deploy.yml",
+      "via": "explicit-path"
+     }
+    ],
+    "revisions": [
+     "base",
+     "head"
+    ],
+    "verifier_hint": "doc reference check (path/id still resolves)"
+   },
+   {
+    "boundary": "intra_unit",
+    "depth": 1,
+    "entity": "document:docs/runbooks/DISK-RB-012-server-bundle-deploy.md",
+    "node_type": "document",
+    "path": [
+     {
+      "edge_type": "documents",
+      "from": "document:docs/runbooks/DISK-RB-012-server-bundle-deploy.md",
+      "provenance": "deterministic",
+      "to": "code_unit:.github/workflows/release-deploy.yml",
+      "via": "explicit-path"
+     }
+    ],
+    "revisions": [
+     "base",
+     "head"
+    ],
+    "verifier_hint": "doc reference check (path/id still resolves)"
+   },
+   {
+    "boundary": "intra_unit",
+    "depth": 1,
+    "entity": "document:docs/runbooks/DISK-RB-013-macos-cli-release-signing.md",
+    "node_type": "document",
+    "path": [
+     {
+      "edge_type": "documents",
+      "from": "document:docs/runbooks/DISK-RB-013-macos-cli-release-signing.md",
+      "provenance": "deterministic",
+      "to": "code_unit:.github/workflows/release-deploy.yml",
+      "via": "explicit-path"
+     }
+    ],
+    "revisions": [
+     "base",
+     "head"
+    ],
+    "verifier_hint": "doc reference check (path/id still resolves)"
+   }
+  ],
+  "edge_types": "all",
+  "global_fallback": {
+   "triggered": false
+  },
+  "inferred_tail": [],
+  "max_depth": 3,
+  "method": "Union of independently revision-bound base/head traversals; reverse traversal (dependents) + forward declared-by hops (provides_route, implements_contract, maps_model of the same file, deploys_to); best path = fewest inferred/observed hops, then shortest; max_depth 3",
+  "total": 4
+ },
+ "notes": [
+  "DRAFT produced by `arcana verify` (tools/graph/verify.py 1.2.0) from matrix contracts/graph-verified-change/verifier-matrix.v1.json; selection rule: required(entity) = ⋃ edge_types[t].mandatory over the edge types t of the hops that reach the entity in its best path (i…",
+  "profile: (auto-detected); baseline: (auto-base-freeze: pre-existing findings at base frozen for this run; persist one with --freeze-baseline) (valid); selected: none; disabled: none"
+ ],
+ "producer": {
+  "tool": "tools/graph/verify.py",
+  "version": "1.2.0"
+ },
+ "receipt_id": "car-verify-20261001T012117Z-cfe01028",
+ "receipt_path": "receipts/graph/change-admission-A2-457-disk-arcana-release-preflight.json",
+ "repo": {
+  "name": "Arcanada-one/disk-arcana",
+  "path": "/srv"
+ },
+ "revision_selection": {
+  "base": [
+   "code_unit:.github/workflows/deploy-probe.yml",
+   "code_unit:.github/workflows/release-deploy.yml",
+   "document:datarim/creative/creative-INFRA-0370-stage-runner-design.md",
+   "document:datarim/plans/INFRA-0370-stage-runner-plan.md",
+   "document:docs/runbooks/DISK-RB-012-server-bundle-deploy.md",
+   "document:docs/runbooks/DISK-RB-013-macos-cli-release-signing.md"
+  ],
+  "head": [
+   "code_unit:.github/workflows/deploy-probe.yml",
+   "code_unit:.github/workflows/release-deploy.yml",
+   "document:datarim/creative/creative-INFRA-0370-stage-runner-design.md",
+   "document:datarim/plans/INFRA-0370-stage-runner-plan.md",
+   "document:docs/runbooks/DISK-RB-012-server-bundle-deploy.md",
+   "document:docs/runbooks/DISK-RB-013-macos-cli-release-signing.md",
+   "receipt:receipts/graph/change-admission-A2-457-disk-arcana-release-preflight.json"
+  ],
+  "schema": "RevisionImpactSelection/v1",
+  "unmeasured_head_files": []
+ },
+ "schema": "ChangeAdmissionReceipt/v1",
+ "staleness": {
+  "checked_at_utc": "2026-10-01T01:21:18Z",
+  "method": "manifest.dirty must be false; manifest.source_commit == change_set.base; working tree must be clean (a receipt in diff mode describes committed history only); content_hash of every whole-file node (code_unit, document, receipt; deployable_unit via its package.json) must equal the sha256 of the file bytes at base (git objects); contract/route/data_model hashes are extractor-owned (declaration text) and not recomputed",
+  "mismatched_nodes": [],
+  "verdict": "fresh"
+ },
+ "structural_exclusions": [
+  {
+   "content_hash": {
+    "base": null,
+    "head": "sha256:f738748bfd5d799100a9fc0e1dadf4e5b41bb1b763674f474c70aa1e4aa96c83"
+   },
+   "entity": "receipt:receipts/graph/change-admission-A2-457-disk-arcana-release-preflight.json",
+   "node_type": "receipt",
+   "path": "receipts/graph/change-admission-A2-457-disk-arcana-release-preflight.json",
+   "reason": "historical receipt: asserted, never re-verified (I14); a new receipt supersedes it; superseded by construction — this run re-issues the receipt at receipts/graph/change-admission-A2-457-disk-arcana-release-preflight.json for work item A2-457-disk-arcana-release-preflight",
+   "rule": "DEC-AUP-0035",
+   "superseded": {
+    "receipt_path": "receipts/graph/change-admission-A2-457-disk-arcana-release-preflight.json",
+    "work_item": "A2-457-disk-arcana-release-preflight"
+   }
+  }
+ ],
+ "tree": {
+  "commit": "cfe01028d911b29c27e18ee6f5aa0040d6f34697",
+  "dirty": false
+ },
+ "verdicts": [
+  {
+   "entity": "code_unit:.github/workflows/deploy-probe.yml",
+   "reason": "v-workflow-config-c775b154e5bbb8ed: bounded workflow configuration shape valid; expressions, shell, actions and hosted execution NOT_MEASURED; v-fitness: no new fitness violation",
+   "verdict": "verified",
+   "verifier_ids": [
+    "v-fitness",
+    "v-workflow-config-c775b154e5bbb8ed"
+   ]
+  },
+  {
+   "entity": "code_unit:.github/workflows/release-deploy.yml",
+   "reason": "v-workflow-config-f65da199da05f3d3: bounded workflow configuration shape valid; expressions, shell, actions and hosted execution NOT_MEASURED; v-fitness: no new fitness violation",
+   "verdict": "verified",
+   "verifier_ids": [
+    "v-fitness",
+    "v-workflow-config-f65da199da05f3d3"
+   ]
+  },
+  {
+   "entity": "document:datarim/creative/creative-INFRA-0370-stage-runner-design.md",
+   "reason": "v-doc-reference: 0 reference(s) resolve at head",
+   "verdict": "verified",
+   "verifier_ids": [
+    "v-doc-reference"
+   ]
+  },
+  {
+   "entity": "document:datarim/plans/INFRA-0370-stage-runner-plan.md",
+   "reason": "v-doc-reference: 0 reference(s) resolve at head",
+   "verdict": "verified",
+   "verifier_ids": [
+    "v-doc-reference"
+   ]
+  },
+  {
+   "entity": "document:docs/runbooks/DISK-RB-012-server-bundle-deploy.md",
+   "reason": "v-doc-reference: 0 reference(s) resolve at head",
+   "verdict": "verified",
+   "verifier_ids": [
+    "v-doc-reference"
+   ]
+  },
+  {
+   "entity": "document:docs/runbooks/DISK-RB-013-macos-cli-release-signing.md",
+   "reason": "v-doc-reference: 0 reference(s) resolve at head",
+   "verdict": "verified",
+   "verifier_ids": [
+    "v-doc-reference"
+   ]
+  }
+ ],
+ "verifier_selection": {
+  "applied": {},
+  "not_applied": [],
+  "requested": [],
+  "schema": "VerifierSelection/v1"
+ },
+ "verifiers": [
+  {
+   "command": "workflow_config.validate exact head bytes",
+   "duration_s": 0.0,
+   "entities": [
+    "code_unit:.github/workflows/deploy-probe.yml"
+   ],
+   "entity_verdicts": {
+    "code_unit:.github/workflows/deploy-probe.yml": "verified"
+   },
+   "exit_code": 0,
+   "id": "v-workflow-config-c775b154e5bbb8ed",
+   "kind": "config_schema",
+   "output_ref": "/mnt/work/verifier-out/v-workflow-config-c775b154e5bbb8ed.txt",
+   "started_at_utc": "2026-10-01T01:21:19Z",
+   "summary": "bounded workflow configuration shape valid; expressions, shell, actions and hosted execution NOT_MEASURED"
+  },
+  {
+   "command": "workflow_config.validate exact head bytes",
+   "duration_s": 0.0,
+   "entities": [
+    "code_unit:.github/workflows/release-deploy.yml"
+   ],
+   "entity_verdicts": {
+    "code_unit:.github/workflows/release-deploy.yml": "verified"
+   },
+   "exit_code": 0,
+   "id": "v-workflow-config-f65da199da05f3d3",
+   "kind": "config_schema",
+   "output_ref": "/mnt/work/verifier-out/v-workflow-config-f65da199da05f3d3.txt",
+   "started_at_utc": "2026-10-01T01:21:19Z",
+   "summary": "bounded workflow configuration shape valid; expressions, shell, actions and hosted execution NOT_MEASURED"
+  },
+  {
+   "command": "verify.py fitness_rules FR-01..FR-05 over the head graph + head sources",
+   "duration_s": 0.0,
+   "entities": [
+    "code_unit:.github/workflows/deploy-probe.yml",
+    "code_unit:.github/workflows/release-deploy.yml"
+   ],
+   "entity_verdicts": {
+    "code_unit:.github/workflows/deploy-probe.yml": "verified",
+    "code_unit:.github/workflows/release-deploy.yml": "verified"
+   },
+   "exit_code": 0,
+   "id": "v-fitness",
+   "kind": "fitness_rules",
+   "output_ref": "/mnt/work/verifier-out/v-fitness.json",
+   "started_at_utc": "2026-10-01T01:21:19Z",
+   "summary": "23 finding(s): 0 new / 23 frozen; 0 entity(ies) failed"
+  },
+  {
+   "command": "verify.py doc_reference: path / route / model references of affected documents resolve at head",
+   "duration_s": 0.0,
+   "entities": [
+    "document:datarim/creative/creative-INFRA-0370-stage-runner-design.md",
+    "document:datarim/plans/INFRA-0370-stage-runner-plan.md",
+    "document:docs/runbooks/DISK-RB-012-server-bundle-deploy.md",
+    "document:docs/runbooks/DISK-RB-013-macos-cli-release-signing.md"
+   ],
+   "entity_verdicts": {
+    "document:datarim/creative/creative-INFRA-0370-stage-runner-design.md": "verified",
+    "document:datarim/plans/INFRA-0370-stage-runner-plan.md": "verified",
+    "document:docs/runbooks/DISK-RB-012-server-bundle-deploy.md": "verified",
+    "document:docs/runbooks/DISK-RB-013-macos-cli-release-signing.md": "verified"
+   },
+   "exit_code": 0,
+   "id": "v-doc-reference",
+   "kind": "doc_reference",
+   "output_ref": "/mnt/work/verifier-out/v-doc-reference.txt",
+   "started_at_utc": "2026-10-01T01:21:19Z",
+   "summary": "4 document(s), 0 failed"
+  }
+ ],
+ "verify": {
+  "events": [
+   {
+    "code": "SUPERSEDED_SELF_EXCLUSION",
+    "entity": "receipt:receipts/graph/change-admission-A2-457-disk-arcana-release-preflight.json",
+    "rule": "DEC-AUP-0035",
+    "text": "the receipt at receipts/graph/change-admission-A2-457-disk-arcana-release-preflight.json is the previous version of the one this run is writing, for the same work item A2-457-disk-arcana-release-preflight — superseded by construction, so it owes this change no verdict"
+   },
+   {
+    "code": "STRUCTURAL_EXCLUSION",
+    "rule": "DEC-AUP-0034",
+    "text": "1 affected entity(ies) owe no verdict (receipt: 1): unchanged at both revisions and given no verifier by the matrix"
+   }
+  ],
+  "required_by_entity": {
+   "code_unit:.github/workflows/deploy-probe.yml": [
+    "config_schema",
+    "fitness_rules"
+   ],
+   "code_unit:.github/workflows/release-deploy.yml": [
+    "config_schema",
+    "fitness_rules"
+   ],
+   "document:datarim/creative/creative-INFRA-0370-stage-runner-design.md": [
+    "doc_reference"
+   ],
+   "document:datarim/plans/INFRA-0370-stage-runner-plan.md": [
+    "doc_reference"
+   ],
+   "document:docs/runbooks/DISK-RB-012-server-bundle-deploy.md": [
+    "doc_reference"
+   ],
+   "document:docs/runbooks/DISK-RB-013-macos-cli-release-signing.md": [
+    "doc_reference"
+   ],
+   "receipt:receipts/graph/change-admission-A2-457-disk-arcana-release-preflight.json": []
+  },
+  "seconds": {
+   "prepare": 0.76,
+   "total": 2.44,
+   "verifiers": 0.0
+  }
+ },
+ "work_item": "A2-457-disk-arcana-release-preflight"
+}
