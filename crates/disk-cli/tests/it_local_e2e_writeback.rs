@@ -48,6 +48,130 @@ use tokio::process::Command;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+/// Select a test daemon. A verifier must separately authenticate exported bytes.
+/// An explicit invalid locator never falls back to the Cargo build path.
+fn daemon_bin_from(
+    explicit: Option<std::ffi::OsString>,
+    cargo_bin: &str,
+) -> std::io::Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let Some(explicit) = explicit else {
+        return Ok(PathBuf::from(cargo_bin));
+    };
+    let path = PathBuf::from(explicit);
+    if !path.is_absolute() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "explicit daemon locator must be absolute and nonempty",
+        ));
+    }
+    let metadata = std::fs::symlink_metadata(&path)?;
+    if !metadata.is_file()
+        || metadata.permissions().mode() & 0o111 == 0
+        || path.canonicalize()? != path
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "explicit daemon locator must be a direct regular executable",
+        ));
+    }
+    Ok(path)
+}
+
+fn find_daemon_bin() -> PathBuf {
+    daemon_bin_from(
+        std::env::var_os("DISK_ARCANA_DAEMON_BIN"),
+        env!("CARGO_BIN_EXE_disk"),
+    )
+    .expect("invalid explicit daemon locator; refusing fallback")
+}
+
+#[cfg(test)]
+mod daemon_locator_tests {
+    use super::daemon_bin_from;
+    use std::ffi::OsString;
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    use std::path::PathBuf;
+
+    fn fixture() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join("inert-daemon-fixture");
+        std::fs::write(&path, b"fixture only; never executed").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn absent_override_retains_cargo_locator() {
+        assert_eq!(
+            daemon_bin_from(None, "cargo-build-path").unwrap(),
+            PathBuf::from("cargo-build-path")
+        );
+    }
+
+    #[test]
+    fn explicit_direct_executable_selected_without_spawn() {
+        let (_dir, path) = fixture();
+        assert_eq!(
+            daemon_bin_from(Some(path.clone().into_os_string()), "unused").unwrap(),
+            path
+        );
+    }
+
+    #[test]
+    fn empty_and_relative_override_refuse_without_fallback() {
+        for value in ["", "relative/disk"] {
+            assert!(daemon_bin_from(Some(OsString::from(value)), "valid-cargo-path").is_err());
+        }
+    }
+
+    #[test]
+    fn missing_override_refuses_without_fallback() {
+        let (dir, _path) = fixture();
+        assert!(daemon_bin_from(
+            Some(dir.path().join("missing").into_os_string()),
+            "valid-cargo-path"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn directory_override_refuses() {
+        let (dir, _path) = fixture();
+        assert!(daemon_bin_from(Some(dir.path().as_os_str().to_owned()), "unused").is_err());
+    }
+
+    #[test]
+    fn nonexecutable_override_refuses() {
+        let (_dir, path) = fixture();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(daemon_bin_from(Some(path.into_os_string()), "unused").is_err());
+    }
+
+    #[test]
+    fn symlink_and_indirect_parent_refuse() {
+        let (dir, path) = fixture();
+        let alias = dir.path().join("alias");
+        symlink(&path, &alias).unwrap();
+        assert!(daemon_bin_from(Some(alias.into_os_string()), "unused").is_err());
+        let parent_alias = dir.path().join("parent-alias");
+        symlink(dir.path(), &parent_alias).unwrap();
+        assert!(daemon_bin_from(
+            Some(
+                parent_alias
+                    .join(path.file_name().unwrap())
+                    .into_os_string()
+            ),
+            "unused"
+        )
+        .is_err());
+    }
+}
+
 /// Serialize E2E tests — they spawn real servers and contend for loopback
 /// ports/CPU under parallel `cargo llvm-cov` (DISK-0041 race class).
 static E2E_SERVER_LOCK: Mutex<()> = Mutex::new(());
@@ -303,7 +427,7 @@ async fn share_state_transitions_after_poll_tick() {
     std::fs::write(root.join("acl.yaml"), &acl_content).unwrap();
 
     let server_bin = find_server_bin();
-    let daemon_bin = env!("CARGO_BIN_EXE_disk");
+    let daemon_bin = find_daemon_bin();
 
     // ── 3. Spawn server ───────────────────────────────────────────────────
     const SPAWN_ATTEMPTS: u32 = 5;
@@ -559,14 +683,19 @@ client_key  = "/etc/disk-arcana/client.key"
 
 [[share]]
 name = "test-vault"
-path = "/tmp/disk-e2e-vault"
+path = __VAULT_PATH__
 "#;
 
-    let bin = env!("CARGO_BIN_EXE_disk");
+    let bin = find_daemon_bin();
     let dir = tempfile::tempdir().unwrap();
     let cfg_path = dir.path().join("disk.toml");
-    std::fs::write(&cfg_path, CONFIG_UNREACHABLE_SERVER).unwrap();
-    std::fs::create_dir_all("/tmp/disk-e2e-vault").unwrap();
+    let vault = dir.path().join("vault");
+    std::fs::create_dir(&vault).unwrap();
+    // JSON string escaping is valid for this TOML basic string, including
+    // quotes/backslashes in a caller-provided temporary-directory path.
+    let quoted_vault = serde_json::to_string(vault.to_str().unwrap()).unwrap();
+    let config = CONFIG_UNREACHABLE_SERVER.replace("__VAULT_PATH__", &quoted_vault);
+    std::fs::write(&cfg_path, config).unwrap();
 
     let mut child = Command::new(bin)
         .args([

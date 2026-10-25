@@ -11,14 +11,14 @@ use tokio::time::sleep;
 #[tokio::test]
 async fn share_index_watcher_upserts_on_local_write() {
     let dir = tempdir().unwrap();
-    let share_root = dir.path().join("hermes-artefacts");
+    let share_root = dir.path().join("media-artefacts");
     std::fs::create_dir_all(&share_root).unwrap();
 
     let db_path = dir.path().join("meta.sqlite");
     let meta_db = MetaDb::open(&db_path).await.unwrap();
 
     let mut roots = std::collections::HashMap::new();
-    roots.insert("hermes-artefacts".to_string(), share_root.clone());
+    roots.insert("media-artefacts".to_string(), share_root.clone());
 
     let _handle = spawn_share_index_watcher(roots, meta_db.clone(), "server")
         .expect("watcher startup must succeed")
@@ -33,7 +33,7 @@ async fn share_index_watcher_upserts_on_local_write() {
     let rel = "probe.txt";
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     loop {
-        if let Ok(Some(row)) = meta_db.get_file_scoped(None, "hermes-artefacts", rel).await {
+        if let Ok(Some(row)) = meta_db.get_file_scoped(None, "media-artefacts", rel).await {
             if !row.deleted && row.size == 22 {
                 return;
             }
@@ -50,7 +50,7 @@ async fn share_index_watcher_upserts_on_local_write() {
 #[tokio::test]
 async fn share_index_watcher_tombstones_on_delete() {
     let dir = tempdir().unwrap();
-    let share_root = dir.path().join("hermes-artefacts");
+    let share_root = dir.path().join("media-artefacts");
     std::fs::create_dir_all(&share_root).unwrap();
     let file = share_root.join("gone.txt");
     std::fs::write(&file, b"x").unwrap();
@@ -60,7 +60,7 @@ async fn share_index_watcher_tombstones_on_delete() {
     meta_db
         .upsert_file_scoped(
             None,
-            "hermes-artefacts",
+            "media-artefacts",
             &disk_core::types::FileMeta {
                 path: PathBuf::from("gone.txt"),
                 content_hash: *blake3::hash(b"x").as_bytes(),
@@ -80,7 +80,7 @@ async fn share_index_watcher_tombstones_on_delete() {
         .unwrap();
 
     let mut roots = std::collections::HashMap::new();
-    roots.insert("hermes-artefacts".to_string(), share_root.clone());
+    roots.insert("media-artefacts".to_string(), share_root.clone());
     let _handle = spawn_share_index_watcher(roots, meta_db.clone(), "server")
         .expect("watcher startup must succeed")
         .expect("configured watcher must spawn");
@@ -92,7 +92,7 @@ async fn share_index_watcher_tombstones_on_delete() {
     let rel = "gone.txt";
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     loop {
-        if let Ok(Some(row)) = meta_db.get_file_scoped(None, "hermes-artefacts", rel).await {
+        if let Ok(Some(row)) = meta_db.get_file_scoped(None, "media-artefacts", rel).await {
             if row.deleted {
                 return;
             }

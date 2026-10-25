@@ -22,9 +22,9 @@ if curl --silent --show-error --max-time 1 http://127.0.0.1:9444/status >/dev/nu
 fi
 
 echo "Building plugin_test_daemon fixture..."
-cargo build -p disk-client --example plugin_test_daemon --quiet
+cargo build -p disk-client --example plugin_test_daemon --locked --quiet
 
-cargo run -p disk-client --example plugin_test_daemon --quiet -- "$FIXTURE_ROOT" >"$LOG_FILE" 2>&1 &
+cargo run -p disk-client --example plugin_test_daemon --locked --quiet -- "$FIXTURE_ROOT" >"$LOG_FILE" 2>&1 &
 DAEMON_PID=$!
 
 ready=0
@@ -46,7 +46,16 @@ if [ "$ready" -ne 1 ]; then
 fi
 
 (cd "$PLUGIN_DIR" && npm ci --silent)
-(cd "$PLUGIN_DIR" && npm run test:integration)
+if [ "$#" -gt 1 ]; then
+    echo "usage: $0 [fresh-vitest-json-report]" >&2
+    exit 2
+fi
+if [ "$#" -eq 1 ]; then
+    test ! -e "$1"
+    (cd "$PLUGIN_DIR" && npm run test:integration -- --reporter=json --outputFile="$1")
+else
+    (cd "$PLUGIN_DIR" && npm run test:integration)
+fi
 
 test "$(cat "$FIXTURE_ROOT/docs/notes/todo.md")" = "remote version"
 test "$(cat "$FIXTURE_ROOT/wiki/notes/todo.md")" = "wiki untouched"

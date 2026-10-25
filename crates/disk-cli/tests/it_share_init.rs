@@ -39,11 +39,11 @@ client_cert = "C:\\ProgramData\\disk-arcana\\client.crt"
 client_key  = "C:\\ProgramData\\disk-arcana\\client.key"
 "#;
 
-fn hermes_share_path() -> &'static str {
+fn media_share_path() -> &'static str {
     if cfg!(windows) {
-        r"C:\var\disk-arcana\hermes"
+        r"C:\var\disk-arcana\media"
     } else {
-        "/var/disk-arcana/hermes"
+        "/var/disk-arcana/media"
     }
 }
 
@@ -69,11 +69,11 @@ fn share_init_publish_appends_publisher_block_end_to_end() {
             "--preset",
             "publish",
             "--name",
-            "hermes-artefacts",
+            "media-artefacts",
             "--path",
-            hermes_share_path(),
+            media_share_path(),
             "--sign-key-ref",
-            "vault:transit/keys/hermes-publisher",
+            "vault:transit/keys/media-publisher",
             "--config",
         ])
         .arg(&cfg)
@@ -83,10 +83,10 @@ fn share_init_publish_appends_publisher_block_end_to_end() {
     assert!(status.success(), "disk share init exited non-zero");
 
     let written = fs::read_to_string(&cfg).unwrap();
-    assert!(written.contains("name = \"hermes-artefacts\""));
+    assert!(written.contains("name = \"media-artefacts\""));
     assert!(written.contains("intended_direction = \"publisher\""));
     assert!(written.contains("[share.publisher]"));
-    assert!(written.contains("sign_key_ref = \"vault:transit/keys/hermes-publisher\""));
+    assert!(written.contains("sign_key_ref = \"vault:transit/keys/media-publisher\""));
     assert!(written.contains("quarantine_on_failure = true"));
 
     // Sanity: the file remains a valid disk.toml after the wizard.
@@ -95,7 +95,7 @@ fn share_init_publish_appends_publisher_block_end_to_end() {
     let parsed = DiskConfig::from_str(&written).expect("re-parse after wizard");
     assert_eq!(parsed.shares.len(), 1);
     assert_eq!(
-        parsed.share_direction("hermes-artefacts"),
+        parsed.share_direction("media-artefacts"),
         Some(Direction::Publisher)
     );
 }

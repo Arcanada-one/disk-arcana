@@ -43,7 +43,7 @@ fn loads_full_fixture_and_resolves_inheritance() {
 
     // Explicit publisher direction.
     assert_eq!(
-        cfg.share_direction("hermes-artefacts"),
+        cfg.share_direction("media-artefacts"),
         Some(Direction::Publisher)
     );
 
@@ -57,15 +57,12 @@ fn loads_full_fixture_and_resolves_inheritance() {
     );
 
     // Publisher section only attached to the publisher-direction share.
-    let hermes = cfg
+    let media = cfg
         .shares
         .iter()
-        .find(|s| s.name == "hermes-artefacts")
+        .find(|s| s.name == "media-artefacts")
         .unwrap();
-    let publisher = hermes
-        .publisher
-        .as_ref()
-        .expect("publisher section present");
+    let publisher = media.publisher.as_ref().expect("publisher section present");
     assert!(publisher.sign_key_ref.starts_with("vault:transit/"));
     assert!(publisher.quarantine_on_failure);
 }

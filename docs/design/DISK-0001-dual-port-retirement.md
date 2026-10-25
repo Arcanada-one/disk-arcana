@@ -1,5 +1,7 @@
 # Dual-port retirement plan — :9443 (system) vs :9543 (user mesh)
 
+> Superseded 2026-10-08: Hermes retired — the `hermes-artefacts` share and `provision-hermes-share.sh` were removed; Hermes mentions below are historical.
+
 **Status:** plan-only (POST-R13). No port changes without consilium + operator safe window.
 
 ## Context

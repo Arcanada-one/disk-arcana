@@ -1,0 +1,325 @@
+{
+  "schema": "CanaryPlan/v2",
+  "id": "persist62d-current-python-CAN-after-authentic-CI-export",
+  "owner": "PERSIST term_7182995b-234d-4791-b2ce-b0aa685b0963",
+  "environment": "owned-local-short-python-no-cargo-no-cloud",
+  "read_only": false,
+  "subject": {
+    "schema": "GitCanarySubject/v1",
+    "commit": "62d4914fbef03e717a42f42944e01e609d52dbf5",
+    "tree": "6564900d23bedce76e699df662711df304d13294",
+    "evidence": {
+      "path": "source.json",
+      "sha256": "59fbe3d1ea82d0b67ed4178830ba772a9b659960bf50c24ba1b888f6c71c6f30",
+      "source_field": "commit"
+    }
+  },
+  "probes": [
+    {
+      "id": "missing-authority",
+      "kind": "process",
+      "argv": [
+        "/usr/bin/python3.12",
+        "-B",
+        "scripts/full-test-group.py",
+        "disk-storage"
+      ],
+      "cwd": ".",
+      "env_keys": [
+        "PATH",
+        "HOME",
+        "TMPDIR"
+      ],
+      "timeout_seconds": 120,
+      "capture_limit_bytes": 1048576,
+      "mutating": true,
+      "entities": [
+        "code_unit:scripts/full-test-group.py"
+      ],
+      "executable_sha256": "e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f",
+      "execution_files": [
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/.arcana/verify.json",
+          "sha256": "942b095400295d61f1ad8226b6bbed71290983e5328936f4d392ab526b6f1504"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/Cargo.lock",
+          "sha256": "c6de4766728ca1783a9d7ef017acb6a2964c579c1ffc6d49513e0598b3a818d8"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/Cargo.toml",
+          "sha256": "169ef3418f47c49f1f905e5e6015e012333cd8ebea5e0fd8e5d868e8f8e5d06c"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/fuzz/Cargo.lock",
+          "sha256": "dfbde4d77ef18d401da47d46dbf8bd4b0a8bb945f1386277292e7474ceed96bc"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/plugins/obsidian/package-lock.json",
+          "sha256": "f8e1fb9772c739b5371031656c3997655de87cee807a4bd8c02246dec9e95857"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/ci-isolate-rust.py",
+          "sha256": "1c892a952f35bed0dcf27f112785086329d39628ff7b329ccee07801c73f5c58"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/full-test-group.py",
+          "sha256": "b9ef925b37645c236ecc67945f9235d9c2242b491d5abca1eaad286af61cea7e"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/full-test.env.example",
+          "sha256": "fdfe6999bdf77ea6823e987c7a07c7580c1e453edcb51e83c5e98c0a1ed60bcb"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/tests/test_ci_isolate_rust.py",
+          "sha256": "b3937f57783f4d18929f4b219de0bfe3828b24b46bb08283600d5801a0f8785e"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/tests/test_full_test_groups.py",
+          "sha256": "502371b9ee2f66ddebbaed5523b6e837661ecb225f41a40560af7460637d2a23"
+        }
+      ],
+      "expect": {
+        "exit_codes": [
+          127
+        ],
+        "stderr_contains": [
+          "separate sandbox authority required"
+        ]
+      }
+    },
+    {
+      "id": "opt-in-not-authority",
+      "kind": "process",
+      "argv": [
+        "/usr/bin/python3.12",
+        "-B",
+        "scripts/full-test-group.py",
+        "disk-storage"
+      ],
+      "cwd": ".",
+      "env_keys": [
+        "PATH",
+        "HOME",
+        "TMPDIR",
+        "DISK_FULL_TEST_REMOTE_SANDBOX"
+      ],
+      "timeout_seconds": 120,
+      "capture_limit_bytes": 1048576,
+      "mutating": true,
+      "entities": [
+        "code_unit:scripts/full-test-group.py"
+      ],
+      "executable_sha256": "e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f",
+      "execution_files": [
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/.arcana/verify.json",
+          "sha256": "942b095400295d61f1ad8226b6bbed71290983e5328936f4d392ab526b6f1504"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/Cargo.lock",
+          "sha256": "c6de4766728ca1783a9d7ef017acb6a2964c579c1ffc6d49513e0598b3a818d8"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/Cargo.toml",
+          "sha256": "169ef3418f47c49f1f905e5e6015e012333cd8ebea5e0fd8e5d868e8f8e5d06c"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/fuzz/Cargo.lock",
+          "sha256": "dfbde4d77ef18d401da47d46dbf8bd4b0a8bb945f1386277292e7474ceed96bc"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/plugins/obsidian/package-lock.json",
+          "sha256": "f8e1fb9772c739b5371031656c3997655de87cee807a4bd8c02246dec9e95857"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/ci-isolate-rust.py",
+          "sha256": "1c892a952f35bed0dcf27f112785086329d39628ff7b329ccee07801c73f5c58"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/full-test-group.py",
+          "sha256": "b9ef925b37645c236ecc67945f9235d9c2242b491d5abca1eaad286af61cea7e"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/full-test.env.example",
+          "sha256": "fdfe6999bdf77ea6823e987c7a07c7580c1e453edcb51e83c5e98c0a1ed60bcb"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/tests/test_ci_isolate_rust.py",
+          "sha256": "b3937f57783f4d18929f4b219de0bfe3828b24b46bb08283600d5801a0f8785e"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/tests/test_full_test_groups.py",
+          "sha256": "502371b9ee2f66ddebbaed5523b6e837661ecb225f41a40560af7460637d2a23"
+        }
+      ],
+      "expect": {
+        "exit_codes": [
+          127
+        ],
+        "stderr_contains": [
+          "storage authority consumer unavailable",
+          "opt-in is insufficient"
+        ]
+      }
+    },
+    {
+      "id": "runner-regression-controls",
+      "kind": "process",
+      "argv": [
+        "/usr/bin/python3.12",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts/tests",
+        "-p",
+        "test_full_test_groups.py"
+      ],
+      "cwd": ".",
+      "env_keys": [
+        "PATH",
+        "HOME",
+        "TMPDIR"
+      ],
+      "timeout_seconds": 120,
+      "capture_limit_bytes": 1048576,
+      "mutating": true,
+      "entities": [
+        "code_unit:scripts/full-test-group.py"
+      ],
+      "executable_sha256": "e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f",
+      "execution_files": [
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/.arcana/verify.json",
+          "sha256": "942b095400295d61f1ad8226b6bbed71290983e5328936f4d392ab526b6f1504"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/Cargo.lock",
+          "sha256": "c6de4766728ca1783a9d7ef017acb6a2964c579c1ffc6d49513e0598b3a818d8"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/Cargo.toml",
+          "sha256": "169ef3418f47c49f1f905e5e6015e012333cd8ebea5e0fd8e5d868e8f8e5d06c"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/fuzz/Cargo.lock",
+          "sha256": "dfbde4d77ef18d401da47d46dbf8bd4b0a8bb945f1386277292e7474ceed96bc"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/plugins/obsidian/package-lock.json",
+          "sha256": "f8e1fb9772c739b5371031656c3997655de87cee807a4bd8c02246dec9e95857"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/ci-isolate-rust.py",
+          "sha256": "1c892a952f35bed0dcf27f112785086329d39628ff7b329ccee07801c73f5c58"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/full-test-group.py",
+          "sha256": "b9ef925b37645c236ecc67945f9235d9c2242b491d5abca1eaad286af61cea7e"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/full-test.env.example",
+          "sha256": "fdfe6999bdf77ea6823e987c7a07c7580c1e453edcb51e83c5e98c0a1ed60bcb"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/tests/test_ci_isolate_rust.py",
+          "sha256": "b3937f57783f4d18929f4b219de0bfe3828b24b46bb08283600d5801a0f8785e"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/tests/test_full_test_groups.py",
+          "sha256": "502371b9ee2f66ddebbaed5523b6e837661ecb225f41a40560af7460637d2a23"
+        }
+      ],
+      "expect": {
+        "exit_codes": [
+          0
+        ],
+        "stderr_contains": [
+          "Ran 16 tests",
+          "OK"
+        ]
+      }
+    },
+    {
+      "id": "ci-isolation-offline-controls",
+      "kind": "process",
+      "argv": [
+        "/usr/bin/python3.12",
+        "-B",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts/tests",
+        "-p",
+        "test_ci_isolate_rust.py"
+      ],
+      "cwd": ".",
+      "env_keys": [
+        "PATH",
+        "HOME",
+        "TMPDIR"
+      ],
+      "timeout_seconds": 120,
+      "capture_limit_bytes": 1048576,
+      "mutating": true,
+      "entities": [
+        "code_unit:scripts/tests/test_ci_isolate_rust.py"
+      ],
+      "executable_sha256": "e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f",
+      "execution_files": [
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/.arcana/verify.json",
+          "sha256": "942b095400295d61f1ad8226b6bbed71290983e5328936f4d392ab526b6f1504"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/Cargo.lock",
+          "sha256": "c6de4766728ca1783a9d7ef017acb6a2964c579c1ffc6d49513e0598b3a818d8"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/Cargo.toml",
+          "sha256": "169ef3418f47c49f1f905e5e6015e012333cd8ebea5e0fd8e5d868e8f8e5d06c"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/fuzz/Cargo.lock",
+          "sha256": "dfbde4d77ef18d401da47d46dbf8bd4b0a8bb945f1386277292e7474ceed96bc"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/plugins/obsidian/package-lock.json",
+          "sha256": "f8e1fb9772c739b5371031656c3997655de87cee807a4bd8c02246dec9e95857"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/ci-isolate-rust.py",
+          "sha256": "1c892a952f35bed0dcf27f112785086329d39628ff7b329ccee07801c73f5c58"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/full-test-group.py",
+          "sha256": "b9ef925b37645c236ecc67945f9235d9c2242b491d5abca1eaad286af61cea7e"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/full-test.env.example",
+          "sha256": "fdfe6999bdf77ea6823e987c7a07c7580c1e453edcb51e83c5e98c0a1ed60bcb"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/tests/test_ci_isolate_rust.py",
+          "sha256": "b3937f57783f4d18929f4b219de0bfe3828b24b46bb08283600d5801a0f8785e"
+        },
+        {
+          "path": "/home/dev/.worktrees/disk-arcana/persist-full-verification-20261003/scripts/tests/test_full_test_groups.py",
+          "sha256": "502371b9ee2f66ddebbaed5523b6e837661ecb225f41a40560af7460637d2a23"
+        }
+      ],
+      "expect": {
+        "exit_codes": [
+          0
+        ],
+        "stderr_contains": [
+          "Ran 16 tests",
+          "OK"
+        ]
+      }
+    }
+  ]
+}

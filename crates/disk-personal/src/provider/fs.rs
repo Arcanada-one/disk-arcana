@@ -383,6 +383,47 @@ impl Drop for Root {
                 std::mem::forget(lock);
             }
             ABANDONED_WORKER.store(true, Ordering::SeqCst);
+        } else if let Some(lock) = &self.lock {
+            // A concurrent fork can retain this open-file description until
+            // exec despite CLOEXEC. Closing only our fd would leave a completed
+            // writer spuriously busy. Unlock only when no worker was started
+            // or successful SQLite shutdown was explicitly acknowledged.
+            let _ = rustix::fs::flock(lock, FlockOperation::Unlock);
         }
+    }
+}
+
+#[cfg(test)]
+mod lock_lifetime_tests {
+    use super::*;
+
+    #[test]
+    fn acknowledged_shutdown_releases_lock_with_inherited_descriptor() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("writer.lock");
+        let lock = File::create(&path).unwrap();
+        rustix::fs::flock(&lock, FlockOperation::NonBlockingLockExclusive).unwrap();
+        // dup shares the open-file description just like a forked child before
+        // exec. CLOEXEC does not release that child's copy until exec happens.
+        let inherited = lock.try_clone().unwrap();
+        let contender = File::open(&path).unwrap();
+        let dir = File::open(directory.path()).unwrap();
+        let mut root = Root {
+            path: directory.path().to_owned(),
+            staging: dir.try_clone().unwrap(),
+            objects: dir.try_clone().unwrap(),
+            dir,
+            lock: Some(lock),
+            shutdown_acknowledged: false,
+            worker_started: true,
+            fail_poison_before_create: false,
+            device: 0,
+            inode: 0,
+        };
+        assert!(rustix::fs::flock(&contender, FlockOperation::NonBlockingLockExclusive).is_err());
+        root.acknowledge_shutdown();
+        drop(root);
+        rustix::fs::flock(&contender, FlockOperation::NonBlockingLockExclusive).unwrap();
+        drop(inherited);
     }
 }

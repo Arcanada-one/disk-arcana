@@ -4,8 +4,8 @@
   "config_version": "1.1",
   "shares": [
     {
-      "name": "hermes-artefacts",
-      "path": "/home/hermes/.hermes/cache",
+      "name": "media-artefacts",
+      "path": "/srv/media/cache",
       "declared_direction": "publisher",
       "server_confirmed_role": "publisher",
       "state": "idle",

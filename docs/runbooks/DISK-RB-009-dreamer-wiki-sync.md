@@ -66,7 +66,7 @@ Provision `disk-acl.yaml` rows for `wiki` share on both node certificates
 
 1. Stop Google Drive File Stream sync for `wiki/` (operator).
 2. Ensure single writer — no parallel Syncthing/rsync on same tree.
-3. One-shot baseline: `disk import-state --from-rsync …` if migrating from Hermes MVP (optional).
+3. One-shot baseline: `disk import-state --from-rsync …` if migrating from an rsync-based setup (optional).
 4. Start Disk Arcana daemons; verify `/status` shows `wiki` share `idle` or `syncing`.
 
 ### 4. Point Dreamer at server wiki

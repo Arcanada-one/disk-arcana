@@ -9,6 +9,7 @@ members = [
     "crates/disk-gui",
     "crates/disk-storage",
     "crates/disk-personal",
+    "crates/disk-personal/sqlite-abi",
 ]
 
 [workspace.package]
@@ -32,7 +33,7 @@ sqlx        = { version = "0.8", default-features = false, features = ["runtime-
 notify      = "8"
 serde       = { version = "1", features = ["derive"] }
 serde_json  = "1"
-serde_yaml_ng = "0.10"
+serde-saphyr = { version = "2", default-features = false, features = ["deserialize"] }
 toml        = "1.1"
 clap        = { version = "4", features = ["derive"] }
 tracing            = "0.1"
