@@ -437,7 +437,7 @@ fn opt_path(var: &'static str) -> Option<PathBuf> {
 
 /// Parse `DISK_SHARE_ROOTS` — comma-separated `share_name:/absolute/path` pairs.
 ///
-/// Example: `hermes-artefacts:/var/lib/disk-arcana/shares/hermes-artefacts`
+/// Example: `media-artefacts:/var/lib/disk-arcana/shares/media-artefacts`
 fn parse_share_roots() -> Result<HashMap<String, PathBuf>, ConfigError> {
     let Some(raw) = std::env::var("DISK_SHARE_ROOTS")
         .ok()

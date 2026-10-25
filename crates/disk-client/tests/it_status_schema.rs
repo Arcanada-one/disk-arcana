@@ -1,7 +1,7 @@
 //! DISK-0006 R7 — `GET /status` JSON shape pinned to PRD §4.12.4.
 //!
 //! Strategy: hydrate `DaemonState` with the same example data the §4.12.4
-//! schema illustrates (one `publisher` share named `hermes-artefacts` in
+//! schema illustrates (one `publisher` share named `media-artefacts` in
 //! `idle` state with explicit byte counters), hit the endpoint via HTTP,
 //! then compare the rendered JSON against `tests/fixtures/status-example.json`
 //! field-by-field. Adding a new field to `StatusShare` must update the
@@ -37,8 +37,8 @@ async fn spawn_with_example_state() -> (SocketAddr, tokio::sync::oneshot::Sender
 
     state
         .set_shares(vec![ShareSnapshot {
-            name: "hermes-artefacts".into(),
-            path: "/home/hermes/.hermes/cache".into(),
+            name: "media-artefacts".into(),
+            path: "/srv/media/cache".into(),
             declared_direction: Direction::Publisher,
             server_confirmed_role: Some(Direction::Publisher),
             state: LoopState::Idle,

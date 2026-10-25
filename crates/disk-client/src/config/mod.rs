@@ -112,8 +112,8 @@ client_key  = "/etc/disk-arcana/client.key"
 server_ca   = "/etc/disk-arcana/server-ca.crt"
 
 [[share]]
-name = "hermes-artefacts"
-path = "/home/hermes/.hermes/cache"
+name = "media-artefacts"
+path = "/srv/media/cache"
 intended_direction = "publisher"
 [share.filter]
 mode = "whitelist"
@@ -148,8 +148,8 @@ client_key  = "C:\\etc\\disk-arcana\\client.key"
 server_ca   = "C:\\etc\\disk-arcana\\server-ca.crt"
 
 [[share]]
-name = "hermes-artefacts"
-path = "C:\\home\\hermes\\.hermes\\cache"
+name = "media-artefacts"
+path = "C:\\srv\\media\\cache"
 intended_direction = "publisher"
 [share.filter]
 mode = "whitelist"
@@ -188,10 +188,10 @@ extensions = ["md", "txt", "json"]
         assert_eq!(cfg.node.display_name.as_deref(), Some("Arcana AI server"));
         assert_eq!(cfg.shares.len(), 2);
 
-        let hermes = &cfg.shares[0];
-        assert_eq!(hermes.name, "hermes-artefacts");
-        assert_eq!(hermes.intended_direction, Some(Direction::Publisher));
-        assert!(hermes.publisher.is_some());
+        let media = &cfg.shares[0];
+        assert_eq!(media.name, "media-artefacts");
+        assert_eq!(media.intended_direction, Some(Direction::Publisher));
+        assert!(media.publisher.is_some());
 
         let wiki = &cfg.shares[1];
         assert_eq!(wiki.name, "wiki");
@@ -208,7 +208,7 @@ extensions = ["md", "txt", "json"]
         let cfg = DiskConfig::from_str(FULL).unwrap();
         assert_eq!(cfg.share_direction("wiki"), Some(Direction::Bidirectional));
         assert_eq!(
-            cfg.share_direction("hermes-artefacts"),
+            cfg.share_direction("media-artefacts"),
             Some(Direction::Publisher)
         );
         assert_eq!(cfg.share_direction("nonexistent"), None);

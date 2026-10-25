@@ -251,7 +251,7 @@ where
     verifier.verify(&bytes)?;
 
     let parsed: AclYamlFile =
-        serde_yaml_ng::from_slice(&bytes).map_err(|e| AclLoadError::Parse(e.to_string()))?;
+        serde_saphyr::from_slice(&bytes).map_err(|e| AclLoadError::Parse(e.to_string()))?;
 
     if parsed.version <= stored_version && stored_version > 0 {
         return Err(AclLoadError::VersionRegress {
@@ -320,11 +320,11 @@ nodes:
     node_id_hint: arcana-ai
     enabled: true
     shares:
-      hermes-artefacts: publisher
+      media-artefacts: publisher
   - cert_fingerprint: 0202020202020202020202020202020202020202020202020202020202020202
     node_id_hint: macbook-ug
     shares:
-      hermes-artefacts: receive_only
+      media-artefacts: receive_only
       wiki: bidirectional
 "#;
 
@@ -347,7 +347,7 @@ nodes:
 
         let arcana_ai = [0x01; 32];
         assert_eq!(
-            out.table.lookup(&arcana_ai, "hermes-artefacts"),
+            out.table.lookup(&arcana_ai, "media-artefacts"),
             Some(EnforcedRole::Publisher)
         );
 

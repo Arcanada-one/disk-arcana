@@ -244,14 +244,14 @@ client_key  = "/etc/disk-arcana/client.key"
     fn render_publish_emits_publisher_section() {
         let s = render_share_section(
             Preset::Publish,
-            "hermes",
-            Path::new("/var/disk-arcana/hermes"),
-            Some("vault:transit/keys/hermes-publisher"),
+            "media",
+            Path::new("/var/disk-arcana/media"),
+            Some("vault:transit/keys/media-publisher"),
         )
         .unwrap();
         assert!(s.contains("intended_direction = \"publisher\""));
         assert!(s.contains("[share.publisher]"));
-        assert!(s.contains("sign_key_ref = \"vault:transit/keys/hermes-publisher\""));
+        assert!(s.contains("sign_key_ref = \"vault:transit/keys/media-publisher\""));
         assert!(s.contains("quarantine_on_failure = true"));
     }
 
@@ -291,23 +291,23 @@ client_key  = "/etc/disk-arcana/client.key"
         append_share(
             &p,
             Preset::Publish,
-            "hermes",
+            "media",
             Path::new(if cfg!(windows) {
-                r"C:\disk-arcana\hermes"
+                r"C:\disk-arcana\media"
             } else {
-                "/var/disk-arcana/hermes"
+                "/var/disk-arcana/media"
             }),
-            Some("vault:transit/keys/hermes-publisher"),
+            Some("vault:transit/keys/media-publisher"),
         )
         .unwrap();
         let cfg = DiskConfig::from_str(&fs::read_to_string(&p).unwrap()).unwrap();
         assert_eq!(cfg.shares.len(), 1);
-        assert_eq!(cfg.share_direction("hermes"), Some(Direction::Publisher));
+        assert_eq!(cfg.share_direction("media"), Some(Direction::Publisher));
         assert!(cfg.shares[0].publisher.is_some());
         let pub_section = cfg.shares[0].publisher.as_ref().unwrap();
         assert_eq!(
             pub_section.sign_key_ref,
-            "vault:transit/keys/hermes-publisher"
+            "vault:transit/keys/media-publisher"
         );
         assert!(pub_section.quarantine_on_failure);
     }

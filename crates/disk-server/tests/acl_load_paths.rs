@@ -21,7 +21,7 @@ nodes:
   - cert_fingerprint: sha256:0101010101010101010101010101010101010101010101010101010101010101
     node_id_hint: arcana-ai
     shares:
-      hermes-artefacts: publisher
+      media-artefacts: publisher
 "#;
 
 const VALID_YAML_V5: &str = r#"
@@ -31,7 +31,7 @@ signed_by: pavel.valentov@arcanada.one
 nodes:
   - cert_fingerprint: sha256:0101010101010101010101010101010101010101010101010101010101010101
     shares:
-      hermes-artefacts: receive_only
+      media-artefacts: receive_only
 "#;
 
 fn write_yaml(content: &str) -> (tempfile::TempDir, std::path::PathBuf) {
@@ -104,7 +104,7 @@ async fn cold_boot_load_ok_promotes_enforcer_and_writes_audit_row() {
 
     // Resolve a real entry.
     let role = enforcer
-        .resolve(&[0x01; 32], "hermes-artefacts")
+        .resolve(&[0x01; 32], "media-artefacts")
         .await
         .expect("entry present");
     assert_eq!(role, EnforcedRole::Publisher);
@@ -255,7 +255,7 @@ async fn revoked_signer_distinct_unhealthy_reason() {
 
     // resolve() still default-denies.
     let err = enforcer
-        .resolve(&[0x01; 32], "hermes-artefacts")
+        .resolve(&[0x01; 32], "media-artefacts")
         .await
         .unwrap_err();
     assert!(matches!(
@@ -278,7 +278,7 @@ async fn second_successful_load_invalidates_old_role_for_changed_share() {
     promote(&enforcer, &audit, &yaml_path7, 0).await;
     assert_eq!(
         enforcer
-            .resolve(&[0x01; 32], "hermes-artefacts")
+            .resolve(&[0x01; 32], "media-artefacts")
             .await
             .unwrap(),
         EnforcedRole::Publisher
@@ -292,7 +292,7 @@ signed_by: pavel.valentov@arcanada.one
 nodes:
   - cert_fingerprint: sha256:0101010101010101010101010101010101010101010101010101010101010101
     shares:
-      hermes-artefacts: receive_only
+      media-artefacts: receive_only
 "#;
     let (_yaml_dir8, yaml_path8) = write_yaml(v8);
     promote(&enforcer, &audit, &yaml_path8, 7).await;
@@ -300,7 +300,7 @@ nodes:
     // Role flipped.
     assert_eq!(
         enforcer
-            .resolve(&[0x01; 32], "hermes-artefacts")
+            .resolve(&[0x01; 32], "media-artefacts")
             .await
             .unwrap(),
         EnforcedRole::ReceiveOnly
