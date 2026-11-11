@@ -77,7 +77,18 @@ yanked = "deny"
 #                                              release exists; the crate stays unmaintained.
 # Add an entry only when no upgrade, replacement or feature-gate exists, and
 # always with a dated rationale plus a tracking backlog item.
-ignore = []
+ignore = [
+    # RUSTSEC-2026-0459 — libsqlite3-sys 0.30.1 / CVE-2026-119375. Patched line
+    # is >=0.39.0, but sqlx-sqlite 0.9.0 still requires <0.38.0 and
+    # disk-personal-sqlite pins =0.30.1 for the declared ABI FULL boundary.
+    # Full rationale + REVIEW BY 2026-12-31 live in .cargo/audit.toml (house
+    # rule: keep deny ignore minimal; do not duplicate the rsa case here —
+    # that advisory is lockfile-only / mysql-optional and would emit
+    # advisory-not-detected under cargo-deny). This one IS on the feature
+    # graph (sqlite enabled), so deny must carry the same id.
+    # Tracking: Muneral 00f3c8e2-5471-4843-9feb-3b2a9181efb3.
+    "RUSTSEC-2026-0459",
+]
 
 [sources]
 unknown-registry = "warn"

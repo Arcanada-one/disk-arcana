@@ -43,6 +43,37 @@ ignore = [
     # land the sqlx upgrade or re-argue the exception with a fresh date. An
     # exception with no review date is how a suppression becomes permanent.
     "RUSTSEC-2023-0071",
+
+    # RUSTSEC-2026-0459 — libsqlite3-sys 0.30.1 via C SQLite CVE-2026-119375
+    # (uninitialized page-cache bytes when opening a DB together with a sibling
+    # -wal whose page size differs). Severity 6.8 medium. Patched releases are
+    # libsqlite3-sys >=0.39.0 (bundled SQLite 3.54.0+).
+    #
+    # No upgrade path in this workspace (remeasured 2026-11-11):
+    #   - sqlx-sqlite 0.8.6 (current) requires libsqlite3-sys ^0.30.1
+    #   - sqlx-sqlite 0.9.0 (latest) still caps libsqlite3-sys at
+    #     >=0.30.1, <0.38.0 — the patched line is outside sqlx's allowed range
+    #   - crates/disk-personal/sqlite-abi pins libsqlite3-sys =0.30.1 for the
+    #     declared SQLite ABI FULL boundary (docs/reference/personal-provider-
+    #     foundation.md); bumping it is an ABI/MSRV change, not a lock refresh
+    #   - `cargo update -p libsqlite3-sys` locks 0 packages within compatible
+    #     versions (measured on this leaf)
+    #
+    # Exploitability here is reduced, not zero: the personal SQLite adapter
+    # refuses WAL/shared-memory opens and opens with PRAGMA journal_mode=DELETE
+    # (crates/disk-personal/sqlite-abi; docs/reference/personal-parent-adapters.md
+    # "WAL remains unsupported"). The CVE's stated vector needs a sibling -wal
+    # with a mismatched page size that a less-trusted party could have written.
+    # sqlx's bundled copy remains on 0.30.1 for inventory/personal paths that
+    # share the pin — do not treat this ignore as a claim the C bug is absent.
+    #
+    # Retire when sqlx publishes a release that allows libsqlite3-sys >=0.39
+    # AND the ABI pin/docs are intentionally revised together. Tracking:
+    # Muneral 00f3c8e2-5471-4843-9feb-3b2a9181efb3 (lintcure leaf); mirror the
+    # same id in deny.toml.
+    #
+    # REVIEW BY 2026-12-31.
+    "RUSTSEC-2026-0459",
 ]
 
 # Deliberately NOT suppressed — each was closed by a real dependency change in
