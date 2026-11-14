@@ -277,5 +277,86 @@ class CliOutputs(unittest.TestCase):
         self.assertIn('Linux build export refused (native_linux_ci_required)', done.stderr)
 
 
+class RealCargo1100Output(unittest.TestCase):
+    """Rows copied from a real `cargo test --workspace --all-features
+    --message-format=json` on rustc/cargo 1.100.0; absolute paths redacted to
+    {WS}. In the real tree target/debug/disk is hard-linked to
+    build/disk-cli/<hash>/out/disk and there is no target/debug/deps directory."""
+
+    FIXTURE = Path(__file__).parent / 'fixtures' / 'cargo-1.100-test-artifacts.jsonl'
+
+    def setUp(self):
+        ExportBoundaries.setUp(self)
+        self.workspace = self.root / 'workspace'
+        self.target = self.workspace / 'target'
+        text = self.FIXTURE.read_text().replace('{WS}', str(self.workspace))
+        self.rows = [json.loads(line) for line in text.splitlines()]
+        elf = self.binary.read_bytes()
+        daemon_out = self.target / 'debug/build/disk-cli/e5088f175f055c1e/out/disk'
+        daemon_out.parent.mkdir(parents=True)
+        daemon_out.write_bytes(elf); daemon_out.chmod(0o700)
+        for row in self.rows:
+            if row.get('reason') != 'compiler-artifact':
+                continue
+            src = Path(row['target']['src_path'])
+            src.parent.mkdir(parents=True, exist_ok=True)
+            src.write_text('// synthetic source')
+        self.daemon = self.target / 'debug' / 'disk'
+        os.link(daemon_out, self.daemon)
+        for row in self.rows:
+            exe = Path(row.get('executable', '/'))
+            if row.get('reason') == 'compiler-artifact' and not exe.exists():
+                exe.parent.mkdir(parents=True, exist_ok=True)
+                exe.write_bytes(elf); exe.chmod(0o700)
+        self.daemon_out = daemon_out
+        self.log = self.root / 'cargo.jsonl'
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def cli(self):
+        self.log.write_text(''.join(json.dumps(row) + '\n' for row in self.rows))
+        with patch.dict(os.environ, {'GITHUB_WORKSPACE': str(self.workspace)}):
+            return module.export_cli(self.log, self.target, self.root, {'fixture_only': True})
+
+    def test_layout_has_no_deps_directory(self):
+        self.assertFalse((self.target / 'debug' / 'deps').exists())
+
+    def test_real_cargo_1_100_rows_export_both_binaries(self):
+        outputs = self.cli()
+        self.assertEqual(len(outputs), 2)
+        names = sorted(json.loads((o / 'BUILD.json').read_text())['binary'] for o in outputs)
+        self.assertEqual(names, ['disk', 'it_local_e2e_writeback'])
+        for output in outputs:
+            manifest = json.loads((output / 'BUILD.json').read_text())
+            self.assertEqual((output / manifest['binary']).stat().st_nlink, 1)
+
+    def test_third_link_to_the_daemon_still_refuses(self):
+        os.link(self.daemon, self.root / 'foreign-alias')
+        with self.assertRaisesRegex(ValueError, 'unowned_binary'): self.cli()
+
+    def test_daemon_alias_in_a_writable_directory_is_not_trusted(self):
+        self.daemon_out.parent.chmod(0o777)
+        with self.assertRaisesRegex(ValueError, 'unowned_binary'): self.cli()
+
+    def test_daemon_without_any_alias_directory_refuses_instead_of_crashing(self):
+        os.link(self.daemon, self.root / 'elsewhere-alias')
+        self.daemon_out.unlink()
+        with self.assertRaisesRegex(ValueError, 'unowned_binary'): self.cli()
+
+    def test_missing_source_names_the_kind_of_path_only(self):
+        Path(self.rows[0]['target']['src_path']).unlink()
+        with self.assertRaises(FileNotFoundError) as caught: self.cli()
+        self.assertEqual(caught.exception.args, ('missing_source_file',))
+
+    def test_main_prints_the_kind_of_missing_path_without_a_path(self):
+        script = Path(__file__).parents[1] / 'ci-export-linux-server.py'
+        env = {'GITHUB_ACTIONS': 'true', 'RUNNER_OS': 'Linux', 'GITHUB_WORKSPACE': str(self.root / 'absent')}
+        done = subprocess.run(['python3', '-I', str(script)], capture_output=True, text=True, env=env)
+        self.assertEqual(done.returncode, 1)
+        self.assertIn('Linux build export refused (missing_workspace)', done.stderr)
+        self.assertNotIn(str(self.root), done.stderr)
+
+
 if __name__ == '__main__':
     unittest.main()

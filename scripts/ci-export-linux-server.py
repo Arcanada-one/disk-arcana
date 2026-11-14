@@ -13,24 +13,63 @@ import tempfile
 MACHINES = {'x86_64-unknown-linux-gnu': 62, 'aarch64-unknown-linux-gnu': 183}
 
 
+def strict_path(path, kind):
+    """Resolve a path that must exist; a miss names only the kind of path."""
+    try:
+        return Path(path).resolve(strict=True)
+    except FileNotFoundError:
+        raise FileNotFoundError('missing_' + kind) from None
+
+
+def private_directory(directory):
+    """True for a real directory owned by this user and not writable by others."""
+    try:
+        entry = directory.lstat()
+        if directory != directory.resolve(strict=True):
+            return False
+    except FileNotFoundError:
+        return False
+    return stat.S_ISDIR(entry.st_mode) and entry.st_uid == os.getuid() and not entry.st_mode & 0o022
+
+
+def cargo_alias_directories(profile_dir):
+    """Directories where cargo may hard-link a binary: deps/ (up to cargo 1.99)
+    or build/<pkg>/<hash>/out/ (cargo 1.100 build-dir layout). Only private,
+    unindirected directories are returned; anything else is not searched.
+    The flag says whether the plain binary name (no -<hash> suffix) is an
+    allowed alias name there; cargo 1.100 links target/debug/<name> to
+    build/<pkg>/<hash>/out/<name>."""
+    found = []
+    deps = profile_dir / 'deps'
+    if private_directory(deps):
+        found.append((deps, False))
+    build = profile_dir / 'build'
+    if private_directory(build):
+        for package in sorted(build.iterdir()):
+            if not private_directory(package):
+                continue
+            for unit in sorted(package.iterdir()):
+                out = unit / 'out'
+                if private_directory(unit) and private_directory(out):
+                    found.append((out, True))
+    return found
+
+
 def known_cargo_links(binary, info):
     if info.st_nlink == 1:
         return True
-    # Cargo links release/<name> to release/deps/<crate>-<hash>. Account for
-    # every link; an extra alias elsewhere must still refuse the export.
-    deps = binary.parent / 'deps'
+    # Cargo links release/<name> to its unit output (deps/<crate>-<hash> or, with
+    # cargo 1.100, build/<pkg>/<hash>/out/<crate>-<hash>). Account for every
+    # link; an extra alias elsewhere must still refuse the export.
     if binary.name not in ('disk-arcana-server', 'disk') or binary.parent.name not in ('release', 'debug'):
         return False
-    if deps != deps.resolve(strict=True):
-        return False
-    directory = deps.lstat()
-    if not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.getuid() or directory.st_mode & 0o022:
-        return False
     aliases = 0
-    for candidate in deps.glob(binary.name.replace('-', '_') + '-*'):
-        entry = candidate.lstat()
-        if stat.S_ISREG(entry.st_mode) and (entry.st_dev, entry.st_ino) == (info.st_dev, info.st_ino):
-            aliases += 1
+    for directory, plain_name in cargo_alias_directories(binary.parent):
+        patterns = [binary.name.replace('-', '_') + '-*'] + ([binary.name] if plain_name else [])
+        for candidate in [c for pattern in patterns for c in directory.glob(pattern)]:
+            entry = candidate.lstat()
+            if stat.S_ISREG(entry.st_mode) and (entry.st_dev, entry.st_ino) == (info.st_dev, info.st_ino):
+                aliases += 1
     return aliases == 1 and info.st_nlink == 2
 
 
@@ -41,14 +80,20 @@ def export_binary(binary, private_root, target, provenance, name="disk-arcana-se
         raise ValueError('unsupported_target')
     root = Path(private_root)
     binary = Path(binary).absolute()
-    if any(char in str(root) for char in '\r\n') or binary != binary.resolve(strict=True):
+    if any(char in str(root) for char in '\r\n') or binary != strict_path(binary, 'binary'):
         raise ValueError('indirect_or_invalid_export_path')
-    info = root.lstat()
+    try:
+        info = root.lstat()
+    except FileNotFoundError:
+        raise FileNotFoundError('missing_private_root') from None
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
         raise ValueError('unowned_private_root')
-    if root != root.resolve(strict=True):
+    if root != strict_path(root, 'private_root'):
         raise ValueError('indirect_private_root')
-    fd = os.open(binary, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        fd = os.open(binary, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        raise FileNotFoundError('missing_binary') from None
     output = None
     try:
         with os.fdopen(fd, 'rb') as source:
@@ -126,8 +171,8 @@ def export_cli(log, target_root, root, provenance):
             continue
         if target.get('kind') != expected[name] or row.get('profile', {}).get('test') != (name != 'disk'):
             continue
-        src = Path(target['src_path']).resolve(strict=True)
-        workspace = Path(os.environ['GITHUB_WORKSPACE']).resolve(strict=True)
+        src = strict_path(target['src_path'], 'source_file')
+        workspace = strict_path(os.environ['GITHUB_WORKSPACE'], 'workspace')
         source = {'disk': 'crates/disk-cli/src/main.rs',
                   'it_local_e2e_writeback': 'crates/disk-cli/tests/it_local_e2e_writeback.rs'}[name]
         if src != workspace / source or name in selected:
@@ -158,7 +203,7 @@ def export_cli(log, target_root, root, provenance):
 def main(argv=()):
     if os.environ.get('GITHUB_ACTIONS') != 'true' or os.environ.get('RUNNER_OS') != 'Linux':
         raise ValueError('native_linux_ci_required')
-    workspace = Path(os.environ['GITHUB_WORKSPACE']).resolve(strict=True)
+    workspace = strict_path(os.environ['GITHUB_WORKSPACE'], 'workspace')
     expected = os.environ['EXPECTED_BUILD_SHA']
     head = subprocess.check_output(['git', '-C', str(workspace), 'rev-parse', 'HEAD'], text=True).strip()
     tree = subprocess.check_output(['git', '-C', str(workspace), 'rev-parse', 'HEAD^{tree}'], text=True).strip()
@@ -166,7 +211,7 @@ def main(argv=()):
         raise ValueError('checkout_source_mismatch')
     subprocess.run(['git', '-C', str(workspace), 'diff', '--exit-code', '--quiet', 'HEAD', '--'], check=True)
     root = Path(os.environ['CI_ISOLATED_RUST_ROOT'])
-    target_root = Path(os.environ.get('CARGO_TARGET_DIR', str(workspace / 'target'))).resolve(strict=True)
+    target_root = strict_path(os.environ.get('CARGO_TARGET_DIR', str(workspace / 'target')), 'target_root')
     if target_root not in (workspace / 'target', root / 'target'):
         raise ValueError('foreign_target_root')
     target = os.environ['BUILD_TARGET']
@@ -198,6 +243,7 @@ if __name__ == '__main__':
     except Exception as error:
         # Name the refusal condition: ValueError messages are fixed reason codes;
         # for any other error only the class name is printed, never its text.
-        reason = str(error) if isinstance(error, ValueError) else type(error).__name__
+        named = isinstance(error, ValueError) or (isinstance(error, FileNotFoundError) and error.args[:1] and str(error.args[0]).startswith('missing_') and len(error.args) == 1)
+        reason = str(error) if named else type(error).__name__
         print('Linux build export refused (' + reason + '); no foreign build or credentials accessed', file=sys.stderr)
         sys.exit(1)
