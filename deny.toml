@@ -78,7 +78,7 @@ yanked = "deny"
 # Add an entry only when no upgrade, replacement or feature-gate exists, and
 # always with a dated rationale plus a tracking backlog item.
 ignore = [
-    # Added 2026-11-11 (Muneral 489280b0, disk-arcana#261). REVIEW BY 2026-11-30.
+    # Added 2026-11-11 (disk-arcana#261). REVIEW BY 2026-11-30.
     # Rationale and retirement condition for 0459 are in `.cargo/audit.toml`.
     { id = "RUSTSEC-2026-0459", reason = "libsqlite3-sys 0.30.1 bundled SQLite < 3.54 (local-vector WAL page-size disclosure); fix needs sqlx 0.9 and re-pinning the disk-personal-sqlite ABI crate, deliberate feature work. Databases are workspace-created, not supplied by untrusted parties. Retire with the sqlx 0.9 upgrade." },
 ]

@@ -45,7 +45,7 @@ ignore = [
     "RUSTSEC-2023-0071",
 
     # RUSTSEC-2026-0459 — libsqlite3-sys 0.30.1 (bundled SQLite < 3.54.0),
-    # CVE-2026-119375, added 2026-11-11 (Muneral 489280b0, disk-arcana#261).
+    # CVE-2026-119375, added 2026-11-11 (disk-arcana#261).
     # Local-vector (CVSS AV:L, UI:P) uninitialized-memory disclosure: only a
     # process that opens a database file TOGETHER WITH a sibling `-wal` file whose
     # page size differs, both written by a less trusted party, is exposed.
@@ -64,7 +64,7 @@ ignore = [
     # Retire when sqlx moves to 0.9 and the ABI crate is re-pinned to >= 0.39.
     # REVIEW BY 2026-11-30 (same tripwire as RUSTSEC-2023-0071).
     #
-    # Added by PR #260 (INFRA-0417 lint cure), re-measured 2026-11-11, merged here
+    # Added by PR #260 (lint cure), re-measured 2026-11-11, merged here
     # into the single entry above:
     #   - sqlx-sqlite 0.8.6 (current) requires libsqlite3-sys ^0.30.1
     #   - sqlx-sqlite 0.9.0 (latest) still caps libsqlite3-sys at >=0.30.1, <0.38.0,

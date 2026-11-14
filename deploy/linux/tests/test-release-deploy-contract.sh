@@ -261,11 +261,11 @@ assert_exact_job_if "$linux_release_block" "$tag_probe_inverse" "Linux release a
 assert_exact_job_if "$windows_release_block" "$tag_probe_inverse" "Windows client release job"
 assert_exact_job_if "$linux_client_release_block" "$tag_probe_inverse" "Linux client release job"
 assert_exact_job_if "$macos_release_block" "$tag_probe_inverse" "macOS client release job"
-# INFRA-0417 / Muneral 00f3c8e2: hostless disposition prefixes the three
+# Hostless disposition prefixes the three
 # label-bound jobs with `false &&` so they cannot queue on missing
 # disk-arcana-stage / disk-arcana-prod runners. The original dispatch
 # predicates remain intact after the breaker (restore by deleting `false &&`
-# per docs/ops/INFRA-0417-server-hostless-disposition.md reverse_if).
+# per docs/ops/server-hostless-disposition.md reverse_if).
 assert_exact_job_if "$dev_block" \
   "false && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && (github.event.inputs.target == 'stage' || github.event.inputs.target == 'prod')" \
   "staging deploy job"

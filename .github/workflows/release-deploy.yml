@@ -36,9 +36,9 @@ jobs:
   # INFRA-0370: actionless proof on the restricted staging runner group. The
   # probe-only target cannot reach any build or delivery job in this workflow.
   #
-  # INFRA-0417 / Muneral 00f3c8e2 (remeasured 2026-11-11): zero org runners carry
+  # Hostless disposition (remeasured 2026-11-11): zero org runners carry
   # label disk-arcana-stage. Keep the job for restore, but do not schedule it onto
-  # a missing label (hangs forever). See docs/ops/INFRA-0417-server-hostless-disposition.md.
+  # a missing label (hangs forever). See docs/ops/server-hostless-disposition.md.
   stage-readiness:
     name: Dedicated staging runner readiness
     if: >-
@@ -640,9 +640,9 @@ jobs:
   #    a tag never lands code on a host on its own. The unique runner label is
   #    part of the least-privilege boundary and must not be shared.
   #
-  # INFRA-0417 / Muneral 00f3c8e2 (remeasured 2026-11-11): disk-arcana-stage has
+  # Hostless disposition (remeasured 2026-11-11): disk-arcana-stage has
   # zero holders — circuit-breaker `false &&` below. reverse_if in
-  # docs/ops/INFRA-0417-server-hostless-disposition.md.
+  # docs/ops/server-hostless-disposition.md.
   # ──────────────────────────────────────────────────────────────────────────
   deploy-stage:
     name: Deploy (dedicated staging)
@@ -769,11 +769,11 @@ jobs:
   #    workflow_dispatch target=prod, NOT auto-run on tag).
   #    Operator must manually trigger with target=prod after staging passes.
   #
-  # INFRA-0417 / Muneral 00f3c8e2 (remeasured 2026-11-11): disk-arcana-prod has
-  # zero holders; disk-arcana-server is absent on arcana-prd and arcana-devs.
-  # Product is NOT retired (ADR-0001 / DISK-0098 mask). Circuit-breaker `false &&`
+  # Hostless disposition (remeasured 2026-11-11): disk-arcana-prod has
+  # zero holders; disk-arcana-server is absent on the surviving hosts.
+  # Product is NOT retired (delivery mask). Circuit-breaker `false &&`
   # prevents an infinite queue on a missing label. reverse_if in
-  # docs/ops/INFRA-0417-server-hostless-disposition.md. This leaf does not Deploy.
+  # docs/ops/server-hostless-disposition.md. This leaf does not Deploy.
   # ──────────────────────────────────────────────────────────────────────────
   deploy-prod:
     name: Deploy (arcana-prod) [HARD-GATED]
