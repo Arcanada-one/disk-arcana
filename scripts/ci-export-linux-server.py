@@ -37,7 +37,8 @@ def cargo_alias_directories(profile_dir):
     or build/<pkg>/<hash>/out/ (cargo 1.100 build-dir layout). Only private,
     unindirected directories are returned; anything else is not searched.
     The flag says whether the plain binary name (no -<hash> suffix) is an
-    allowed alias name there; cargo 1.100 links target/debug/<name> to
+    allowed alias name there (also with underscores for a crate name with
+    dashes); cargo 1.100 links target/<profile>/<name> to
     build/<pkg>/<hash>/out/<name>."""
     found = []
     deps = profile_dir / 'deps'
@@ -65,8 +66,8 @@ def known_cargo_links(binary, info):
         return False
     aliases = 0
     for directory, plain_name in cargo_alias_directories(binary.parent):
-        patterns = [binary.name.replace('-', '_') + '-*'] + ([binary.name] if plain_name else [])
-        for candidate in [c for pattern in patterns for c in directory.glob(pattern)]:
+        patterns = [binary.name.replace('-', '_') + '-*'] + ([binary.name, binary.name.replace('-', '_')] if plain_name else [])
+        for candidate in sorted({c for pattern in patterns for c in directory.glob(pattern)}):  # a set: no file counts twice
             entry = candidate.lstat()
             if stat.S_ISREG(entry.st_mode) and (entry.st_dev, entry.st_ino) == (info.st_dev, info.st_ino):
                 aliases += 1

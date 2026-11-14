@@ -358,5 +358,60 @@ class RealCargo1100Output(unittest.TestCase):
         self.assertNotIn(str(self.root), done.stderr)
 
 
+class RealCargo1100ReleaseBuild(SourceBinding):
+    """`cargo build --release --target <triple> --workspace` on cargo 1.100.0:
+    release/disk-arcana-server is hard-linked to
+    release/build/disk-server/<hash>/out/disk_arcana_server and there is no
+    release/deps directory. The artifact row is the real one (paths redacted)."""
+
+    FIXTURE = Path(__file__).parent / 'fixtures' / 'cargo-1.100-release-target-artifacts.jsonl'
+    ALIAS = 'build/disk-server/b4c7df6c08bdc253/out/disk_arcana_server'
+
+    def setUp(self):
+        super().setUp()
+        release = self.workspace / 'target/x86_64-unknown-linux-gnu/release'
+        rows = [json.loads(line) for line in self.FIXTURE.read_text().replace('{WS}', str(self.workspace)).splitlines()]
+        self.assertEqual(rows[0]['executable'], str(release / 'disk-arcana-server'))
+        self.assertEqual(rows[0]['target']['kind'], ['bin'])
+        self.assertTrue(rows[1]['success'])
+        self.alias = release / self.ALIAS
+        self.alias.parent.mkdir(parents=True)
+        os.link(self.binary, self.alias)
+        self.assertFalse((release / 'deps').exists())
+
+    def run_main(self):
+        with patch.dict(os.environ, self.env, clear=True):
+            module.main()
+
+    def test_real_release_layout_exports_single_link_copy(self):
+        self.run_main()
+        output = Path((self.root / 'output').read_text().strip().split('=', 1)[1])
+        self.assertEqual((output / 'disk-arcana-server').stat().st_nlink, 1)
+        self.assertEqual(json.loads((output / 'BUILD.json').read_text())['binary'], 'disk-arcana-server')
+
+    def test_third_link_still_refuses(self):
+        os.link(self.binary, self.root / 'foreign-alias')
+        with self.assertRaisesRegex(ValueError, 'unowned_binary'): self.run_main()
+
+    def test_alias_directory_writable_by_others_is_not_trusted(self):
+        self.alias.parent.chmod(0o777)
+        with self.assertRaisesRegex(ValueError, 'unowned_binary'): self.run_main()
+
+    def test_second_link_outside_the_cargo_directories_refuses(self):
+        self.alias.unlink()
+        os.link(self.binary, self.root / 'elsewhere')
+        with self.assertRaisesRegex(ValueError, 'unowned_binary'): self.run_main()
+
+    def test_second_link_with_another_name_in_the_out_directory_refuses(self):
+        self.alias.rename(self.alias.parent / 'something_else')
+        with self.assertRaisesRegex(ValueError, 'unowned_binary'): self.run_main()
+
+    def test_two_aliases_refuse(self):
+        other = self.alias.parents[2] / 'ffffffffffffffff/out'
+        other.mkdir(parents=True)
+        os.link(self.binary, other / 'disk_arcana_server')
+        with self.assertRaisesRegex(ValueError, 'unowned_binary'): self.run_main()
+
+
 if __name__ == '__main__':
     unittest.main()
