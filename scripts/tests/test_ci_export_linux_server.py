@@ -221,5 +221,197 @@ class CliOutputs(unittest.TestCase):
             self.assertEqual((output / manifest['binary']).stat().st_nlink, 1)
 
 
+    def relocate_driver(self, *relative):
+        binary = Path(self.rows[1]['executable'])
+        moved = self.target / 'debug' / Path(*relative)
+        moved.parent.mkdir(parents=True, exist_ok=True)
+        binary.rename(moved)
+        self.rows[1]['executable'] = str(moved)
+
+    def test_cargo_1_100_build_dir_layout_is_accepted(self):
+        self.relocate_driver('build', 'disk-cli', '0dd77b782dfe76a3', 'out', 'it_local_e2e_writeback-0dd77b782dfe76a3')
+        outputs = self.cli()
+        self.assertEqual(len(outputs), 2)
+        manifest = json.loads((outputs[1] / 'BUILD.json').read_text())
+        self.assertEqual(manifest['binary'], 'it_local_e2e_writeback')
+        self.assertEqual(manifest['binary_sha256'], hashlib.sha256(Path(self.rows[1]['executable']).read_bytes()).hexdigest())
+
+    def test_deps_layout_is_still_accepted(self):
+        self.assertEqual(len(self.cli()), 2)
+
+    def test_build_dir_path_with_wrong_shape_refuses(self):
+        self.relocate_driver('build', 'disk-cli', 'out', 'it_local_e2e_writeback-0dd77b782dfe76a3')
+        with self.assertRaisesRegex(ValueError, 'foreign_cargo_output'): self.cli()
+
+    def test_build_dir_path_outside_target_refuses(self):
+        elsewhere = self.root / 'elsewhere/build/disk-cli/0dd77b782dfe76a3/out'
+        elsewhere.mkdir(parents=True)
+        moved = elsewhere / 'it_local_e2e_writeback-0dd77b782dfe76a3'
+        Path(self.rows[1]['executable']).rename(moved)
+        self.rows[1]['executable'] = str(moved)
+        with self.assertRaisesRegex(ValueError, 'foreign_cargo_output'): self.cli()
+
+    def test_build_dir_path_under_release_profile_refuses(self):
+        moved = self.target / 'release/build/disk-cli/0dd77b782dfe76a3/out/it_local_e2e_writeback-0dd77b782dfe76a3'
+        moved.parent.mkdir(parents=True)
+        Path(self.rows[1]['executable']).rename(moved)
+        self.rows[1]['executable'] = str(moved)
+        with self.assertRaisesRegex(ValueError, 'foreign_cargo_output'): self.cli()
+
+    def test_build_dir_wrong_driver_name_refuses(self):
+        self.relocate_driver('build', 'disk-cli', '0dd77b782dfe76a3', 'out', 'other_binary-0dd77b782dfe76a3')
+        with self.assertRaisesRegex(ValueError, 'wrong_driver_output'): self.cli()
+
+    def test_daemon_must_stay_directly_under_debug(self):
+        daemon = Path(self.rows[0]['executable'])
+        moved = self.target / 'debug/build/disk-cli/0dd77b782dfe76a3/out/disk'
+        moved.parent.mkdir(parents=True)
+        daemon.rename(moved)
+        self.rows[0]['executable'] = str(moved)
+        with self.assertRaisesRegex(ValueError, 'foreign_cargo_output'): self.cli()
+
+    def test_main_prints_the_refusal_reason_not_the_error_text(self):
+        script = Path(__file__).parents[1] / 'ci-export-linux-server.py'
+        done = subprocess.run(['python3', '-I', str(script)], capture_output=True, text=True, env={})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn('Linux build export refused (native_linux_ci_required)', done.stderr)
+
+
+class RealCargo1100Output(unittest.TestCase):
+    """Rows copied from a real `cargo test --workspace --all-features
+    --message-format=json` on rustc/cargo 1.100.0; absolute paths redacted to
+    {WS}. In the real tree target/debug/disk is hard-linked to
+    build/disk-cli/<hash>/out/disk and there is no target/debug/deps directory."""
+
+    FIXTURE = Path(__file__).parent / 'fixtures' / 'cargo-1.100-test-artifacts.jsonl'
+
+    def setUp(self):
+        ExportBoundaries.setUp(self)
+        self.workspace = self.root / 'workspace'
+        self.target = self.workspace / 'target'
+        text = self.FIXTURE.read_text().replace('{WS}', str(self.workspace))
+        self.rows = [json.loads(line) for line in text.splitlines()]
+        elf = self.binary.read_bytes()
+        daemon_out = self.target / 'debug/build/disk-cli/e5088f175f055c1e/out/disk'
+        daemon_out.parent.mkdir(parents=True)
+        daemon_out.write_bytes(elf); daemon_out.chmod(0o700)
+        for row in self.rows:
+            if row.get('reason') != 'compiler-artifact':
+                continue
+            src = Path(row['target']['src_path'])
+            src.parent.mkdir(parents=True, exist_ok=True)
+            src.write_text('// synthetic source')
+        self.daemon = self.target / 'debug' / 'disk'
+        os.link(daemon_out, self.daemon)
+        for row in self.rows:
+            exe = Path(row.get('executable', '/'))
+            if row.get('reason') == 'compiler-artifact' and not exe.exists():
+                exe.parent.mkdir(parents=True, exist_ok=True)
+                exe.write_bytes(elf); exe.chmod(0o700)
+        self.daemon_out = daemon_out
+        self.log = self.root / 'cargo.jsonl'
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def cli(self):
+        self.log.write_text(''.join(json.dumps(row) + '\n' for row in self.rows))
+        with patch.dict(os.environ, {'GITHUB_WORKSPACE': str(self.workspace)}):
+            return module.export_cli(self.log, self.target, self.root, {'fixture_only': True})
+
+    def test_layout_has_no_deps_directory(self):
+        self.assertFalse((self.target / 'debug' / 'deps').exists())
+
+    def test_real_cargo_1_100_rows_export_both_binaries(self):
+        outputs = self.cli()
+        self.assertEqual(len(outputs), 2)
+        names = sorted(json.loads((o / 'BUILD.json').read_text())['binary'] for o in outputs)
+        self.assertEqual(names, ['disk', 'it_local_e2e_writeback'])
+        for output in outputs:
+            manifest = json.loads((output / 'BUILD.json').read_text())
+            self.assertEqual((output / manifest['binary']).stat().st_nlink, 1)
+
+    def test_third_link_to_the_daemon_still_refuses(self):
+        os.link(self.daemon, self.root / 'foreign-alias')
+        with self.assertRaisesRegex(ValueError, 'unowned_binary'): self.cli()
+
+    def test_daemon_alias_in_a_writable_directory_is_not_trusted(self):
+        self.daemon_out.parent.chmod(0o777)
+        with self.assertRaisesRegex(ValueError, 'unowned_binary'): self.cli()
+
+    def test_daemon_without_any_alias_directory_refuses_instead_of_crashing(self):
+        os.link(self.daemon, self.root / 'elsewhere-alias')
+        self.daemon_out.unlink()
+        with self.assertRaisesRegex(ValueError, 'unowned_binary'): self.cli()
+
+    def test_missing_source_names_the_kind_of_path_only(self):
+        Path(self.rows[0]['target']['src_path']).unlink()
+        with self.assertRaises(FileNotFoundError) as caught: self.cli()
+        self.assertEqual(caught.exception.args, ('missing_source_file',))
+
+    def test_main_prints_the_kind_of_missing_path_without_a_path(self):
+        script = Path(__file__).parents[1] / 'ci-export-linux-server.py'
+        env = {'GITHUB_ACTIONS': 'true', 'RUNNER_OS': 'Linux', 'GITHUB_WORKSPACE': str(self.root / 'absent')}
+        done = subprocess.run(['python3', '-I', str(script)], capture_output=True, text=True, env=env)
+        self.assertEqual(done.returncode, 1)
+        self.assertIn('Linux build export refused (missing_workspace)', done.stderr)
+        self.assertNotIn(str(self.root), done.stderr)
+
+
+class RealCargo1100ReleaseBuild(SourceBinding):
+    """`cargo build --release --target <triple> --workspace` on cargo 1.100.0:
+    release/disk-arcana-server is hard-linked to
+    release/build/disk-server/<hash>/out/disk_arcana_server and there is no
+    release/deps directory. The artifact row is the real one (paths redacted)."""
+
+    FIXTURE = Path(__file__).parent / 'fixtures' / 'cargo-1.100-release-target-artifacts.jsonl'
+    ALIAS = 'build/disk-server/b4c7df6c08bdc253/out/disk_arcana_server'
+
+    def setUp(self):
+        super().setUp()
+        release = self.workspace / 'target/x86_64-unknown-linux-gnu/release'
+        rows = [json.loads(line) for line in self.FIXTURE.read_text().replace('{WS}', str(self.workspace)).splitlines()]
+        self.assertEqual(rows[0]['executable'], str(release / 'disk-arcana-server'))
+        self.assertEqual(rows[0]['target']['kind'], ['bin'])
+        self.assertTrue(rows[1]['success'])
+        self.alias = release / self.ALIAS
+        self.alias.parent.mkdir(parents=True)
+        os.link(self.binary, self.alias)
+        self.assertFalse((release / 'deps').exists())
+
+    def run_main(self):
+        with patch.dict(os.environ, self.env, clear=True):
+            module.main()
+
+    def test_real_release_layout_exports_single_link_copy(self):
+        self.run_main()
+        output = Path((self.root / 'output').read_text().strip().split('=', 1)[1])
+        self.assertEqual((output / 'disk-arcana-server').stat().st_nlink, 1)
+        self.assertEqual(json.loads((output / 'BUILD.json').read_text())['binary'], 'disk-arcana-server')
+
+    def test_third_link_still_refuses(self):
+        os.link(self.binary, self.root / 'foreign-alias')
+        with self.assertRaisesRegex(ValueError, 'unowned_binary'): self.run_main()
+
+    def test_alias_directory_writable_by_others_is_not_trusted(self):
+        self.alias.parent.chmod(0o777)
+        with self.assertRaisesRegex(ValueError, 'unowned_binary'): self.run_main()
+
+    def test_second_link_outside_the_cargo_directories_refuses(self):
+        self.alias.unlink()
+        os.link(self.binary, self.root / 'elsewhere')
+        with self.assertRaisesRegex(ValueError, 'unowned_binary'): self.run_main()
+
+    def test_second_link_with_another_name_in_the_out_directory_refuses(self):
+        self.alias.rename(self.alias.parent / 'something_else')
+        with self.assertRaisesRegex(ValueError, 'unowned_binary'): self.run_main()
+
+    def test_two_aliases_refuse(self):
+        other = self.alias.parents[2] / 'ffffffffffffffff/out'
+        other.mkdir(parents=True)
+        os.link(self.binary, other / 'disk_arcana_server')
+        with self.assertRaisesRegex(ValueError, 'unowned_binary'): self.run_main()
+
+
 if __name__ == '__main__':
     unittest.main()

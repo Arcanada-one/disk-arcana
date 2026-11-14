@@ -43,6 +43,39 @@ ignore = [
     # land the sqlx upgrade or re-argue the exception with a fresh date. An
     # exception with no review date is how a suppression becomes permanent.
     "RUSTSEC-2023-0071",
+
+    # RUSTSEC-2026-0459 — libsqlite3-sys 0.30.1 (bundled SQLite < 3.54.0),
+    # CVE-2026-119375, added 2026-11-11 (disk-arcana#261).
+    # Local-vector (CVSS AV:L, UI:P) uninitialized-memory disclosure: only a
+    # process that opens a database file TOGETHER WITH a sibling `-wal` file whose
+    # page size differs, both written by a less trusted party, is exposed.
+    #
+    # Why not upgraded here: the fix is libsqlite3-sys >= 0.39. It is pulled by
+    # (a) `sqlx-sqlite` 0.8.6, which needs the sqlx 0.9 major, and (b) the
+    # `disk-personal-sqlite` ABI crate, which pins `=0.30.1` on purpose and is
+    # guarded by the "SQLite ABI declared FULL" CI check. Both are deliberate
+    # feature work, not a lockfile bump; a janitor batch must not change them.
+    #
+    # Exposure argument: the databases opened are created by this workspace in
+    # its own state directories; no code path opens a database/WAL pair supplied
+    # by a remote or otherwise untrusted party. Re-verify that claim when
+    # retiring this entry.
+    #
+    # Retire when sqlx moves to 0.9 and the ABI crate is re-pinned to >= 0.39.
+    # REVIEW BY 2026-11-30 (same tripwire as RUSTSEC-2023-0071).
+    #
+    # Added by PR #260 (lint cure), re-measured 2026-11-11, merged here
+    # into the single entry above:
+    #   - sqlx-sqlite 0.8.6 (current) requires libsqlite3-sys ^0.30.1
+    #   - sqlx-sqlite 0.9.0 (latest) still caps libsqlite3-sys at >=0.30.1, <0.38.0,
+    #     so the patched line (>=0.39.0, bundled SQLite 3.54.0+) is outside sqlx's range
+    #   - `cargo update -p libsqlite3-sys` locks 0 packages within compatible versions
+    #   - exploitability is reduced, not zero: the personal SQLite adapter refuses
+    #     WAL/shared-memory opens and uses PRAGMA journal_mode=DELETE
+    #     (crates/disk-personal/sqlite-abi; docs/reference/personal-parent-adapters.md).
+    #     This is not a claim that the C bug is absent.
+    # Review date: #261 said 2026-11-30, #260 said 2026-12-31; the earlier one is kept.
+    "RUSTSEC-2026-0459",
 ]
 
 # Deliberately NOT suppressed — each was closed by a real dependency change in
