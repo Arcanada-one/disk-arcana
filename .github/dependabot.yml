@@ -4,10 +4,16 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    # One grouped PR at a time keeps the open-PR count bounded (backlog <= 3).
+    open-pull-requests-limit: 1
     labels:
       - dependencies
       - rust
+    # Major bumps need a human decision (dependabot-auto-merge skips them) and
+    # were closed repeatedly in the 2026-11-11 backlog sweep; do not reopen them.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       cargo-minor-patch:
         update-types: ["minor", "patch"]
@@ -15,7 +21,7 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 1
     labels:
       - dependencies
       - github-actions
@@ -26,7 +32,12 @@ updates:
     directory: "/plugins/obsidian"
     schedule:
       interval: weekly
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 1
+    # Major bumps need a human decision (dependabot-auto-merge skips them) and
+    # were closed repeatedly in the 2026-11-11 backlog sweep; do not reopen them.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     # Transitive security fixes need the lockfile refreshed, not package.json
     # edited, so indirect updates must be allowed or scheduled runs simply fail.
     allow:
