@@ -11,10 +11,10 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
+    "@types/node": "^22.20.5",
     "builtin-modules": "^4.0.0",
     "esbuild": "^0.28.2",
-    "obsidian": "^1.8.0",
+    "obsidian": "^1.14.4",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   }
