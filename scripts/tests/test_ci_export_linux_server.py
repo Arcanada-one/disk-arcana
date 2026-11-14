@@ -221,5 +221,61 @@ class CliOutputs(unittest.TestCase):
             self.assertEqual((output / manifest['binary']).stat().st_nlink, 1)
 
 
+    def relocate_driver(self, *relative):
+        binary = Path(self.rows[1]['executable'])
+        moved = self.target / 'debug' / Path(*relative)
+        moved.parent.mkdir(parents=True, exist_ok=True)
+        binary.rename(moved)
+        self.rows[1]['executable'] = str(moved)
+
+    def test_cargo_1_100_build_dir_layout_is_accepted(self):
+        self.relocate_driver('build', 'disk-cli', '0dd77b782dfe76a3', 'out', 'it_local_e2e_writeback-0dd77b782dfe76a3')
+        outputs = self.cli()
+        self.assertEqual(len(outputs), 2)
+        manifest = json.loads((outputs[1] / 'BUILD.json').read_text())
+        self.assertEqual(manifest['binary'], 'it_local_e2e_writeback')
+        self.assertEqual(manifest['binary_sha256'], hashlib.sha256(Path(self.rows[1]['executable']).read_bytes()).hexdigest())
+
+    def test_deps_layout_is_still_accepted(self):
+        self.assertEqual(len(self.cli()), 2)
+
+    def test_build_dir_path_with_wrong_shape_refuses(self):
+        self.relocate_driver('build', 'disk-cli', 'out', 'it_local_e2e_writeback-0dd77b782dfe76a3')
+        with self.assertRaisesRegex(ValueError, 'foreign_cargo_output'): self.cli()
+
+    def test_build_dir_path_outside_target_refuses(self):
+        elsewhere = self.root / 'elsewhere/build/disk-cli/0dd77b782dfe76a3/out'
+        elsewhere.mkdir(parents=True)
+        moved = elsewhere / 'it_local_e2e_writeback-0dd77b782dfe76a3'
+        Path(self.rows[1]['executable']).rename(moved)
+        self.rows[1]['executable'] = str(moved)
+        with self.assertRaisesRegex(ValueError, 'foreign_cargo_output'): self.cli()
+
+    def test_build_dir_path_under_release_profile_refuses(self):
+        moved = self.target / 'release/build/disk-cli/0dd77b782dfe76a3/out/it_local_e2e_writeback-0dd77b782dfe76a3'
+        moved.parent.mkdir(parents=True)
+        Path(self.rows[1]['executable']).rename(moved)
+        self.rows[1]['executable'] = str(moved)
+        with self.assertRaisesRegex(ValueError, 'foreign_cargo_output'): self.cli()
+
+    def test_build_dir_wrong_driver_name_refuses(self):
+        self.relocate_driver('build', 'disk-cli', '0dd77b782dfe76a3', 'out', 'other_binary-0dd77b782dfe76a3')
+        with self.assertRaisesRegex(ValueError, 'wrong_driver_output'): self.cli()
+
+    def test_daemon_must_stay_directly_under_debug(self):
+        daemon = Path(self.rows[0]['executable'])
+        moved = self.target / 'debug/build/disk-cli/0dd77b782dfe76a3/out/disk'
+        moved.parent.mkdir(parents=True)
+        daemon.rename(moved)
+        self.rows[0]['executable'] = str(moved)
+        with self.assertRaisesRegex(ValueError, 'foreign_cargo_output'): self.cli()
+
+    def test_main_prints_the_refusal_reason_not_the_error_text(self):
+        script = Path(__file__).parents[1] / 'ci-export-linux-server.py'
+        done = subprocess.run(['python3', '-I', str(script)], capture_output=True, text=True, env={})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn('Linux build export refused (native_linux_ci_required)', done.stderr)
+
+
 if __name__ == '__main__':
     unittest.main()

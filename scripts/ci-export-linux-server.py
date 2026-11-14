@@ -88,6 +88,25 @@ def export_binary(binary, private_root, target, provenance, name="disk-arcana-se
 
 
 
+def cargo_output_location_ok(binary, target_root, name):
+    """True when a cargo-reported executable sits where this workspace's cargo puts it.
+
+    The daemon binary is target/debug/disk. A test driver is target/debug/deps/<file>
+    (cargo up to 1.99) or target/debug/build/<pkg>/<hash>/out/<file> (cargo 1.100
+    build-dir layout). Anything else, including any path outside target_root/debug,
+    is foreign.
+    """
+    try:
+        parts = binary.relative_to(target_root / 'debug').parts
+    except ValueError:
+        return False
+    if name == 'disk':
+        return len(parts) == 1
+    if len(parts) == 2 and parts[0] == 'deps':
+        return True
+    return len(parts) == 5 and parts[0] == 'build' and parts[3] == 'out' and '' not in parts
+
+
 def export_cli(log, target_root, root, provenance):
     """Select both outputs from the existing successful Cargo invocation."""
     selected = {}
@@ -114,8 +133,7 @@ def export_cli(log, target_root, root, provenance):
         if src != workspace / source or name in selected:
             raise ValueError('ambiguous_or_foreign_cargo_target')
         binary = Path(row['executable'])
-        expected_parent = target_root / 'debug' / ('deps' if name != 'disk' else '')
-        if binary.parent != expected_parent or (name == 'disk' and binary.name != 'disk'):
+        if not cargo_output_location_ok(binary, target_root, name) or (name == 'disk' and binary.name != 'disk'):
             raise ValueError('foreign_cargo_output')
         if name != 'disk' and not binary.name.startswith(name + '-'):
             raise ValueError('wrong_driver_output')
@@ -177,6 +195,9 @@ def main(argv=()):
 if __name__ == '__main__':
     try:
         main(sys.argv[1:])
-    except Exception:
-        print('Linux build export refused; no foreign build or credentials accessed', file=sys.stderr)
+    except Exception as error:
+        # Name the refusal condition: ValueError messages are fixed reason codes;
+        # for any other error only the class name is printed, never its text.
+        reason = str(error) if isinstance(error, ValueError) else type(error).__name__
+        print('Linux build export refused (' + reason + '); no foreign build or credentials accessed', file=sys.stderr)
         sys.exit(1)
