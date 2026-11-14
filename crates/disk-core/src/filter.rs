@@ -128,11 +128,7 @@ impl Filter {
             }
         }
 
-        if self.ignore.is_match(rel_path) {
-            return true;
-        }
-
-        false
+        self.ignore.is_match(rel_path)
     }
 }
 
