@@ -542,7 +542,7 @@ jobs:
           BUILD_TARGET: ${{ matrix.target }}
         run: python3 scripts/ci-export-linux-server.py
       - name: Upload exact Linux server build
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.1, existing Windows pin
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2, existing Windows pin
         with:
           name: disk-arcana-server-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ steps.server_export.outputs.directory }}
