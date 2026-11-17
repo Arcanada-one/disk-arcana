@@ -49,7 +49,8 @@ jobs:
     if: >-
       github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.conclusion == 'success' &&
-      startsWith(github.event.workflow_run.head_branch, 'dependabot/')
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/') &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     # GitHub-hosted: public repos get free unlimited hosted minutes, and the
     # org's single self-hosted ci-general runner is permanently contended —
     # targeting it left these jobs queued indefinitely (SEC-0039). Private-repo
