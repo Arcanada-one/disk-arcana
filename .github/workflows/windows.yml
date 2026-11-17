@@ -12,6 +12,7 @@ concurrency:
 
 jobs:
   test:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: windows-${{ matrix.target }}
     # Local Windows desktop in Tailscale mesh (vika-pc / 100.103.19.90).
     # Do NOT use GitHub-hosted windows-* - Arcanada CI runs on own runners.

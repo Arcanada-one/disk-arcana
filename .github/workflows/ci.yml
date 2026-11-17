@@ -31,6 +31,7 @@ env:
 # downloads still apply.
 jobs:
   sqlite-abi-full:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: SQLite ABI declared FULL (Rust 1.97.1)
     runs-on: [arcana-dbs-ci]
     # Ten minutes for ordinary setup; the declared inner suite remains 1800s.
@@ -79,6 +80,7 @@ jobs:
           printf 'SQLITE_FULL_INVENTORY_EXIT=0\n'
 
   personal-provider:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Personal provider foundation (Rust 1.97.1)
     runs-on: [arcana-dbs-ci]
     # Existing foundation budget (20m) plus the unchanged full-group limit (30m)
@@ -162,6 +164,7 @@ jobs:
           retention-days: 14
 
   lint:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Lint (fmt + clippy + audit + deny)
     runs-on: [arcana-dbs-ci]
     steps:
@@ -329,6 +332,7 @@ jobs:
         run: bash deploy/linux/tests/test-fresh-main-gate.sh
 
   test:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Test (linux)
     runs-on: [arcana-dbs-ci]
     steps:
@@ -402,6 +406,7 @@ jobs:
         run: bash scripts/test-obsidian-integration.sh
 
   fuzz-smoke:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Fuzz smoke (DISK-0012, 80s)
     runs-on: [arcana-dbs-ci]
     steps:
@@ -455,6 +460,7 @@ jobs:
           done
 
   build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Build (${{ matrix.target }})
     needs: [lint, test]
     strategy:
