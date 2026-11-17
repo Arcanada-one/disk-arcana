@@ -246,7 +246,11 @@ validate_bundle() {
 }
 
 validate_unit_contract() {
-  local unit="$1" key section="" count_interval=0 count_burst=0
+  local unit="$1"
+  local key
+  local section=""
+  local count_interval=0
+  local count_burst=0
   while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" =~ ^\[([^]]+)\]$ ]]; then
       section="${BASH_REMATCH[1]}"
