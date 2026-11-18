@@ -549,14 +549,15 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────────
   # 1d. Build + sign macOS client binaries on tag (DISK-0010 install.sh assets).
   #     Requires GitHub Secrets (see docs/runbooks/DISK-RB-013-macos-cli-release-signing.md).
-  #     Uses GitHub-hosted macos-14 (signing; no Mac self-hosted runner in fleet — report-only).
+  #     Self-hosted Mac pool (labels self-hosted,macOS,ARM64,mac-release); see
+  #     documentation/runbooks/mac-actions-runner.md in arcana-workspace.
   # ──────────────────────────────────────────────────────────────────────────
   build-macos-client:
     name: Build macOS client (signed disk)
     if: >-
       startsWith(github.ref, 'refs/tags/') &&
       (github.event_name != 'workflow_dispatch' || github.event.inputs.target != 'stage-probe')
-    runs-on: macos-14
+    runs-on: [self-hosted, macOS, ARM64, mac-release]
     permissions:
       contents: write
     strategy:
