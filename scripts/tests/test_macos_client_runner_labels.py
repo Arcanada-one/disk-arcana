@@ -9,6 +9,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "release-deploy.yml"
+ACTIONLINT = ROOT / ".github" / "actionlint.yaml"
 EXPECTED_LABELS = ["self-hosted", "macOS", "ARM64", "mac-release"]
 FORBIDDEN_HOSTED = {"macos-14", "macos-15", "macos-latest", "ubuntu-latest", "windows-latest"}
 
@@ -37,6 +38,11 @@ class MacosClientRunnerLabels(unittest.TestCase):
         self.assertIn("runs-on:", block)
         for hosted in ("macos-14", "macos-15", "macos-latest"):
             self.assertNotIn(f"runs-on: {hosted}", block)
+
+    def test_actionlint_allowlists_mac_release_labels(self):
+        text = ACTIONLINT.read_text(encoding="utf-8")
+        for label in ("macOS", "ARM64", "mac-release"):
+            self.assertRegex(text, rf"(?m)^    - {label}$")
 
 
 if __name__ == "__main__":

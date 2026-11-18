@@ -25,3 +25,8 @@ self-hosted-runner:
     - ci-general
     - docker
     - vika-pc
+    # Org mac-release pool (operator Mac): exact label casing required by
+    # documentation/runbooks/mac-actions-runner.md in arcana-workspace.
+    - macOS
+    - ARM64
+    - mac-release
