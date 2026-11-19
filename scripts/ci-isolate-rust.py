@@ -98,7 +98,9 @@ def prepare():
             (cargo / 'bin' / name).symlink_to('rustup')
     else:
         bootstrap(root, env)
-    subprocess.run([str(cargo / 'bin/rustup'), '--version'], env=env, check=True, timeout=30)
+    # cwd must be the isolated root: the repository rust-toolchain.toml would otherwise
+    # make `rustup --version` sync/download the channel (main CI run 44412070281 timed out).
+    subprocess.run([str(cargo / 'bin/rustup'), '--version'], env=env, cwd=root, check=True, timeout=30)
     with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as output:
         output.writelines(f'{key}={value}\n' for key, value in values.items())
     with open(os.environ['GITHUB_PATH'], 'a', encoding='utf-8') as output:
