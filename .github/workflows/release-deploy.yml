@@ -549,14 +549,16 @@ jobs:
   # ──────────────────────────────────────────────────────────────────────────
   # 1d. Build + sign macOS client binaries on tag (DISK-0010 install.sh assets).
   #     Requires GitHub Secrets (see docs/runbooks/DISK-RB-013-macos-cli-release-signing.md).
-  #     Uses GitHub-hosted macos-14 (signing; no Mac self-hosted runner in fleet — report-only).
+  #     Self-hosted Mac pool (labels self-hosted,macOS,ARM64,mac-release); see
+  #     documentation/runbooks/mac-actions-runner.md in arcana-workspace.
   # ──────────────────────────────────────────────────────────────────────────
   build-macos-client:
     name: Build macOS client (signed disk)
     if: >-
       startsWith(github.ref, 'refs/tags/') &&
-      (github.event_name != 'workflow_dispatch' || github.event.inputs.target != 'stage-probe')
-    runs-on: macos-14
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.target != 'stage-probe') &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, macOS, ARM64, mac-release]
     permissions:
       contents: write
     strategy:
@@ -588,6 +590,8 @@ jobs:
             echo "::error::DISK_MACOS_CERT_P12 secret is not configured — see docs/runbooks/DISK-RB-013-macos-cli-release-signing.md"
             exit 1
           fi
+          PREV_KC=$(security default-keychain | sed -e 's/^ *"//' -e 's/" *$//')
+          printf '%s\n' "$PREV_KC" > "$RUNNER_TEMP/disk-prev-default-keychain"
           echo "$DISK_MACOS_CERT_P12" | base64 --decode > /tmp/disk-signing.p12
           security create-keychain -p actions disk-sign.keychain
           security default-keychain -s disk-sign.keychain
@@ -595,6 +599,11 @@ jobs:
           security import /tmp/disk-signing.p12 -k disk-sign.keychain \
             -P "$DISK_MACOS_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions disk-sign.keychain
+          if command -v shred >/dev/null 2>&1; then
+            shred -u /tmp/disk-signing.p12
+          else
+            rm -f /tmp/disk-signing.p12
+          fi
 
       - name: Build disk CLI
         run: cargo build --release -p disk-cli --bin disk --target ${{ matrix.target }}
@@ -632,6 +641,25 @@ jobs:
         with:
           files: ${{ matrix.asset }}
           fail_on_unmatched_files: true
+
+      - name: Tear down ephemeral signing keychain
+        if: always()
+        run: |
+          set +e
+          PREV_KC_FILE="$RUNNER_TEMP/disk-prev-default-keychain"
+          if [[ -f "$PREV_KC_FILE" ]]; then
+            PREV_KC=$(cat "$PREV_KC_FILE")
+            security default-keychain -s "$PREV_KC"
+          else
+            security default-keychain -s "$HOME/Library/Keychains/login.keychain-db"
+          fi
+          security delete-keychain disk-sign.keychain
+          if command -v shred >/dev/null 2>&1; then
+            shred -u /tmp/disk-signing.p12 2>/dev/null
+          else
+            rm -f /tmp/disk-signing.p12
+          fi
+          rm -f "$PREV_KC_FILE"
 
   # ──────────────────────────────────────────────────────────────────────────
   # 2. Deploy through the dedicated Disk staging runner. A production

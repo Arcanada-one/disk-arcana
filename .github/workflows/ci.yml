@@ -181,6 +181,7 @@ jobs:
           python3 scripts/tests/test_ci_isolate_rust.py
           python3 -B scripts/tests/test_ci_export_linux_server.py
           python3 scripts/tests/test_full_test_groups.py
+          python3 scripts/tests/test_macos_client_runner_labels.py
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0  # v2.9.3
       - name: Ensure protoc is available
         # Self-hosted runner pool is heterogeneous — some machines lack a

@@ -256,11 +256,13 @@ stage_readiness_step="$(sed -n '/^      - name: Read-only readiness verdict$/,$p
 stage_readiness_script="$(extract_stage_readiness_script "$stage_readiness_step")"
 probe_inverse="github.event_name != 'workflow_dispatch' || github.event.inputs.target != 'stage-probe'"
 tag_probe_inverse="startsWith(github.ref, 'refs/tags/') && (github.event_name != 'workflow_dispatch' || github.event.inputs.target != 'stage-probe')"
+# mac-release self-hosted pool: same tag/probe gate plus job-level fork deny.
+macos_tag_probe_inverse="${tag_probe_inverse} && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)"
 assert_exact_job_if "$build_block" "$probe_inverse" "build job"
 assert_exact_job_if "$linux_release_block" "$tag_probe_inverse" "Linux release attachment job"
 assert_exact_job_if "$windows_release_block" "$tag_probe_inverse" "Windows client release job"
 assert_exact_job_if "$linux_client_release_block" "$tag_probe_inverse" "Linux client release job"
-assert_exact_job_if "$macos_release_block" "$tag_probe_inverse" "macOS client release job"
+assert_exact_job_if "$macos_release_block" "$macos_tag_probe_inverse" "macOS client release job"
 # Hostless disposition prefixes the three
 # label-bound jobs with `false &&` so they cannot queue on missing
 # disk-arcana-stage / disk-arcana-prod runners. The original dispatch

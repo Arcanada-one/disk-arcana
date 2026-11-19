@@ -12,7 +12,7 @@ Gatekeeper trust for the public `disk` CLI binary (v0.1.0+). Operators run this 
 | Release assets | `disk-macos-{arm64,x86_64}` | **Missing on v0.1.0** — only `disk-arcana-server` was attached; re-tag after signing |
 | Local Mac build | `target/{aarch64,x86_64}-apple-darwin/release/disk` | `scripts/build-macos-release.sh` |
 | Install target | `/usr/local/bin/disk` | `scripts/install-macos.sh --binary <path>` |
-| CI job | `.github/workflows/release-deploy.yml` → `build-macos-client` | Tag push `v*.*.*`, `macos-14` runner |
+| CI job | `.github/workflows/release-deploy.yml` → `build-macos-client` | Tag push `v*.*.*`, self-hosted labels `[self-hosted, macOS, ARM64, mac-release]` |
 
 arcana-devs is **Linux-only** — codesign/notarytool cannot run there. On DEVS, verify **packaging only**:
 
@@ -22,7 +22,7 @@ arcana-devs is **Linux-only** — codesign/notarytool cannot run there. On DEVS,
 DISK_VERSION=v0.1.0 ./scripts/verify-macos-release-assets.sh --download  # + Mach-O probe
 ```
 
-Build/sign on operator Mac or macOS CI (`build-macos-client` job, `macos-14` runner).
+Build/sign on operator Mac or the org self-hosted Mac runner (`build-macos-client` job, labels `[self-hosted, macOS, ARM64, mac-release]`; see workspace runbook `documentation/runbooks/mac-actions-runner.md`).
 
 ## Operator prerequisites (stop if any missing)
 
