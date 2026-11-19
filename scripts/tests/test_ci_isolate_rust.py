@@ -91,6 +91,22 @@ class IsolationTest(unittest.TestCase):
         os.environ['PATH'] = ''
         self.prepare()
 
+    def test_prepare_version_check_runs_outside_workspace_toolchain(self):
+        """rustup --version must not inherit repo rust-toolchain.toml (main CI 44412070281)."""
+        captured = []
+        real_run = isolation.subprocess.run
+        def spy(args, **kwargs):
+            captured.append((list(args), dict(kwargs)))
+            return real_run(args, **kwargs)
+        with patch.object(isolation.subprocess, 'run', side_effect=spy):
+            values = self.prepare()
+        version_calls = [c for c in captured if len(c[0]) >= 2 and c[0][1] == '--version']
+        self.assertEqual(len(version_calls), 1)
+        args, kwargs = version_calls[0]
+        isolated_root = Path(values['CI_ISOLATED_RUST_ROOT'])
+        self.assertEqual(Path(kwargs['cwd']).resolve(), isolated_root)
+        self.assertTrue(str(args[0]).startswith(str(Path(values['CARGO_HOME']) / 'bin')))
+
     def test_no_existing_rustup_uses_pinned_fallback(self):
         self.executable.unlink()
         with patch.object(isolation, 'bootstrap', side_effect=ValueError('fallback reached')) as fallback:
