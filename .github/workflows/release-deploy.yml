@@ -297,11 +297,11 @@ jobs:
   build:
     name: Build (x86_64-unknown-linux-gnu)
     if: github.event_name != 'workflow_dispatch' || github.event.inputs.target != 'stage-probe'
-    # `cross` drives the build through a container, so this job needs Docker
-    # access — but `cargo install cross` compiles ON THE HOST first, so the
-    # runner also needs a working C toolchain. The `docker` label alone does
-    # not imply one: three runners carry it (arcana-ci-general, arcana-db,
-    # arcana-dbs) and only ci-general has `cc`. A build-only dispatch landed on
+    # `cross` drives the build through digest-pinned public images in Cross.toml,
+    # so this job needs Docker access. `cargo install cross` compiles on the
+    # host first, so the runner also needs a working C toolchain. The `docker`
+    # label alone implies both dependencies: three runners carry it, and only
+    # ci-general has `cc`. A build-only dispatch landed on
     # arcana-dbs and died with `linker \`cc\` not found` while installing cross,
     # while the identical workflow had passed minutes earlier purely because
     # the scheduler happened to pick ci-general. Pin the label so the outcome
@@ -345,7 +345,7 @@ jobs:
           "$PROTOC_DIR/bin/protoc" --version
 
       - name: Install cross
-        run: cargo install cross --locked --quiet
+        run: cargo install cross --version 0.2.5 --locked --quiet
 
       - name: Build release binary
         run: cross build --release --target ${{ env.BUILD_TARGET }} --bin ${{ env.BINARY_NAME }}
@@ -529,7 +529,7 @@ jobs:
           echo "$PROTOC_DIR/bin" >> "$GITHUB_PATH"
           "$PROTOC_DIR/bin/protoc" --version
       - name: Install cross
-        run: cargo install cross --locked --quiet
+        run: cargo install cross --version 0.2.5 --locked --quiet
       - name: Build disk CLI
         run: cross build --release -p disk-cli --bin disk --target ${{ matrix.target }}
       - name: Stage release asset

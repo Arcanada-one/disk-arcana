@@ -16,3 +16,12 @@ pre-build = [
     "unzip -o protoc-25.3-linux-x86_64.zip -d /usr/local",
     "rm -f protoc-25.3-linux-x86_64.zip",
 ]
+
+# Public manifest digests read anonymously from GHCR on 2026-11-22.
+# Pinning these images avoids mutable tag resolution and the historical
+# unauthenticated pull failure for the x86_64 build image.
+[target.x86_64-unknown-linux-gnu]
+image = "ghcr.io/cross-rs/x86_64-unknown-linux-gnu@sha256:9e5b39c09874bc1816c675ed11afca2c2ed6cee0c4ed2b3c1d5763c346c9ae3f"
+
+[target.aarch64-unknown-linux-gnu]
+image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu@sha256:7f8308a8734d9fcd2ebbe9a3e4bdea74af293f0799d80c3cc341e340cda49a4c"
