@@ -300,8 +300,8 @@ jobs:
     # `cross` drives the build through digest-pinned public images in Cross.toml,
     # so this job needs Docker access. `cargo install cross` compiles on the
     # host first, so the runner also needs a working C toolchain. The `docker`
-    # label alone implies both dependencies: three runners carry it, and only
-    # ci-general has `cc`. A build-only dispatch landed on
+    # label alone does not establish both prerequisites: three runners carry it,
+    # and only `ci-general` has `cc`. A build-only dispatch landed on
     # arcana-dbs and died with `linker \`cc\` not found` while installing cross,
     # while the identical workflow had passed minutes earlier purely because
     # the scheduler happened to pick ci-general. Pin the label so the outcome
