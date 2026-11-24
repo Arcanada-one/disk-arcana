@@ -22,13 +22,13 @@ path = "src/bin/disk-personal-fixture-worker.rs"
 required-features = ["synthetic-fixtures"]
 
 [dependencies]
-tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 sha2 = "=0.10.9"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+tokio.workspace = true
 disk-personal-sqlite = { path = "sqlite-abi" }
 sqlx.workspace = true
 uuid = "=1.29.2"
