@@ -19,4 +19,4 @@ jobs:
     name: governance-diff-guard
     runs-on: [self-hosted, Linux, X64, ci-general]
     steps:
-      - uses: Arcanada-one/shared-workflows/.github/actions/governance-diff-guard@e08282c9e0f2de32d94c1850918fa87e250bd80a
+      - uses: Arcanada-one/shared-workflows/.github/actions/governance-diff-guard@e9cff997fe024f5f663e4e9e5f98685c4fb05fb8
