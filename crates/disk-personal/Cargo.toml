@@ -31,7 +31,7 @@ sha2 = "=0.10.9"
 tokio.workspace = true
 disk-personal-sqlite = { path = "sqlite-abi" }
 sqlx.workspace = true
-uuid = "=1.29.2"
+uuid = "=1.29.3"
 rustix = { version = "=1.1.6", features = ["fs", "process"] }
 
 [dev-dependencies]
